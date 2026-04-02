@@ -7,16 +7,31 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		600B13DFCCC5F789A0C2B73A /* StateWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9FF1CC4D818E916F535E406 /* StateWatcher.swift */; };
 		94DD2048172D83044FB1C880 /* token_hudApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B354BB4B28539F177EE68A /* token_hudApp.swift */; };
+		E65E00D35A346B4E4CCEAAB5 /* token_hudCore in Frameworks */ = {isa = PBXBuildFile; productRef = E29BCD37B205D7EC9BAB8D04 /* token_hudCore */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		A6B354BB4B28539F177EE68A /* token_hudApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = token_hudApp.swift; sourceTree = "<group>"; };
+		A9FF1CC4D818E916F535E406 /* StateWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateWatcher.swift; sourceTree = "<group>"; };
+		B7D562C0C01D0C45988F722A /* token_hud */ = {isa = PBXFileReference; lastKnownFileType = folder; name = token_hud; path = .; sourceTree = SOURCE_ROOT; };
 		BE6F423D97166F8C00033C38 /* token_hud.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = token_hud.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0B2D7C7E9909F98C9E209AA /* token_hud-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "token_hud-Bridging-Header.h"; sourceTree = "<group>"; };
 		CF286D60C8084A91D44CA0C6 /* token_hud.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = token_hud.entitlements; sourceTree = "<group>"; };
 		FEF8CB8AF9790BE508616B5B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		FA7B19483B7A5F0D6357787E /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				E65E00D35A346B4E4CCEAAB5 /* token_hudCore in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		00CAC50DA0902AF7048C17F1 /* token_hud */ = {
@@ -26,6 +41,7 @@
 				CF286D60C8084A91D44CA0C6 /* token_hud.entitlements */,
 				778C05A0F15D257BFB45EB9F /* App */,
 				4814A6EDE9E523A164E81E97 /* Resources */,
+				2E0E42AD3EAC848DF7B3E9BE /* State */,
 			);
 			path = token_hud;
 			sourceTree = "<group>";
@@ -33,9 +49,18 @@
 		21D217461771185A0C43798A = {
 			isa = PBXGroup;
 			children = (
+				831882274A7D74262EC210FD /* Packages */,
 				00CAC50DA0902AF7048C17F1 /* token_hud */,
 				4C07DEE80F0B1FF1741F6E0F /* Products */,
 			);
+			sourceTree = "<group>";
+		};
+		2E0E42AD3EAC848DF7B3E9BE /* State */ = {
+			isa = PBXGroup;
+			children = (
+				A9FF1CC4D818E916F535E406 /* StateWatcher.swift */,
+			);
+			path = State;
 			sourceTree = "<group>";
 		};
 		4814A6EDE9E523A164E81E97 /* Resources */ = {
@@ -62,6 +87,14 @@
 			path = App;
 			sourceTree = "<group>";
 		};
+		831882274A7D74262EC210FD /* Packages */ = {
+			isa = PBXGroup;
+			children = (
+				B7D562C0C01D0C45988F722A /* token_hud */,
+			);
+			name = Packages;
+			sourceTree = "<group>";
+		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -70,6 +103,7 @@
 			buildConfigurationList = 7258629B9396D1CFC6554095 /* Build configuration list for PBXNativeTarget "token_hud" */;
 			buildPhases = (
 				7D386869204FB371E6A7E732 /* Sources */,
+				FA7B19483B7A5F0D6357787E /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -77,6 +111,7 @@
 			);
 			name = token_hud;
 			packageProductDependencies = (
+				E29BCD37B205D7EC9BAB8D04 /* token_hudCore */,
 			);
 			productName = token_hud;
 			productReference = BE6F423D97166F8C00033C38 /* token_hud.app */;
@@ -106,6 +141,9 @@
 			);
 			mainGroup = 21D217461771185A0C43798A;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				E062229B739A416A8D3600C1 /* XCLocalSwiftPackageReference "." */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 4C07DEE80F0B1FF1741F6E0F /* Products */;
 			projectDirPath = "";
@@ -121,6 +159,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				600B13DFCCC5F789A0C2B73A /* StateWatcher.swift in Sources */,
 				94DD2048172D83044FB1C880 /* token_hudApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -311,6 +350,20 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		E062229B739A416A8D3600C1 /* XCLocalSwiftPackageReference "." */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = .;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		E29BCD37B205D7EC9BAB8D04 /* token_hudCore */ = {
+			isa = XCSwiftPackageProductDependency;
+			productName = token_hudCore;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = 33ED27EAE3CCA599F30F9300 /* Project object */;
 }
