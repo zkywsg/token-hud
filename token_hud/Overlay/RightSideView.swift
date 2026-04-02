@@ -8,7 +8,7 @@ struct RightSideView: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(store.rightWidgets) { config in
-                PlaceholderWidgetView(label: config.metric.rawValue)
+                WidgetRenderer(config: config, state: watcher.currentState)
             }
         }
         .padding(.horizontal, 4)
