@@ -95,16 +95,16 @@ final class NotchWindowManager {
         if let lw = leftWindow {
             let w = max(leftArea.width - padding, 20)
             let h = leftArea.height
-            let x = screen.frame.minX + leftArea.minX
-            let y = screen.frame.maxY - leftArea.maxY
+            let x = leftArea.minX
+            let y = leftArea.minY
             lw.setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
         }
 
         if let rw = rightWindow {
             let w = max(rightArea.width - padding, 20)
             let h = rightArea.height
-            let x = screen.frame.minX + rightArea.minX + padding
-            let y = screen.frame.maxY - rightArea.maxY
+            let x = rightArea.minX + padding
+            let y = rightArea.minY
             rw.setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
         }
     }
