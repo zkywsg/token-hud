@@ -1,0 +1,40 @@
+// token_hud/Widgets/BarWidget.swift
+import SwiftUI
+
+struct BarWidget: View {
+    let fraction: Double   // 0.0 – 1.0 (used/total)
+    let label: String
+    let width: CGFloat
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(label)
+                .font(.system(size: 9, weight: .medium, design: .rounded))
+                .foregroundColor(.white.opacity(0.9))
+                .lineLimit(1)
+
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(Color.white.opacity(0.15))
+                        .frame(height: 4)
+
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(barColor)
+                        .frame(width: geo.size.width * CGFloat(min(max(1.0 - fraction, 0), 1.0)), height: 4)
+                        .animation(.easeOut(duration: 0.3), value: fraction)
+                }
+            }
+            .frame(height: 4)
+        }
+        .frame(width: width)
+    }
+
+    private var barColor: Color {
+        switch fraction {
+        case 0..<0.5:   return .green
+        case 0.5..<0.8: return .yellow
+        default:         return .red
+        }
+    }
+}
