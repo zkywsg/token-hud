@@ -4,10 +4,6 @@ options:
   deploymentTarget:
     macOS: "14.0"
 
-packages:
-  token_hudCore:
-    path: .
-
 settings:
   base:
     SWIFT_VERSION: "6.0"
@@ -22,15 +18,15 @@ targets:
     platform: macOS
     sources:
       - token_hud
+      - Sources/token_hudCore
     info:
       path: token_hud/Resources/Info.plist
-    dependencies:
-      - package: token_hudCore
-        product: token_hudCore
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.tokenHud.token-hud
         INFOPLIST_FILE: token_hud/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: token_hud/token_hud.entitlements
-        CODE_SIGN_STYLE: Automatic
+        CODE_SIGN_STYLE: Manual
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
         DEVELOPMENT_TEAM: ""

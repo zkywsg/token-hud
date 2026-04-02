@@ -1,7 +1,6 @@
 // token_hud/State/StateWatcher.swift
 import Foundation
 import Observation
-import token_hudCore
 
 @Observable
 @MainActor

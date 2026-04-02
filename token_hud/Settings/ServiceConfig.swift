@@ -7,7 +7,7 @@ struct ServiceConfigView: View {
     @State private var selectedBrowser: BrowserType = .safari
     private let extractor = SessionKeyExtractor()
 
-    enum ExtractionState {
+    enum ExtractionState: Equatable {
         case idle, extracting
         case success(BrowserType), failed(String)
     }

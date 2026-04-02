@@ -79,7 +79,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let settingsView = SettingsWindow().environmentObject(widgetStore)
+        let settingsView = SettingsWindow().environment(widgetStore)
         let win = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
             styleMask: [.titled, .closable, .miniaturizable],

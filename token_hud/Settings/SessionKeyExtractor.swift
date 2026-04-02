@@ -154,7 +154,8 @@ actor SessionKeyExtractor {
 
         let encrypted = data.dropFirst(3)
         let iv = Data(repeating: 0x20, count: 16) // 16 space chars
-        var decrypted = Data(count: encrypted.count + kCCBlockSizeAES128)
+        let decryptedSize = encrypted.count + kCCBlockSizeAES128
+        var decrypted = Data(count: decryptedSize)
         var outLen = 0
         let cryptStatus = decrypted.withUnsafeMutableBytes { outPtr in
             encrypted.withUnsafeBytes { encPtr in
@@ -167,7 +168,7 @@ actor SessionKeyExtractor {
                             keyPtr2.baseAddress, 16,
                             ivPtr.baseAddress,
                             encPtr.baseAddress, encrypted.count,
-                            outPtr.baseAddress, decrypted.count,
+                            outPtr.baseAddress, decryptedSize,
                             &outLen
                         )
                     }

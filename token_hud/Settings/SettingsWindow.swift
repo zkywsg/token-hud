@@ -2,7 +2,7 @@
 import SwiftUI
 
 struct SettingsWindow: View {
-    @EnvironmentObject var widgetStore: WidgetStore
+    @Environment(WidgetStore.self) private var widgetStore
 
     var body: some View {
         TabView {

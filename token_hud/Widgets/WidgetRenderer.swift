@@ -1,6 +1,5 @@
 // token_hud/Widgets/WidgetRenderer.swift
 import SwiftUI
-import token_hudCore
 
 struct WidgetRenderer: View {
     let config: WidgetConfig

@@ -2,8 +2,10 @@
 import SwiftUI
 
 struct WidgetListEditor: View {
-    @EnvironmentObject var store: WidgetStore
+    @Environment(WidgetStore.self) private var store
     @State private var showAddSheet: WidgetSide? = nil
+
+    @MainActor private var bindableStore: Bindable<WidgetStore> { Bindable(store) }
 
     enum WidgetSide: Identifiable {
         case left, right
@@ -12,9 +14,9 @@ struct WidgetListEditor: View {
 
     var body: some View {
         HStack(alignment: .top, spacing: 16) {
-            widgetColumn(title: "Left Side",  widgets: $store.leftWidgets,  side: .left)
+            widgetColumn(title: "Left Side",  widgets: bindableStore.leftWidgets,  side: .left)
             Divider()
-            widgetColumn(title: "Right Side", widgets: $store.rightWidgets, side: .right)
+            widgetColumn(title: "Right Side", widgets: bindableStore.rightWidgets, side: .right)
         }
         .sheet(item: $showAddSheet) { side in
             AddWidgetSheet(side: side, store: store)
