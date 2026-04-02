@@ -1,0 +1,133 @@
+<h2>HUD 刘海布局方案</h2>
+<p class="subtitle">选择你喜欢的信息密度和排列方式</p>
+
+<div class="options">
+
+  <!-- Option A -->
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>紧凑图标式（推荐）</h3>
+      <p style="color:#94a3b8;font-size:13px;margin-bottom:12px">每个服务只显示一个小圆弧进度 + 缩写，点击展开详情</p>
+
+      <!-- Mockup -->
+      <div style="background:#000;border-radius:12px;padding:4px 0;position:relative;overflow:hidden">
+        <!-- Menu bar -->
+        <div style="display:flex;align-items:center;height:28px;padding:0 12px;position:relative">
+          <!-- Left side -->
+          <div style="display:flex;align-items:center;gap:10px;flex:1">
+            <div style="display:flex;align-items:center;gap:6px">
+              <!-- Claude arc -->
+              <svg width="20" height="20" viewBox="0 0 20 20">
+                <circle cx="10" cy="10" r="8" fill="none" stroke="#374151" stroke-width="2"/>
+                <circle cx="10" cy="10" r="8" fill="none" stroke="#f59e0b" stroke-width="2"
+                  stroke-dasharray="35 15" stroke-dashoffset="12" stroke-linecap="round"/>
+                <text x="10" y="14" text-anchor="middle" fill="white" font-size="6" font-weight="bold">C</text>
+              </svg>
+              <span style="color:white;font-size:10px;font-family:-apple-system">4.2h</span>
+            </div>
+            <div style="display:flex;align-items:center;gap:6px">
+              <svg width="20" height="20" viewBox="0 0 20 20">
+                <circle cx="10" cy="10" r="8" fill="none" stroke="#374151" stroke-width="2"/>
+                <circle cx="10" cy="10" r="8" fill="none" stroke="#10b981" stroke-width="2"
+                  stroke-dasharray="42 8" stroke-dashoffset="12" stroke-linecap="round"/>
+                <text x="10" y="14" text-anchor="middle" fill="white" font-size="6" font-weight="bold">G</text>
+              </svg>
+              <span style="color:white;font-size:10px;font-family:-apple-system">850k</span>
+            </div>
+          </div>
+
+          <!-- Notch -->
+          <div style="width:120px;height:28px;background:#000;border-radius:0 0 18px 18px;position:absolute;left:50%;transform:translateX(-50%);z-index:10"></div>
+
+          <!-- Right side -->
+          <div style="display:flex;align-items:center;gap:6px;flex:1;justify-content:flex-end">
+            <span style="color:#94a3b8;font-size:10px;font-family:-apple-system">session</span>
+            <span style="color:#60a5fa;font-size:10px;font-family:-apple-system;font-weight:500">↑ 1.5k</span>
+            <span style="color:#6b7280;font-size:9px">|</span>
+            <span style="color:white;font-size:10px;font-family:-apple-system">9:41</span>
+          </div>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top:10px">
+        <div class="pros"><h4>优点</h4><ul><li>信息密度高，不抢眼</li><li>进度条一眼看懂剩余量</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>服务多时会挤</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Option B -->
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>文字标签式</h3>
+      <p style="color:#94a3b8;font-size:13px;margin-bottom:12px">每个服务显示名称 + 剩余值，清晰但占空间</p>
+
+      <!-- Mockup -->
+      <div style="background:#000;border-radius:12px;padding:4px 0;position:relative;overflow:hidden">
+        <div style="display:flex;align-items:center;height:28px;padding:0 12px;position:relative">
+          <!-- Left side -->
+          <div style="display:flex;align-items:center;gap:12px;flex:1">
+            <span style="color:white;font-size:10px;font-family:-apple-system">
+              <span style="color:#f59e0b">Claude</span> 4.2h
+            </span>
+            <span style="color:white;font-size:10px;font-family:-apple-system">
+              <span style="color:#10b981">GPT</span> $18.5
+            </span>
+          </div>
+
+          <!-- Notch -->
+          <div style="width:120px;height:28px;background:#000;border-radius:0 0 18px 18px;position:absolute;left:50%;transform:translateX(-50%);z-index:10"></div>
+
+          <!-- Right side -->
+          <div style="display:flex;align-items:center;gap:6px;flex:1;justify-content:flex-end">
+            <span style="color:#60a5fa;font-size:10px;font-family:-apple-system">↑ 1,523 tok</span>
+            <span style="color:white;font-size:10px;font-family:-apple-system">9:41</span>
+          </div>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top:10px">
+        <div class="pros"><h4>优点</h4><ul><li>最直观，不用猜图标</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>占用菜单栏空间多</li><li>没有进度感</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Option C -->
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>单一聚合式</h3>
+      <p style="color:#94a3b8;font-size:13px;margin-bottom:12px">刘海两侧只显示最关键的一个指标，悬停/点击展开全部</p>
+
+      <!-- Mockup -->
+      <div style="background:#000;border-radius:12px;padding:4px 0;position:relative;overflow:hidden">
+        <div style="display:flex;align-items:center;height:28px;padding:0 12px;position:relative">
+          <!-- Left side: most critical -->
+          <div style="display:flex;align-items:center;gap:6px;flex:1">
+            <svg width="20" height="20" viewBox="0 0 20 20">
+              <circle cx="10" cy="10" r="8" fill="none" stroke="#374151" stroke-width="2"/>
+              <circle cx="10" cy="10" r="8" fill="none" stroke="#f59e0b" stroke-width="2"
+                stroke-dasharray="35 15" stroke-dashoffset="12" stroke-linecap="round"/>
+            </svg>
+            <span style="color:white;font-size:10px;font-family:-apple-system">4.2h left</span>
+          </div>
+
+          <!-- Notch -->
+          <div style="width:120px;height:28px;background:#000;border-radius:0 0 18px 18px;position:absolute;left:50%;transform:translateX(-50%);z-index:10"></div>
+
+          <!-- Right side: session only -->
+          <div style="display:flex;align-items:center;gap:6px;flex:1;justify-content:flex-end">
+            <span style="color:#60a5fa;font-size:10px;font-family:-apple-system">↑ 1.5k</span>
+            <span style="color:white;font-size:10px;font-family:-apple-system">9:41</span>
+          </div>
+        </div>
+      </div>
+      <div class="pros-cons" style="margin-top:10px">
+        <div class="pros"><h4>优点</h4><ul><li>最不抢眼</li><li>只显示最重要信息</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>多服务时需要轮播或点击</li></ul></div>
+      </div>
+    </div>
+  </div>
+
+</div>

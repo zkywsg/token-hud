@@ -1,0 +1,5 @@
+{"type":"server-started","port":60672,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:60672","screen_dir":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/53412-1774970179/content","state_dir":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/53412-1774970179/state"}
+{"type":"screen-added","file":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/53412-1774970179/content/revised-architecture.html"}
+{"type":"screen-added","file":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/53412-1774970179/content/hud-layout.html"}
+{"type":"screen-added","file":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/53412-1774970179/content/widget-system.html"}
+{"type":"server-stopped","reason":"idle timeout"}

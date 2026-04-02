@@ -1,0 +1,99 @@
+<h2>修订后的架构</h2>
+<p class="subtitle">从「主动上报」转变为「被动读取」— 更贴近 CodexBar 的思路</p>
+
+<div class="section">
+
+  <!-- Before / After -->
+  <div class="split" style="margin-bottom:20px">
+    <div class="mockup" style="border-color:rgba(239,68,68,0.3)">
+      <div class="mockup-header" style="background:rgba(239,68,68,0.15);color:#fca5a5">原设计（主动上报）</div>
+      <div class="mockup-body" style="font-size:13px;color:#94a3b8;line-height:1.8">
+        开发者需要在代码里调用<br>
+        <code>tracker.consume('claude', {tokens: 500})</code><br><br>
+        ❌ 需要改动自己的代码<br>
+        ❌ 适合「开发自己 app」的场景<br>
+        ❌ 不适合监控订阅配额
+      </div>
+    </div>
+    <div class="mockup" style="border-color:rgba(16,185,129,0.35)">
+      <div class="mockup-header" style="background:rgba(16,185,129,0.15);color:#6ee7b7">新设计（被动读取）</div>
+      <div class="mockup-body" style="font-size:13px;color:#94a3b8;line-height:1.8">
+        库自动从各平台已有的数据<br>
+        来源中读取用量，写入 state.json<br><br>
+        ✅ 零代码改动<br>
+        ✅ 适合监控订阅配额<br>
+        ✅ 支持 CLI / 本地日志 / OAuth API
+      </div>
+    </div>
+  </div>
+
+  <!-- New Architecture -->
+  <div style="display:flex;gap:14px;align-items:flex-start;flex-wrap:wrap">
+
+    <!-- Data Sources -->
+    <div style="flex:1;min-width:200px">
+      <div class="label" style="margin-bottom:10px">数据来源（已有，无需改动）</div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        <div style="background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:10px 12px;font-size:13px">
+          <strong style="color:#c7d2fe">Claude</strong><br>
+          <span style="color:#64748b;font-size:12px">~/.config/claude/projects/ JSONL 日志<br>Claude OAuth API（rate window）</span>
+        </div>
+        <div style="background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:10px 12px;font-size:13px">
+          <strong style="color:#c7d2fe">OpenAI</strong><br>
+          <span style="color:#64748b;font-size:12px">OpenAI Usage API<br>（需要 API Key）</span>
+        </div>
+        <div style="background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.3);border-radius:8px;padding:10px 12px;font-size:13px">
+          <strong style="color:#c7d2fe">Gemini</strong><br>
+          <span style="color:#64748b;font-size:12px">Google OAuth API</span>
+        </div>
+        <div style="background:rgba(99,102,241,0.08);border:1px dashed rgba(99,102,241,0.3);border-radius:8px;padding:10px 12px;font-size:13px">
+          <strong style="color:#94a3b8">自定义服务</strong><br>
+          <span style="color:#64748b;font-size:12px">手动上报 consume()（可选，兜底）</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:40px;gap:6px">
+      <div style="font-size:20px;color:#f59e0b">→</div>
+      <div style="font-size:11px;color:#6b7280;text-align:center">token-state<br>TypeScript 库<br>（读取 + 归一化）</div>
+      <div style="font-size:20px;color:#f59e0b">→</div>
+    </div>
+
+    <!-- State File -->
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:30px">
+      <div style="background:rgba(245,158,11,0.15);border:1px solid rgba(245,158,11,0.4);border-radius:10px;padding:16px 20px;text-align:center">
+        <div style="font-size:24px">📄</div>
+        <div style="font-size:12px;font-weight:600;color:#fbbf24;margin-top:6px">~/.token-hud/<br>state.json</div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:4px">归一化数据<br>定期更新</div>
+      </div>
+    </div>
+
+    <!-- Arrow -->
+    <div style="display:flex;flex-direction:column;align-items:center;justify-content:center;padding-top:40px;gap:6px">
+      <div style="font-size:20px;color:#34d399">→</div>
+      <div style="font-size:11px;color:#6b7280;text-align:center">FSEvents<br>监听变化</div>
+      <div style="font-size:20px;color:#34d399">→</div>
+    </div>
+
+    <!-- HUD -->
+    <div style="flex:1;min-width:180px;padding-top:30px">
+      <div style="background:rgba(16,185,129,0.10);border:1px solid rgba(16,185,129,0.3);border-radius:10px;padding:16px">
+        <div class="label" style="color:#6ee7b7;margin-bottom:8px">token_hud</div>
+        <div style="font-size:13px;color:#94a3b8;line-height:1.8">
+          Swift + SwiftUI<br>
+          刘海两侧常驻<br><br>
+          左：配额剩余量<br>
+          右：当前 session
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- token-state library role -->
+  <div style="margin-top:20px;padding:14px 18px;background:rgba(255,255,255,0.04);border-left:3px solid #6366f1;border-radius:0 8px 8px 0">
+    <strong style="color:#a5b4fc">token-state 库的新职责：</strong>
+    <span style="color:#94a3b8;font-size:14px">「数据读取 + 归一化」而非「追踪上报」。它定期从各平台拉取数据，统一格式写入 state.json。其他开发者可以用它在自己的脚本/工具里读取订阅用量，不需要 HUD。</span>
+  </div>
+
+</div>

@@ -1,0 +1,50 @@
+<h2>架构方案选择</h2>
+<p class="subtitle">核心问题：Swift HUD 如何从 TypeScript 状态管理库获取数据？</p>
+
+<div class="options">
+  <div class="option" data-choice="a" onclick="toggleSelect(this)">
+    <div class="letter">A</div>
+    <div class="content">
+      <h3>文件 IPC（推荐）</h3>
+      <p>TypeScript 库将状态写入 <code>~/.token-hud/state.json</code>，Swift HUD 用 FSEvents 监听文件变化，零延迟响应。</p>
+      <div class="pros-cons" style="margin-top:12px">
+        <div class="pros"><h4>优点</h4><ul><li>无需后台守护进程</li><li>实现最简单</li><li>离线也能工作</li><li>任何语言都能写入/读取</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>高频更新时有 I/O 开销</li><li>需约定 JSON schema</li></ul></div>
+      </div>
+      <div style="margin-top:12px;padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;font-size:12px;font-family:monospace">
+        TS 库 → 写入 state.json → FSEvents → Swift HUD 重绘
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="b" onclick="toggleSelect(this)">
+    <div class="letter">B</div>
+    <div class="content">
+      <h3>本地 HTTP 守护进程</h3>
+      <p>TypeScript 库包含一个 daemon 模式，在本地启动 HTTP 服务器（如 <code>localhost:7654</code>），Swift HUD 定期轮询获取数据。</p>
+      <div class="pros-cons" style="margin-top:12px">
+        <div class="pros"><h4>优点</h4><ul><li>支持实时推送（WebSocket）</li><li>可支持多个消费者</li><li>接口更灵活（REST API）</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>需要管理 Node.js 守护进程</li><li>用户需要 node 环境</li><li>进程崩溃 HUD 就断线</li></ul></div>
+      </div>
+      <div style="margin-top:12px;padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;font-size:12px;font-family:monospace">
+        TS 守护进程 → HTTP/WS → Swift HUD 轮询/订阅
+      </div>
+    </div>
+  </div>
+
+  <div class="option" data-choice="c" onclick="toggleSelect(this)">
+    <div class="letter">C</div>
+    <div class="content">
+      <h3>文件 IPC + HTTP 混合</h3>
+      <p>持久配额用文件存储，当前 session 实时数据用轻量 HTTP（仅当有活跃会话时才启动 server）。</p>
+      <div class="pros-cons" style="margin-top:12px">
+        <div class="pros"><h4>优点</h4><ul><li>持久数据离线可用</li><li>活跃 session 时实时更新</li><li>最接近真实使用场景</li></ul></div>
+        <div class="cons"><h4>缺点</h4><ul><li>两套机制，稍微复杂</li><li>需要区分"有 session"和"无 session"状态</li></ul></div>
+      </div>
+      <div style="margin-top:12px;padding:10px;background:rgba(255,255,255,0.05);border-radius:8px;font-size:12px;font-family:monospace">
+        配额: state.json → FSEvents → HUD<br>
+        Session: HTTP/WS → 实时更新 HUD
+      </div>
+    </div>
+  </div>
+</div>

@@ -7,18 +7,50 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		00FB77F857B34F21612C0819 /* WidgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D0791EBB1B5070024A40B1A /* WidgetStore.swift */; };
+		0FD327A9B929ECF82F7E5026 /* LeftSideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFE72328706E7A623FF4E81E /* LeftSideView.swift */; };
+		1A4DF4EA8A197C0122B6CD88 /* WidgetRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8A4772EC1DF06224545FA80 /* WidgetRenderer.swift */; };
+		1E77F3C6F81AD0564F14824C /* WidgetConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECD0698516FDF9871FFF5C6F /* WidgetConfig.swift */; };
+		2F3FC258A169010C69071DF0 /* RingWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5FB21BF5542FE6CA4AED10F7 /* RingWidget.swift */; };
+		40A6924E9860250BF8373C7D /* TextWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64092BD47770FC0CCEB8EFB /* TextWidget.swift */; };
+		41243C131E417A3F9B7BB84D /* AggregateWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 868DD929F1D2119F6B8D9A12 /* AggregateWidget.swift */; };
+		5EC4C18A0B0DBEBDEB8F072A /* SessionKeyExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */; };
 		600B13DFCCC5F789A0C2B73A /* StateWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9FF1CC4D818E916F535E406 /* StateWatcher.swift */; };
+		7CC1B02E7A74E8059111F008 /* ServiceConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8E74DD2F7701BA7EF38E4535 /* ServiceConfig.swift */; };
+		7FC68D4F2A998421648D471A /* KeychainHelper.swift in Sources */ = {isa = PBXBuildFile; fileRef = 785C48870F7D50C608E045F5 /* KeychainHelper.swift */; };
+		81ED33E7C8C83E4E7B86F2C3 /* WidgetListEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FA515D5AD06D073A0B6352 /* WidgetListEditor.swift */; };
 		94DD2048172D83044FB1C880 /* token_hudApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B354BB4B28539F177EE68A /* token_hudApp.swift */; };
+		A97C40BDDCBA9F970EC4DD4E /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFB3E874F27CEB54B2DF5487 /* AppDelegate.swift */; };
+		C04189CC4BA2C75DAF9B2A15 /* NotchWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C4EE03DEB973E73B766DE2 /* NotchWindowManager.swift */; };
+		CC1E55CA118A407A193EE65A /* BarWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66EE1EED049C463DEC42FEF8 /* BarWidget.swift */; };
 		E65E00D35A346B4E4CCEAAB5 /* token_hudCore in Frameworks */ = {isa = PBXBuildFile; productRef = E29BCD37B205D7EC9BAB8D04 /* token_hudCore */; };
+		F50A4E58A9068B53EF6F19C3 /* RightSideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8373E4390D298807A0BBF1D /* RightSideView.swift */; };
+		F6839D66065414BB4F75A4DB /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
+		15FA515D5AD06D073A0B6352 /* WidgetListEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetListEditor.swift; sourceTree = "<group>"; };
+		38C4EE03DEB973E73B766DE2 /* NotchWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchWindowManager.swift; sourceTree = "<group>"; };
+		5D0791EBB1B5070024A40B1A /* WidgetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetStore.swift; sourceTree = "<group>"; };
+		5FB21BF5542FE6CA4AED10F7 /* RingWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingWidget.swift; sourceTree = "<group>"; };
+		66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
+		66EE1EED049C463DEC42FEF8 /* BarWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarWidget.swift; sourceTree = "<group>"; };
+		785C48870F7D50C608E045F5 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
+		7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionKeyExtractor.swift; sourceTree = "<group>"; };
+		868DD929F1D2119F6B8D9A12 /* AggregateWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AggregateWidget.swift; sourceTree = "<group>"; };
+		8E74DD2F7701BA7EF38E4535 /* ServiceConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceConfig.swift; sourceTree = "<group>"; };
 		A6B354BB4B28539F177EE68A /* token_hudApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = token_hudApp.swift; sourceTree = "<group>"; };
 		A9FF1CC4D818E916F535E406 /* StateWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateWatcher.swift; sourceTree = "<group>"; };
+		AFB3E874F27CEB54B2DF5487 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		B7D562C0C01D0C45988F722A /* token_hud */ = {isa = PBXFileReference; lastKnownFileType = folder; name = token_hud; path = .; sourceTree = SOURCE_ROOT; };
 		BE6F423D97166F8C00033C38 /* token_hud.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = token_hud.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0B2D7C7E9909F98C9E209AA /* token_hud-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "token_hud-Bridging-Header.h"; sourceTree = "<group>"; };
+		C64092BD47770FC0CCEB8EFB /* TextWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextWidget.swift; sourceTree = "<group>"; };
+		C8373E4390D298807A0BBF1D /* RightSideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightSideView.swift; sourceTree = "<group>"; };
+		C8A4772EC1DF06224545FA80 /* WidgetRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetRenderer.swift; sourceTree = "<group>"; };
 		CF286D60C8084A91D44CA0C6 /* token_hud.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = token_hud.entitlements; sourceTree = "<group>"; };
+		ECD0698516FDF9871FFF5C6F /* WidgetConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetConfig.swift; sourceTree = "<group>"; };
+		EFE72328706E7A623FF4E81E /* LeftSideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftSideView.swift; sourceTree = "<group>"; };
 		FEF8CB8AF9790BE508616B5B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
@@ -40,8 +72,12 @@
 				C0B2D7C7E9909F98C9E209AA /* token_hud-Bridging-Header.h */,
 				CF286D60C8084A91D44CA0C6 /* token_hud.entitlements */,
 				778C05A0F15D257BFB45EB9F /* App */,
+				35D2F1286C8D357411BF85B2 /* Overlay */,
 				4814A6EDE9E523A164E81E97 /* Resources */,
+				4065EB9361852627F9596356 /* Settings */,
 				2E0E42AD3EAC848DF7B3E9BE /* State */,
+				FF41A067BDF47366F8AF4C00 /* Support */,
+				8692D6520B736E298A5CC00E /* Widgets */,
 			);
 			path = token_hud;
 			sourceTree = "<group>";
@@ -59,8 +95,30 @@
 			isa = PBXGroup;
 			children = (
 				A9FF1CC4D818E916F535E406 /* StateWatcher.swift */,
+				5D0791EBB1B5070024A40B1A /* WidgetStore.swift */,
 			);
 			path = State;
+			sourceTree = "<group>";
+		};
+		35D2F1286C8D357411BF85B2 /* Overlay */ = {
+			isa = PBXGroup;
+			children = (
+				EFE72328706E7A623FF4E81E /* LeftSideView.swift */,
+				38C4EE03DEB973E73B766DE2 /* NotchWindowManager.swift */,
+				C8373E4390D298807A0BBF1D /* RightSideView.swift */,
+			);
+			path = Overlay;
+			sourceTree = "<group>";
+		};
+		4065EB9361852627F9596356 /* Settings */ = {
+			isa = PBXGroup;
+			children = (
+				8E74DD2F7701BA7EF38E4535 /* ServiceConfig.swift */,
+				7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */,
+				66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */,
+				15FA515D5AD06D073A0B6352 /* WidgetListEditor.swift */,
+			);
+			path = Settings;
 			sourceTree = "<group>";
 		};
 		4814A6EDE9E523A164E81E97 /* Resources */ = {
@@ -82,6 +140,7 @@
 		778C05A0F15D257BFB45EB9F /* App */ = {
 			isa = PBXGroup;
 			children = (
+				AFB3E874F27CEB54B2DF5487 /* AppDelegate.swift */,
 				A6B354BB4B28539F177EE68A /* token_hudApp.swift */,
 			);
 			path = App;
@@ -93,6 +152,27 @@
 				B7D562C0C01D0C45988F722A /* token_hud */,
 			);
 			name = Packages;
+			sourceTree = "<group>";
+		};
+		8692D6520B736E298A5CC00E /* Widgets */ = {
+			isa = PBXGroup;
+			children = (
+				868DD929F1D2119F6B8D9A12 /* AggregateWidget.swift */,
+				66EE1EED049C463DEC42FEF8 /* BarWidget.swift */,
+				5FB21BF5542FE6CA4AED10F7 /* RingWidget.swift */,
+				C64092BD47770FC0CCEB8EFB /* TextWidget.swift */,
+				ECD0698516FDF9871FFF5C6F /* WidgetConfig.swift */,
+				C8A4772EC1DF06224545FA80 /* WidgetRenderer.swift */,
+			);
+			path = Widgets;
+			sourceTree = "<group>";
+		};
+		FF41A067BDF47366F8AF4C00 /* Support */ = {
+			isa = PBXGroup;
+			children = (
+				785C48870F7D50C608E045F5 /* KeychainHelper.swift */,
+			);
+			path = Support;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -159,7 +239,23 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				41243C131E417A3F9B7BB84D /* AggregateWidget.swift in Sources */,
+				A97C40BDDCBA9F970EC4DD4E /* AppDelegate.swift in Sources */,
+				CC1E55CA118A407A193EE65A /* BarWidget.swift in Sources */,
+				7FC68D4F2A998421648D471A /* KeychainHelper.swift in Sources */,
+				0FD327A9B929ECF82F7E5026 /* LeftSideView.swift in Sources */,
+				C04189CC4BA2C75DAF9B2A15 /* NotchWindowManager.swift in Sources */,
+				F50A4E58A9068B53EF6F19C3 /* RightSideView.swift in Sources */,
+				2F3FC258A169010C69071DF0 /* RingWidget.swift in Sources */,
+				7CC1B02E7A74E8059111F008 /* ServiceConfig.swift in Sources */,
+				5EC4C18A0B0DBEBDEB8F072A /* SessionKeyExtractor.swift in Sources */,
+				F6839D66065414BB4F75A4DB /* SettingsWindow.swift in Sources */,
 				600B13DFCCC5F789A0C2B73A /* StateWatcher.swift in Sources */,
+				40A6924E9860250BF8373C7D /* TextWidget.swift in Sources */,
+				1E77F3C6F81AD0564F14824C /* WidgetConfig.swift in Sources */,
+				81ED33E7C8C83E4E7B86F2C3 /* WidgetListEditor.swift in Sources */,
+				1A4DF4EA8A197C0122B6CD88 /* WidgetRenderer.swift in Sources */,
+				00FB77F857B34F21612C0819 /* WidgetStore.swift in Sources */,
 				94DD2048172D83044FB1C880 /* token_hudApp.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

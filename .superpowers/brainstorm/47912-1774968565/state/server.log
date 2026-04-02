@@ -1,0 +1,7 @@
+{"type":"server-started","port":50301,"host":"127.0.0.1","url_host":"localhost","url":"http://localhost:50301","screen_dir":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/47912-1774968565/content","state_dir":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/47912-1774968565/state"}
+{"type":"screen-added","file":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/47912-1774968565/content/approaches.html"}
+{"source":"user-event","type":"click","text":"A\n    \n      文件 IPC（推荐）\n      TypeScript 库将状态写入 ~/.token-hud/state.json，Swift HUD 用 FSEvents 监听文件变化，零延迟响应。\n      \n        优点无需后台守护进程实现最简单离线也能工作任何语言都能写入/读取\n        缺点高频更新时有 I/O 开销需约定 JSON schema\n      \n      \n        TS 库 → 写入 state.json → FSEvents → Swift HUD 重绘","choice":"a","id":null,"timestamp":1774968639696}
+{"type":"screen-added","file":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/47912-1774968565/content/architecture.html"}
+{"type":"screen-added","file":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/47912-1774968565/content/schema.html"}
+{"type":"screen-added","file":"/Users/lauzanhing/Desktop/token_hud/.superpowers/brainstorm/47912-1774968565/content/library-api.html"}
+{"type":"server-stopped","reason":"owner process exited"}

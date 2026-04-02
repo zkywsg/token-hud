@@ -1,0 +1,68 @@
+<h2>token-state 库 API 设计</h2>
+<p class="subtitle">TypeScript · npm 发布 · 三层使用方式</p>
+
+<div class="section">
+  <div style="display:flex;flex-direction:column;gap:16px">
+
+    <!-- Layer 1: Core -->
+    <div style="background:rgba(99,102,241,0.10);border:1px solid rgba(99,102,241,0.3);border-radius:12px;padding:18px">
+      <div class="label" style="color:#818cf8">层 1 · 核心（必须）</div>
+      <h3 style="margin:6px 0 12px;color:#c7d2fe">TokenTracker — 配额管理</h3>
+      <div style="background:#0f172a;border-radius:8px;padding:14px;font-family:monospace;font-size:12px;line-height:1.8">
+        <span style="color:#7dd3fc">import</span> { <span style="color:#c7d2fe">TokenTracker</span> } <span style="color:#7dd3fc">from</span> <span style="color:#86efac">'token-state'</span><br><br>
+        <span style="color:#64748b">// 初始化，指定 state.json 路径</span><br>
+        <span style="color:#f8fafc">const</span> tracker = <span style="color:#7dd3fc">new</span> <span style="color:#c7d2fe">TokenTracker</span>({<br>
+        &nbsp;&nbsp;<span style="color:#7dd3fc">stateFile</span>: <span style="color:#86efac">'~/.token-hud/state.json'</span> <span style="color:#64748b">// 默认值</span><br>
+        })<br><br>
+        <span style="color:#64748b">// 注册一个 service 及其配额</span><br>
+        tracker.<span style="color:#fbbf24">addService</span>(<span style="color:#86efac">'claude'</span>, {<br>
+        &nbsp;&nbsp;<span style="color:#7dd3fc">label</span>: <span style="color:#86efac">'Claude Max'</span>,<br>
+        &nbsp;&nbsp;<span style="color:#7dd3fc">quotas</span>: [<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;{ <span style="color:#7dd3fc">type</span>: <span style="color:#86efac">'time'</span>, <span style="color:#7dd3fc">total</span>: <span style="color:#fb923c">18000</span>, <span style="color:#7dd3fc">unit</span>: <span style="color:#86efac">'seconds'</span>, <span style="color:#7dd3fc">resetsAt</span>: <span style="color:#86efac">'2026-04-30'</span> },<br>
+        &nbsp;&nbsp;&nbsp;&nbsp;{ <span style="color:#7dd3fc">type</span>: <span style="color:#86efac">'tokens'</span>, <span style="color:#7dd3fc">total</span>: <span style="color:#fb923c">1_000_000</span> }<br>
+        &nbsp;&nbsp;]<br>
+        })<br><br>
+        <span style="color:#64748b">// 手动上报消耗</span><br>
+        tracker.<span style="color:#fbbf24">consume</span>(<span style="color:#86efac">'claude'</span>, { <span style="color:#7dd3fc">tokens</span>: <span style="color:#fb923c">1500</span>, <span style="color:#7dd3fc">time</span>: <span style="color:#fb923c">2.3</span> })<br><br>
+        <span style="color:#64748b">// 重置配额（如月度续费）</span><br>
+        tracker.<span style="color:#fbbf24">resetQuota</span>(<span style="color:#86efac">'claude'</span>, <span style="color:#86efac">'time'</span>)
+      </div>
+    </div>
+
+    <!-- Layer 2: Session -->
+    <div style="background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);border-radius:12px;padding:18px">
+      <div class="label" style="color:#6ee7b7">层 2 · Session（推荐）</div>
+      <h3 style="margin:6px 0 12px;color:#a7f3d0">Session — 追踪单次会话</h3>
+      <div style="background:#0f172a;border-radius:8px;padding:14px;font-family:monospace;font-size:12px;line-height:1.8">
+        <span style="color:#64748b">// 开始一个会话（写入 currentSession）</span><br>
+        <span style="color:#f8fafc">const</span> session = tracker.<span style="color:#fbbf24">startSession</span>(<span style="color:#86efac">'claude'</span>)<br><br>
+        <span style="color:#64748b">// 会话中上报消耗（同时更新 quotas.used + currentSession）</span><br>
+        session.<span style="color:#fbbf24">consume</span>({ <span style="color:#7dd3fc">tokens</span>: <span style="color:#fb923c">500</span>, <span style="color:#7dd3fc">time</span>: <span style="color:#fb923c">1.2</span> })<br><br>
+        <span style="color:#64748b">// 结束会话（清空 currentSession → null）</span><br>
+        session.<span style="color:#fbbf24">end</span>()<br><br>
+        <span style="color:#64748b">// 或用 try/finally 保证 end() 一定调用</span><br>
+        <span style="color:#7dd3fc">await</span> tracker.<span style="color:#fbbf24">withSession</span>(<span style="color:#86efac">'claude'</span>, <span style="color:#7dd3fc">async</span> (session) => {<br>
+        &nbsp;&nbsp;<span style="color:#64748b">// ... 你的 AI 调用逻辑 ...</span><br>
+        &nbsp;&nbsp;session.<span style="color:#fbbf24">consume</span>({ <span style="color:#7dd3fc">tokens</span>: <span style="color:#fb923c">800</span> })<br>
+        }) <span style="color:#64748b">// 自动 end()</span>
+      </div>
+    </div>
+
+    <!-- Layer 3: SDK Wrappers -->
+    <div style="background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.25);border-radius:12px;padding:18px">
+      <div class="label" style="color:#fbbf24">层 3 · SDK 插件（可选）</div>
+      <h3 style="margin:6px 0 12px;color:#fde68a">wrapOpenAI / wrapAnthropic — 自动拦截</h3>
+      <div style="background:#0f172a;border-radius:8px;padding:14px;font-family:monospace;font-size:12px;line-height:1.8">
+        <span style="color:#7dd3fc">import</span> { <span style="color:#c7d2fe">wrapOpenAI</span> } <span style="color:#7dd3fc">from</span> <span style="color:#86efac">'token-state/openai'</span><br>
+        <span style="color:#7dd3fc">import</span> { <span style="color:#c7d2fe">wrapAnthropic</span> } <span style="color:#7dd3fc">from</span> <span style="color:#86efac">'token-state/anthropic'</span><br><br>
+        <span style="color:#64748b">// 原来的 client 包一层，其他代码完全不变</span><br>
+        <span style="color:#f8fafc">const</span> openai = <span style="color:#fbbf24">wrapOpenAI</span>(<span style="color:#7dd3fc">new</span> OpenAI(), tracker, <span style="color:#86efac">'openai'</span>)<br>
+        <span style="color:#f8fafc">const</span> claude = <span style="color:#fbbf24">wrapAnthropic</span>(<span style="color:#7dd3fc">new</span> Anthropic(), tracker, <span style="color:#86efac">'claude'</span>)<br><br>
+        <span style="color:#64748b">// 之后正常用，token 自动扣减 ✓</span><br>
+        <span style="color:#7dd3fc">const</span> res = <span style="color:#7dd3fc">await</span> openai.chat.completions.<span style="color:#fbbf24">create</span>({...})<br>
+        <span style="color:#64748b">// 内部自动: tracker.consume('openai', { tokens: res.usage.total_tokens })</span>
+      </div>
+    </div>
+
+  </div>
+</div>
