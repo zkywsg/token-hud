@@ -1,0 +1,29 @@
+name: token_hud
+options:
+  bundleIdPrefix: com.tokenHud
+  deploymentTarget:
+    macOS: "14.0"
+
+settings:
+  base:
+    SWIFT_VERSION: "6.0"
+    SWIFT_STRICT_CONCURRENCY: complete
+    OTHER_LDFLAGS: "-framework Security -framework ServiceManagement"
+    SWIFT_OBJC_BRIDGING_HEADER: token_hud/token_hud-Bridging-Header.h
+    MACOSX_DEPLOYMENT_TARGET: "14.0"
+
+targets:
+  token_hud:
+    type: application
+    platform: macOS
+    sources:
+      - token_hud
+    info:
+      path: token_hud/Resources/Info.plist
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.tokenHud.token-hud
+        INFOPLIST_FILE: token_hud/Resources/Info.plist
+        CODE_SIGN_ENTITLEMENTS: token_hud/token_hud.entitlements
+        CODE_SIGN_STYLE: Automatic
+        DEVELOPMENT_TEAM: ""
