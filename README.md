@@ -1,91 +1,59 @@
 # token-hud
 
-A macOS menu bar app that displays your AI service usage quotas (Claude, OpenAI, etc.) as a real-time overlay in the notch area of your MacBook.
+Your AI quota, always visible — tucked into the MacBook notch.
 
-![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue)
-![Swift 6](https://img.shields.io/badge/Swift-6-orange)
+[中文版](README.zh.md) · [![macOS 14+](https://img.shields.io/badge/macOS-14%2B-blue?style=flat-square)](https://www.apple.com/macos/) [![Swift 6](https://img.shields.io/badge/Swift-6-orange?style=flat-square)](https://swift.org) [![MIT](https://img.shields.io/badge/license-MIT-green?style=flat-square)](LICENSE)
 
-## What it does
+---
 
-token-hud reads a local JSON file (`~/.token-hud/state.json`) and renders your quota usage directly in the notch — no browser tab, no manual checking.
+<!-- Replace with a real screenshot once the app UI is finalised -->
+> 📸 **Screenshot coming soon** — drop a notch overlay image here when ready.
 
-- Token usage bars
-- Time window countdowns (5-hour, 7-day)
-- Credit balance
-- Configurable widgets (ring, bar, text)
-- Works with any service supported by [token-state](https://github.com/zkywsg/token-state)
+---
 
-## Requirements
+## Features
 
-- macOS 14 (Sonoma) or later
-- MacBook with notch display
-- [token-state](https://github.com/zkywsg/token-state) daemon running in the background
+- Real-time Claude · OpenAI usage sync
+- 5-hour & 7-day quota countdown
+- Ring · Bar · Text widgets — mix and match
+- Lives entirely in the notch, zero screen footprint
 
-## Installation
+## Quick Start
 
-### Build from source
+**Requirements:** macOS 14+, notched MacBook, Node.js 18+
 
-1. Clone the repo:
+**1. Start the data source**
 
 ```bash
-git clone https://github.com/zkywsg/token-hud.git
-cd token-hud
-```
-
-2. Open in Xcode:
-
-```bash
-open token_hud.xcodeproj
-```
-
-3. Build and run (⌘R)
-
-### Set up the data source
-
-token-hud reads from `~/.token-hud/state.json`, which is written by the [token-state](https://github.com/zkywsg/token-state) daemon. Follow its setup guide to get your API credentials configured.
-
-```bash
-# Install and start the daemon
 npm install -g token-state
 token-state
 ```
 
-## Configuration
+**2. Build the app**
 
-Once the app is running, click the menu bar icon to open Settings:
-
-- **Services** — extract your Claude session key directly from Safari/Chrome, or paste it manually
-- **Widgets** — add, remove, and reorder the metrics shown in the notch
-
-## Architecture
-
-token-hud is intentionally decoupled from any specific AI service:
-
-```
-token-state daemon  →  ~/.token-hud/state.json  →  token-hud app
+```bash
+git clone https://github.com/zkywsg/token-hud.git
+open token_hud.xcodeproj   # then press ⌘R
 ```
 
-The app only reads the local JSON file. All API communication happens in [token-state](https://github.com/zkywsg/token-state), which can be replaced with any tool that writes to the same schema.
+**3. Configure services**
 
-### Project structure
+Click the menu bar icon → **Settings** → paste your API key, or use one-click extraction for Claude session keys directly from Safari / Chrome.
+
+---
+
+<details>
+<summary>Architecture & developer docs</summary>
+
+token-hud never calls AI APIs directly. All data flows through a local file:
 
 ```
-token_hud/
-├── App/          # App entry point and AppDelegate
-├── Overlay/      # Notch window management and layout
-├── Widgets/      # Widget types (bar, ring, text, aggregate)
-├── Settings/     # Settings window, session key extractor
-├── State/        # StateWatcher (file watcher → StateFile)
-└── Support/      # Keychain helper
-
-Sources/token_hudCore/
-├── StateModel.swift          # Shared data types (StateFile, Quota, etc.)
-└── WidgetValueComputer.swift # Pure logic for computing display values
+token-state daemon  →  ~/.token-hud/state.json  →  token-hud
 ```
 
-## state.json Schema
+Any tool that writes to the same schema works as a drop-in replacement for the daemon. See the [state.json schema →](https://github.com/zkywsg/token-state#statejson-schema)
 
-See [token-state](https://github.com/zkywsg/token-state#statejson-schema) for the full schema definition.
+</details>
 
 ## License
 
