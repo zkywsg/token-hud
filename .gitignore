@@ -13,3 +13,6 @@ docs/
 
 # Internal AI tooling
 .superpowers/
+
+# SwiftPM Xcode generated files
+.swiftpm/
