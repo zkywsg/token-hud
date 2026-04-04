@@ -35,4 +35,31 @@ public struct StateFile: Codable, Sendable {
     public let version: Int
     public let updatedAt: String
     public let services: [String: Service]
+
+    public static let preview = StateFile(
+        version: 1,
+        updatedAt: ISO8601DateFormatter().string(from: Date()),
+        services: [
+            "claude": Service(
+                label: "Claude",
+                quotas: [
+                    Quota(type: .time,   total: 28800, used: 10800, unit: "seconds",
+                          resetsAt: ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: 6300))),
+                    Quota(type: .tokens, total: 200_000, used: 80_000, unit: "tokens", resetsAt: nil)
+                ],
+                currentSession: SessionSnapshot(
+                    id: "preview-session",
+                    startedAt: ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: -3600)),
+                    tokens: 45_000, time: 3600, money: 0.54, requests: 12
+                )
+            ),
+            "openai": Service(
+                label: "OpenAI",
+                quotas: [
+                    Quota(type: .money, total: 5.0, used: 1.5, unit: "USD", resetsAt: nil)
+                ],
+                currentSession: nil
+            )
+        ]
+    )
 }

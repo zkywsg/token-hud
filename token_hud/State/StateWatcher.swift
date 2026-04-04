@@ -12,6 +12,9 @@ final class StateWatcher {
     private(set) var lastError: String?
     private(set) var lastUpdated: Date?
 
+    /// Real data when available, falls back to mock preview so widgets always show something.
+    var effectiveState: StateFile { currentState ?? .preview }
+
     // MARK: - Configuration
 
     var stateFilePath: String {

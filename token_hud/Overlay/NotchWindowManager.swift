@@ -7,6 +7,8 @@ final class NotchWindowManager {
 
     private var leftWindow: NSWindow?
     private var rightWindow: NSWindow?
+    private var leftHostingView: NSHostingView<AnyView>?
+    private var rightHostingView: NSHostingView<AnyView>?
     private let stateWatcher: StateWatcher
     private let widgetStore: WidgetStore
     private var screenObserver: NSObjectProtocol?
@@ -17,11 +19,9 @@ final class NotchWindowManager {
     }
 
     func setup() {
-        guard let screen = NSScreen.main else { return }
-
-        if screen.auxiliaryTopLeftArea != nil {
-            leftWindow  = makeOverlayWindow(side: .left,  screen: screen)
-            rightWindow = makeOverlayWindow(side: .right, screen: screen)
+        if let screen = notchScreen() {
+            (leftWindow,  leftHostingView)  = makeOverlayWindow(side: .left,  screen: screen)
+            (rightWindow, rightHostingView) = makeOverlayWindow(side: .right, screen: screen)
             positionWindows(screen: screen)
         }
         // Non-notch: no overlay windows; AppDelegate creates a status item.
@@ -33,6 +33,11 @@ final class NotchWindowManager {
         ) { [weak self] _ in
             self?.handleScreenChange()
         }
+    }
+
+    /// Returns the first screen that has a notch (auxiliaryTopLeftArea), preferring the built-in display.
+    private func notchScreen() -> NSScreen? {
+        NSScreen.screens.first { $0.auxiliaryTopLeftArea != nil }
     }
 
     func teardown() {
@@ -47,7 +52,7 @@ final class NotchWindowManager {
 
     private enum Side { case left, right }
 
-    private func makeOverlayWindow(side: Side, screen: NSScreen) -> NSWindow {
+    private func makeOverlayWindow(side: Side, screen: NSScreen) -> (NSWindow, NSHostingView<AnyView>) {
         let window = NSWindow(
             contentRect: .zero,
             styleMask: [.borderless],
@@ -55,10 +60,10 @@ final class NotchWindowManager {
             defer: false,
             screen: screen
         )
-        window.level             = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 1)
-        window.backgroundColor   = .clear
-        window.isOpaque          = false
-        window.hasShadow         = false
+        window.level              = NSWindow.Level(rawValue: Int(CGWindowLevelForKey(.statusWindow)) + 1)
+        window.backgroundColor    = .clear
+        window.isOpaque           = false
+        window.hasShadow          = false
         window.ignoresMouseEvents = false
         window.collectionBehavior = [.canJoinAllSpaces, .stationary, .fullScreenAuxiliary]
         window.isReleasedWhenClosed = false
@@ -79,51 +84,76 @@ final class NotchWindowManager {
             )
         }
 
-        window.contentView = NSHostingView(rootView: rootView)
-        window.orderFrontRegardless()
-        return window
+        let hostingView = NSHostingView(rootView: rootView)
+        window.contentView = hostingView
+        // Don't show until frame is calculated in positionWindows
+        return (window, hostingView)
     }
 
     private func positionWindows(screen: NSScreen) {
         guard
             let leftArea  = screen.auxiliaryTopLeftArea,
             let rightArea = screen.auxiliaryTopRightArea
-        else { return }
-
-        let padding: CGFloat = 6
-
-        if let lw = leftWindow {
-            let w = max(leftArea.width - padding, 20)
-            let h = leftArea.height
-            let x = leftArea.minX
-            let y = leftArea.minY
-            lw.setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
+        else {
+            print("[token_hud] auxiliaryTopLeftArea is nil — no notch detected")
+            return
         }
 
-        if let rw = rightWindow {
-            let w = max(rightArea.width - padding, 20)
-            let h = rightArea.height
-            let x = rightArea.minX + padding
-            let y = rightArea.minY
-            rw.setFrame(NSRect(x: x, y: y, width: w, height: h), display: true)
+        let padding: CGFloat = 6
+        let maxFraction: CGFloat = 0.4
+
+        // auxiliaryTopLeft/RightArea are in the screen's local coordinate space.
+        // Convert to global by adding screen.frame.origin.
+        let ox = screen.frame.origin.x
+        let oy = screen.frame.origin.y
+
+        if let lw = leftWindow, let lhv = leftHostingView {
+            lhv.layoutSubtreeIfNeeded()
+            let contentWidth = lhv.intrinsicContentSize.width
+            let maxWidth = leftArea.width * maxFraction
+            let width = max(min(contentWidth, maxWidth), 20)
+
+            // Right-align to notch left edge
+            let frame = NSRect(
+                x: ox + leftArea.maxX - width - padding,
+                y: oy + leftArea.minY,
+                width: width,
+                height: leftArea.height
+            )
+            lw.setFrame(frame, display: true)
+            lw.orderFrontRegardless()
+            print("[token_hud] leftWindow.frame  = \(frame)  (contentWidth=\(contentWidth))")
+        }
+
+        if let rw = rightWindow, let rhv = rightHostingView {
+            rhv.layoutSubtreeIfNeeded()
+            let contentWidth = rhv.intrinsicContentSize.width
+            let maxWidth = rightArea.width * maxFraction
+            let width = max(min(contentWidth, maxWidth), 20)
+
+            // Left-align to notch right edge
+            let frame = NSRect(
+                x: ox + rightArea.minX + padding,
+                y: oy + rightArea.minY,
+                width: width,
+                height: rightArea.height
+            )
+            rw.setFrame(frame, display: true)
+            rw.orderFrontRegardless()
+            print("[token_hud] rightWindow.frame = \(frame)  (contentWidth=\(contentWidth))")
         }
     }
 
     private func handleScreenChange() {
-        guard let screen = NSScreen.main else {
+        guard let screen = notchScreen() else {
             leftWindow?.orderOut(nil)
             rightWindow?.orderOut(nil)
             return
         }
-        if screen.auxiliaryTopLeftArea != nil {
-            if leftWindow == nil {
-                leftWindow  = makeOverlayWindow(side: .left,  screen: screen)
-                rightWindow = makeOverlayWindow(side: .right, screen: screen)
-            }
-            positionWindows(screen: screen)
-        } else {
-            leftWindow?.orderOut(nil)
-            rightWindow?.orderOut(nil)
+        if leftWindow == nil {
+            (leftWindow,  leftHostingView)  = makeOverlayWindow(side: .left,  screen: screen)
+            (rightWindow, rightHostingView) = makeOverlayWindow(side: .right, screen: screen)
         }
+        positionWindows(screen: screen)
     }
 }

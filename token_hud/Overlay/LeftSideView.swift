@@ -8,7 +8,7 @@ struct LeftSideView: View {
     var body: some View {
         HStack(spacing: 4) {
             ForEach(store.leftWidgets) { config in
-                WidgetRenderer(config: config, state: watcher.currentState)
+                WidgetRenderer(config: config, state: watcher.effectiveState)
             }
         }
         .padding(.horizontal, 4)
