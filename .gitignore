@@ -1,6 +1,8 @@
 .build/
 *.xcuserdata/
+*.xcuserdatad/
 *.xcworkspace/xcuserdata/
+xcuserdata/
 DerivedData/
 .DS_Store
 *.o
@@ -8,3 +10,6 @@ DerivedData/
 
 # Internal planning docs
 docs/
+
+# Internal AI tooling
+.superpowers/
