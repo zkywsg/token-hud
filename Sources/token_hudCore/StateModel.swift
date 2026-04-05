@@ -29,6 +29,14 @@ public struct Service: Codable, Sendable {
     public let label: String
     public let quotas: [Quota]
     public let currentSession: SessionSnapshot?
+    public let error: String?
+
+    public init(label: String, quotas: [Quota], currentSession: SessionSnapshot?, error: String? = nil) {
+        self.label = label
+        self.quotas = quotas
+        self.currentSession = currentSession
+        self.error = error
+    }
 }
 
 public struct StateFile: Codable, Sendable {
@@ -59,6 +67,17 @@ public struct StateFile: Codable, Sendable {
                     Quota(type: .money, total: 5.0, used: 1.5, unit: "USD", resetsAt: nil)
                 ],
                 currentSession: nil
+            ),
+            "codex": Service(
+                label: "Codex",
+                quotas: [
+                    Quota(type: .money, total: 120.0, used: 4.20, unit: "USD", resetsAt: nil)
+                ],
+                currentSession: SessionSnapshot(
+                    id: "codex-preview",
+                    startedAt: ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: -86400)),
+                    tokens: 42_000, time: nil, money: 4.20, requests: nil
+                )
             )
         ]
     )

@@ -77,4 +77,17 @@ struct StateModelTests {
             #expect(state.services["s"]?.quotas.first != nil)
         }
     }
+
+    @Test func serviceErrorIsNilWhenKeyAbsent() throws {
+        let state = try JSONDecoder().decode(StateFile.self, from: Data(fullStateJSON.utf8))
+        #expect(state.services["claude"]?.error == nil)
+    }
+
+    @Test func serviceErrorDecodesWhenPresent() throws {
+        let json = """
+        {"version":1,"updatedAt":"2026-04-01T00:00:00Z","services":{"codex":{"label":"Codex","quotas":[],"currentSession":null,"error":"tokenExpired"}}}
+        """
+        let state = try JSONDecoder().decode(StateFile.self, from: Data(json.utf8))
+        #expect(state.services["codex"]?.error == "tokenExpired")
+    }
 }
