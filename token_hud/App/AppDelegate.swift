@@ -8,26 +8,49 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     private var stateWatcher: StateWatcher!
     private var widgetStore: WidgetStore!
+    private var appFilterStore: AppFilterStore!
+    private var appWatcher: AppWatcher!
     private var windowManager: NotchWindowManager!
     private var statusItem: NSStatusItem?
     private var settingsController: NSWindowController?
+    private var codexFetcher: CodexFetcher!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
 
-        stateWatcher  = StateWatcher()
-        widgetStore   = WidgetStore()
+        stateWatcher    = StateWatcher()
+        widgetStore     = WidgetStore()
+        appFilterStore  = AppFilterStore()
+        appWatcher      = AppWatcher()
         stateWatcher.start()
+        appWatcher.start()
+        codexFetcher = CodexFetcher()
 
-        windowManager = NotchWindowManager(stateWatcher: stateWatcher, widgetStore: widgetStore)
+        windowManager = NotchWindowManager(
+            stateWatcher: stateWatcher,
+            widgetStore: widgetStore,
+            appFilterStore: appFilterStore,
+            appWatcher: appWatcher
+        )
         windowManager.setup()
 
         setupStatusBar()
     }
 
+    func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
+        if !hasVisibleWindows { openSettings() }
+        return true
+    }
+
+    func applicationDockMenu(_ sender: NSApplication) -> NSMenu? {
+        buildMenu()
+    }
+
     func applicationWillTerminate(_ notification: Notification) {
         stateWatcher.stop()
+        appWatcher.stop()
         windowManager.teardown()
+        codexFetcher.stop()
     }
 
     // MARK: - Status Bar
@@ -79,9 +102,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             return
         }
 
-        let settingsView = SettingsWindow().environment(widgetStore)
+        let settingsView = SettingsWindow()
+            .environment(widgetStore)
+            .environment(stateWatcher)
+            .environment(appFilterStore)
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 500, height: 420),
+            contentRect: NSRect(x: 0, y: 0, width: 520, height: 480),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
