@@ -48,7 +48,8 @@ final class WidgetStore {
         case .left:
             return [
                 WidgetConfig(service: "claude", metric: .remainingTime, style: .ring),
-                WidgetConfig(service: "openai",  metric: .balance,       style: .bar),
+                WidgetConfig(service: "openai",  metric: .balance,      style: .bar),
+                WidgetConfig(service: "codex",   metric: .balance,      style: .bar),
             ]
         case .right:
             return [
