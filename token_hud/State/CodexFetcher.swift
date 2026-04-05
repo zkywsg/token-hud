@@ -1,13 +1,17 @@
 // token_hud/State/CodexFetcher.swift
 import Foundation
+import Observation
 
 /// Fetches Codex billing/usage data on a configurable timer and writes it
 /// into ~/.token-hud/state.json under the "codex" key.
 ///
 /// Lifecycle: init → starts timer + fires immediately.
 /// Call stop() before the object is discarded.
+@Observable
 @MainActor
 final class CodexFetcher {
+
+    private(set) var isFetching = false
 
     private var timer: Timer?
     private var currentInterval: Int = 0
@@ -66,6 +70,8 @@ final class CodexFetcher {
     // MARK: - Fetch
 
     func fetch() async {
+        isFetching = true
+        defer { isFetching = false }
         let authPath = (NSHomeDirectory() as NSString)
             .appendingPathComponent(".codex/auth.json")
 

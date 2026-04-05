@@ -30,6 +30,7 @@ struct PlatformRowView: View {
     @Binding var isExpanded: Bool
 
     @Environment(StateWatcher.self) private var stateWatcher
+    @Environment(CodexFetcher.self) private var codexFetcher
 
     @State private var storedKey: String? = nil
 
@@ -255,6 +256,25 @@ struct PlatformRowView: View {
                 }
             } else {
                 Text("No data").font(.caption).foregroundColor(.secondary)
+            }
+            if platform.credentialType == .codexLocalAuth {
+                Divider()
+                Button {
+                    Task { await codexFetcher.fetch() }
+                } label: {
+                    if codexFetcher.isFetching {
+                        HStack(spacing: 4) {
+                            ProgressView().controlSize(.mini)
+                            Text("Refreshing…").font(.caption2)
+                        }
+                    } else {
+                        Label("Refresh", systemImage: "arrow.clockwise")
+                            .font(.caption2)
+                    }
+                }
+                .buttonStyle(.plain)
+                .foregroundColor(.secondary)
+                .disabled(codexFetcher.isFetching)
             }
         }
         .padding(8)
