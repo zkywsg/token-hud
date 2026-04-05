@@ -35,12 +35,12 @@ public func buildCodexService(
     costUsd: Double,
     costLimitUsd: Double,
     tokensUsed: Int,
-    plan: String
+    now: Date = Date()
 ) -> Service {
     let calendar    = Calendar.current
     let firstOfMonth = calendar.date(
-        from: calendar.dateComponents([.year, .month], from: Date())
-    ) ?? Date()
+        from: calendar.dateComponents([.year, .month], from: now)
+    ) ?? now
     let startedAt = ISO8601DateFormatter().string(from: firstOfMonth)
 
     return Service(
@@ -66,12 +66,12 @@ public func buildCodexErrorService(error: String) -> Service {
 
 /// Merge a Codex `Service` into an existing `StateFile`, preserving all other services.
 /// If `existing` is nil (file doesn't exist yet), creates a new `StateFile`.
-public func mergeCodexService(_ service: Service, into existing: StateFile?) -> StateFile {
+public func mergeCodexService(_ service: Service, into existing: StateFile?, now: Date = Date()) -> StateFile {
     var services        = existing?.services ?? [:]
     services["codex"]  = service
     return StateFile(
         version:   existing?.version ?? 1,
-        updatedAt: ISO8601DateFormatter().string(from: Date()),
+        updatedAt: ISO8601DateFormatter().string(from: now),
         services:  services
     )
 }

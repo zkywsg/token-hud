@@ -62,7 +62,7 @@ struct CodexJWTTests {
     // MARK: buildCodexService
 
     @Test func buildServiceHasMoneyQuota() {
-        let s = buildCodexService(costUsd: 5.0, costLimitUsd: 100.0, tokensUsed: 50_000, plan: "Pay-as-you-go")
+        let s = buildCodexService(costUsd: 5.0, costLimitUsd: 100.0, tokensUsed: 50_000)
         #expect(s.label == "Codex")
         #expect(s.error == nil)
         let money = s.quotas.first { $0.type == .money }
@@ -72,8 +72,17 @@ struct CodexJWTTests {
     }
 
     @Test func buildServiceStoresTokensInSession() {
-        let s = buildCodexService(costUsd: 1.0, costLimitUsd: 50.0, tokensUsed: 12_345, plan: "Plus")
+        // Use a known date: April 5, 2026 → first of month = April 1, 2026
+        var comps = DateComponents()
+        comps.year = 2026; comps.month = 4; comps.day = 5
+        let knownDate = Calendar.current.date(from: comps)!
+        let s = buildCodexService(costUsd: 1.0, costLimitUsd: 50.0, tokensUsed: 12_345, now: knownDate)
         #expect(s.currentSession?.tokens == 12_345.0)
+        // startedAt should be first of the month
+        var firstComps = DateComponents()
+        firstComps.year = 2026; firstComps.month = 4; firstComps.day = 1
+        let firstOfMonth = Calendar.current.date(from: firstComps)!
+        #expect(s.currentSession?.startedAt == ISO8601DateFormatter().string(from: firstOfMonth))
     }
 
     // MARK: buildCodexErrorService
@@ -93,14 +102,14 @@ struct CodexJWTTests {
             updatedAt: "2026-04-01T00:00:00Z",
             services: ["claude": Service(label: "Claude", quotas: [], currentSession: nil)]
         )
-        let merged = mergeCodexService(buildCodexErrorService(error: "notConfigured"), into: existing)
+        let merged = mergeCodexService(buildCodexErrorService(error: "notConfigured"), into: existing, now: Date())
         #expect(merged.services["claude"] != nil)
         #expect(merged.services["codex"] != nil)
         #expect(merged.version == 1)
     }
 
     @Test func mergeIntoNilCreatesNewFile() {
-        let merged = mergeCodexService(buildCodexErrorService(error: "notConfigured"), into: nil)
+        let merged = mergeCodexService(buildCodexErrorService(error: "notConfigured"), into: nil, now: Date())
         #expect(merged.services.count == 1)
         #expect(merged.services["codex"] != nil)
         #expect(merged.version == 1)
