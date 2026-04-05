@@ -25,7 +25,6 @@ final class StateWatcher {
 
     private var dispatchSource: DispatchSourceFileSystemObject?
     private var fileDescriptor: Int32 = -1
-    private let queue = DispatchQueue(label: "com.tokenHud.stateWatcher", qos: .utility)
     private var isRunning = false
 
     // MARK: - Init
@@ -59,30 +58,29 @@ final class StateWatcher {
         let path = stateFilePath
         let fd = open(path, O_EVTONLY)
         guard fd >= 0 else {
-            // File doesn't exist yet — retry after 2s
-            queue.asyncAfter(deadline: .now() + 2) { [weak self] in
-                guard let self else { return }
-                Task { @MainActor in
-                    guard self.isRunning else { return }
-                    self.startWatching()
-                }
+            // File doesn't exist yet — retry after 2s on main queue
+            DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
+                guard let self, self.isRunning else { return }
+                self.startWatching()
             }
             return
         }
         fileDescriptor = fd
 
+        // Use .main so the handler runs on the main actor — no cross-queue Task hops needed.
         let source = DispatchSource.makeFileSystemObjectSource(
             fileDescriptor: fd,
             eventMask: [.write, .rename, .delete],
-            queue: queue
+            queue: .main
         )
         source.setEventHandler { [weak self] in
             guard let self else { return }
             let flags = source.data
             if flags.contains(.delete) || flags.contains(.rename) {
-                Task { @MainActor in self.stop(); self.start() }
+                self.stop()
+                self.start()
             } else {
-                Task { @MainActor in self.readNow() }
+                self.readNow()
             }
         }
         source.setCancelHandler { close(fd) }
@@ -90,23 +88,17 @@ final class StateWatcher {
         dispatchSource = source
     }
 
+    /// Read state.json synchronously on the main actor.
+    /// The file is small (< 4 KB) so synchronous I/O here is acceptable.
     func readNow() {
-        let path = stateFilePath
-        queue.async { [weak self] in
-            guard let self else { return }
-            do {
-                let data = try Data(contentsOf: URL(fileURLWithPath: path))
-                let decoded = try JSONDecoder().decode(StateFile.self, from: data)
-                Task { @MainActor in
-                    self.currentState = decoded
-                    self.lastUpdated = Date()
-                    self.lastError = nil
-                }
-            } catch {
-                Task { @MainActor in
-                    self.lastError = error.localizedDescription
-                }
-            }
+        do {
+            let data = try Data(contentsOf: URL(fileURLWithPath: stateFilePath))
+            let decoded = try JSONDecoder().decode(StateFile.self, from: data)
+            currentState = decoded
+            lastUpdated = Date()
+            lastError = nil
+        } catch {
+            lastError = error.localizedDescription
         }
     }
 
