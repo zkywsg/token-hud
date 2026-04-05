@@ -27,6 +27,13 @@
 		CC1E55CA118A407A193EE65A /* BarWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66EE1EED049C463DEC42FEF8 /* BarWidget.swift */; };
 		F50A4E58A9068B53EF6F19C3 /* RightSideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8373E4390D298807A0BBF1D /* RightSideView.swift */; };
 		F6839D66065414BB4F75A4DB /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */; };
+		AA0001000000000000000001 /* AppFilterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001000000000000000001F /* AppFilterStore.swift */; };
+		AA0002000000000000000002 /* AppWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0002000000000000000002F /* AppWatcher.swift */; };
+		AA0003000000000000000003 /* AppFilterSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0003000000000000000003F /* AppFilterSettingsView.swift */; };
+		AA0004000000000000000004 /* PlatformListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0004000000000000000004F /* PlatformListView.swift */; };
+		AA0005000000000000000005 /* PlatformRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0005000000000000000005F /* PlatformRowView.swift */; };
+		AA0006000000000000000006 /* CodexFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0006000000000000000006F /* CodexFetcher.swift */; };
+		AA0007000000000000000007 /* CodexJWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0007000000000000000007F /* CodexJWT.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -54,6 +61,13 @@
 		ECD0698516FDF9871FFF5C6F /* WidgetConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetConfig.swift; sourceTree = "<group>"; };
 		EFE72328706E7A623FF4E81E /* LeftSideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftSideView.swift; sourceTree = "<group>"; };
 		FEF8CB8AF9790BE508616B5B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
+		AA0001000000000000000001F /* AppFilterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFilterStore.swift; sourceTree = "<group>"; };
+		AA0002000000000000000002F /* AppWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppWatcher.swift; sourceTree = "<group>"; };
+		AA0003000000000000000003F /* AppFilterSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFilterSettingsView.swift; sourceTree = "<group>"; };
+		AA0004000000000000000004F /* PlatformListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformListView.swift; sourceTree = "<group>"; };
+		AA0005000000000000000005F /* PlatformRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformRowView.swift; sourceTree = "<group>"; };
+		AA0006000000000000000006F /* CodexFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexFetcher.swift; sourceTree = "<group>"; };
+		AA0007000000000000000007F /* CodexJWT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexJWT.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -85,6 +99,9 @@
 		2E0E42AD3EAC848DF7B3E9BE /* State */ = {
 			isa = PBXGroup;
 			children = (
+				AA0001000000000000000001F /* AppFilterStore.swift */,
+				AA0002000000000000000002F /* AppWatcher.swift */,
+				AA0006000000000000000006F /* CodexFetcher.swift */,
 				A9FF1CC4D818E916F535E406 /* StateWatcher.swift */,
 				5D0791EBB1B5070024A40B1A /* WidgetStore.swift */,
 			);
@@ -104,6 +121,9 @@
 		4065EB9361852627F9596356 /* Settings */ = {
 			isa = PBXGroup;
 			children = (
+				AA0003000000000000000003F /* AppFilterSettingsView.swift */,
+				AA0004000000000000000004F /* PlatformListView.swift */,
+				AA0005000000000000000005F /* PlatformRowView.swift */,
 				8E74DD2F7701BA7EF38E4535 /* ServiceConfig.swift */,
 				7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */,
 				66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */,
@@ -155,6 +175,7 @@
 			children = (
 				9A9DADE13CB5357B82D092F1 /* StateModel.swift */,
 				984F43F8D4E91F9EBD3E415A /* WidgetValueComputer.swift */,
+				AA0007000000000000000007F /* CodexJWT.swift */,
 			);
 			name = token_hudCore;
 			path = Sources/token_hudCore;
@@ -247,6 +268,13 @@
 				00FB77F857B34F21612C0819 /* WidgetStore.swift in Sources */,
 				2A9E20D63E0CC0F34118AF32 /* WidgetValueComputer.swift in Sources */,
 				94DD2048172D83044FB1C880 /* token_hudApp.swift in Sources */,
+				AA0001000000000000000001 /* AppFilterStore.swift in Sources */,
+				AA0002000000000000000002 /* AppWatcher.swift in Sources */,
+				AA0003000000000000000003 /* AppFilterSettingsView.swift in Sources */,
+				AA0004000000000000000004 /* PlatformListView.swift in Sources */,
+				AA0005000000000000000005 /* PlatformRowView.swift in Sources */,
+				AA0006000000000000000006 /* CodexFetcher.swift in Sources */,
+				AA0007000000000000000007 /* CodexJWT.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
