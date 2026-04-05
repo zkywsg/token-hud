@@ -246,8 +246,12 @@ struct PlatformRowView: View {
     @ViewBuilder private var metricsSection: some View {
         VStack(alignment: .leading, spacing: 6) {
             if let service = stateWatcher.currentState?.services[platform.id] {
-                ForEach(service.quotas, id: \.type.rawValue) { quota in
-                    quotaRow(quota)
+                if let errorMsg = service.error {
+                    codexErrorLabel(errorMsg)
+                } else {
+                    ForEach(service.quotas, id: \.type.rawValue) { quota in
+                        quotaRow(quota)
+                    }
                 }
             } else {
                 Text("No data").font(.caption).foregroundColor(.secondary)
@@ -257,6 +261,29 @@ struct PlatformRowView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background(Color(NSColor.windowBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder private func codexErrorLabel(_ error: String) -> some View {
+        let (icon, color, message): (String, Color, String) = {
+            switch error {
+            case "notConfigured":
+                return ("info.circle", .secondary, "Not configured")
+            case "tokenExpired":
+                return ("exclamationmark.triangle", .orange, "Token expired — run `codex login`")
+            case "apiForbidden":
+                return ("lock", .yellow, "API access denied (403)")
+            case "networkError":
+                return ("wifi.slash", .gray, "Network unavailable")
+            default:
+                if error.hasPrefix("apiError(") {
+                    return ("xmark.circle", .yellow, error)
+                }
+                return ("xmark.circle", .secondary, error)
+            }
+        }()
+        Label(message, systemImage: icon)
+            .font(.caption)
+            .foregroundColor(color)
     }
 
     @ViewBuilder private func quotaRow(_ quota: Quota) -> some View {
