@@ -98,6 +98,7 @@ final class CodexFetcher {
 
         let costUsd    = (try? usage.get()) ?? 0
         let limitUsd   = (try? sub.get())?.0 ?? 0
+        // fetchTokenUsage is optional — if it fails, token count defaults to 0 (quota/cost data still shows)
         let tokensUsed = (try? toks.get()) ?? 0
 
         await write(buildCodexService(
