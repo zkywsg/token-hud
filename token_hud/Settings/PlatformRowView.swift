@@ -328,7 +328,7 @@ struct PlatformRowView: View {
         }
     }
 
-    private func loadCodexStatus() {
+    @MainActor private func loadCodexStatus() {
         let authPath = (NSHomeDirectory() as NSString).appendingPathComponent(".codex/auth.json")
         guard
             let data = FileManager.default.contents(atPath: authPath),
@@ -342,10 +342,13 @@ struct PlatformRowView: View {
             return
         }
 
-        // Check expiry using access_token (60s buffer)
-        if let accessPayload = decodeCodexJwtPayload(accessToken),
-           let exp = accessPayload["exp"] as? TimeInterval,
-           Date().timeIntervalSince1970 >= exp - 60 {
+        // Check expiry using access_token (60s buffer).
+        // If we can't decode the token or it has no exp claim, treat as expired.
+        guard
+            let accessPayload = decodeCodexJwtPayload(accessToken),
+            let exp = accessPayload["exp"] as? TimeInterval,
+            Date().timeIntervalSince1970 < exp - 60
+        else {
             codexStatus = .expired
             return
         }
