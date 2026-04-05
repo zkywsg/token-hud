@@ -12,6 +12,13 @@ final class CodexFetcher {
     private var timer: Timer?
     private var currentInterval: Int = 0
     private var defaultsObserver: NSObjectProtocol?
+    private var initialFetchTask: Task<Void, Never>?
+
+    private let monthFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "yyyy-MM-dd"
+        return f
+    }()
 
     init() {
         defaultsObserver = NotificationCenter.default.addObserver(
@@ -22,12 +29,14 @@ final class CodexFetcher {
             Task { @MainActor [weak self] in self?.rescheduleIfNeeded() }
         }
         rescheduleIfNeeded()
-        Task { await fetch() }
+        initialFetchTask = Task { await fetch() }
     }
 
     func stop() {
         timer?.invalidate()
         timer = nil
+        initialFetchTask?.cancel()
+        initialFetchTask = nil
         if let obs = defaultsObserver {
             NotificationCenter.default.removeObserver(obs)
             defaultsObserver = nil
@@ -97,7 +106,7 @@ final class CodexFetcher {
         }
 
         let costUsd    = (try? usage.get()) ?? 0
-        let limitUsd   = (try? sub.get())?.0 ?? 0
+        let limitUsd   = (try? sub.get()) ?? 0
         // fetchTokenUsage is optional — if it fails, token count defaults to 0 (quota/cost data still shows)
         let tokensUsed = (try? toks.get()) ?? 0
 
@@ -126,9 +135,8 @@ final class CodexFetcher {
         let calendar = Calendar.current
         let now = Date()
         let comps = calendar.dateComponents([.year, .month], from: now)
-        let startDate = String(format: "%04d-%02d-01", comps.year!, comps.month!)
-        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
-        let endDate = df.string(from: now)
+        let startDate = String(format: "%04d-%02d-01", comps.year ?? 2000, comps.month ?? 1)
+        let endDate = monthFormatter.string(from: now)
 
         var urlComps = URLComponents(string: "https://api.openai.com/dashboard/billing/usage")!
         urlComps.queryItems = [
@@ -151,7 +159,7 @@ final class CodexFetcher {
         } catch { return .failure(.networkError) }
     }
 
-    private func fetchSubscription(token: String) async -> Result<(Double, String), FetchError> {
+    private func fetchSubscription(token: String) async -> Result<Double, FetchError> {
         var req = URLRequest(url: URL(string: "https://api.openai.com/dashboard/billing/subscription")!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
@@ -162,19 +170,16 @@ final class CodexFetcher {
             guard http.statusCode == 200 else { return .failure(.httpError(http.statusCode)) }
             struct R: Decodable {
                 let hardLimitUsd: Double
-                let plan: Plan
-                enum CodingKeys: String, CodingKey { case hardLimitUsd = "hard_limit_usd"; case plan }
-                struct Plan: Decodable { let title: String }
+                enum CodingKeys: String, CodingKey { case hardLimitUsd = "hard_limit_usd" }
             }
             let decoded = try JSONDecoder().decode(R.self, from: data)
-            return .success((decoded.hardLimitUsd, decoded.plan.title))
+            return .success(decoded.hardLimitUsd)
         } catch { return .failure(.networkError) }
     }
 
     private func fetchTokenUsage(token: String) async -> Result<Int, FetchError> {
-        let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd"
         var comps = URLComponents(string: "https://api.openai.com/v1/usage")!
-        comps.queryItems = [URLQueryItem(name: "date", value: df.string(from: Date()))]
+        comps.queryItems = [URLQueryItem(name: "date", value: monthFormatter.string(from: Date()))]
         var req = URLRequest(url: comps.url!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
