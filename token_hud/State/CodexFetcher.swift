@@ -18,11 +18,11 @@ final class CodexFetcher {
     private var defaultsObserver: NSObjectProtocol?
     private var initialFetchTask: Task<Void, Never>?
 
-    private let monthFormatter: DateFormatter = {
-        let f = DateFormatter()
-        f.dateFormat = "yyyy-MM-dd"
-        return f
-    }()
+    /// Returns today as "YYYY-MM-DD". Safe to call from any isolation context.
+    nonisolated private static func todayString() -> String {
+        let comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
+        return String(format: "%04d-%02d-%02d", comps.year ?? 2000, comps.month ?? 1, comps.day ?? 1)
+    }
 
     init() {
         defaultsObserver = NotificationCenter.default.addObserver(
@@ -81,12 +81,12 @@ final class CodexFetcher {
             let tokens = json["tokens"] as? [String: Any],
             let access = tokens["access_token"] as? String
         else {
-            await write(buildCodexErrorService(error: "notConfigured"))
+            write(buildCodexErrorService(error: "notConfigured"))
             return
         }
 
         guard !isCodexTokenExpired(token: access) else {
-            await write(buildCodexErrorService(error: "tokenExpired"))
+            write(buildCodexErrorService(error: "tokenExpired"))
             return
         }
 
@@ -98,17 +98,17 @@ final class CodexFetcher {
 
         // Network errors preserve existing quota data (stale data > no data)
         if case .failure(.networkError) = usage {
-            await writeError("networkError", preserveExisting: true); return
+            writeError("networkError", preserveExisting: true); return
         }
         if case .failure(.networkError) = sub {
-            await writeError("networkError", preserveExisting: true); return
+            writeError("networkError", preserveExisting: true); return
         }
         // Auth/HTTP errors clear quota data (something is wrong that needs fixing)
         if case .failure(let e) = usage {
-            await writeError(e.label, preserveExisting: false); return
+            writeError(e.label, preserveExisting: false); return
         }
         if case .failure(let e) = sub {
-            await writeError(e.label, preserveExisting: false); return
+            writeError(e.label, preserveExisting: false); return
         }
 
         let costUsd    = (try? usage.get()) ?? 0
@@ -116,7 +116,7 @@ final class CodexFetcher {
         // fetchTokenUsage is optional — if it fails, token count defaults to 0 (quota/cost data still shows)
         let tokensUsed = (try? toks.get()) ?? 0
 
-        await write(buildCodexService(
+        write(buildCodexService(
             costUsd: costUsd,
             costLimitUsd: limitUsd,
             tokensUsed: tokensUsed
@@ -137,12 +137,11 @@ final class CodexFetcher {
         }
     }
 
-    private func fetchBillingUsage(token: String) async -> Result<Double, FetchError> {
-        let calendar = Calendar.current
+    nonisolated private func fetchBillingUsage(token: String) async -> Result<Double, FetchError> {
         let now = Date()
-        let comps = calendar.dateComponents([.year, .month], from: now)
+        let comps = Calendar.current.dateComponents([.year, .month], from: now)
         let startDate = String(format: "%04d-%02d-01", comps.year ?? 2000, comps.month ?? 1)
-        let endDate = monthFormatter.string(from: now)
+        let endDate = CodexFetcher.todayString()
 
         var urlComps = URLComponents(string: "https://api.openai.com/dashboard/billing/usage")!
         urlComps.queryItems = [
@@ -165,7 +164,7 @@ final class CodexFetcher {
         } catch { return .failure(.networkError) }
     }
 
-    private func fetchSubscription(token: String) async -> Result<Double, FetchError> {
+    nonisolated private func fetchSubscription(token: String) async -> Result<Double, FetchError> {
         var req = URLRequest(url: URL(string: "https://api.openai.com/dashboard/billing/subscription")!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
@@ -183,9 +182,9 @@ final class CodexFetcher {
         } catch { return .failure(.networkError) }
     }
 
-    private func fetchTokenUsage(token: String) async -> Result<Int, FetchError> {
+    nonisolated private func fetchTokenUsage(token: String) async -> Result<Int, FetchError> {
         var comps = URLComponents(string: "https://api.openai.com/v1/usage")!
-        comps.queryItems = [URLQueryItem(name: "date", value: monthFormatter.string(from: Date()))]
+        comps.queryItems = [URLQueryItem(name: "date", value: CodexFetcher.todayString())]
         var req = URLRequest(url: comps.url!)
         req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
 
@@ -212,7 +211,7 @@ final class CodexFetcher {
     // MARK: - Write
 
     // Write a fully-built service (success path).
-    private func write(_ service: Service) async {
+    private func write(_ service: Service) {
         let (path, existing) = readStateFile()
         let updated = mergeCodexService(service, into: existing)
         persist(updated, to: path)
@@ -221,7 +220,7 @@ final class CodexFetcher {
     // Write only an error flag.
     // When preserveExisting is true and the current state.json already has
     // Codex quota data, the quotas are kept so the overlay stays populated.
-    private func writeError(_ error: String, preserveExisting: Bool) async {
+    private func writeError(_ error: String, preserveExisting: Bool) {
         let (path, existing) = readStateFile()
         let currentCodex = existing?.services["codex"]
         let service: Service
