@@ -3,24 +3,28 @@ import SwiftUI
 
 struct SettingsWindow: View {
     @Environment(WidgetStore.self) private var widgetStore
+    @Environment(AppFilterStore.self) private var appFilterStore
 
     var body: some View {
         TabView {
             WidgetListEditor()
                 .tabItem { Label("Widgets", systemImage: "rectangle.3.group") }
-            ServiceConfigView()
-                .tabItem { Label("Services", systemImage: "key") }
+            PlatformListView()
+                .tabItem { Label("Platforms", systemImage: "cpu") }
+            AppFilterSettingsView()
+                .environment(appFilterStore)
+                .tabItem { Label("App Filter", systemImage: "app.badge") }
             GeneralSettingsView()
                 .tabItem { Label("General", systemImage: "gear") }
         }
-        .frame(width: 500, height: 420)
+        .frame(width: 520, height: 480)
         .padding()
     }
 }
 
 struct GeneralSettingsView: View {
     @AppStorage("stateFilePath")   private var stateFilePath   = "~/.token-hud/state.json"
-    @AppStorage("refreshInterval") private var refreshInterval = 60
+    @AppStorage("refreshInterval") private var refreshInterval = 300
 
     var body: some View {
         Form {
@@ -30,13 +34,16 @@ struct GeneralSettingsView: View {
                     Button("Browse…") { browseFile() }
                 }
             }
-            Section("Daemon Interval") {
+            Section("Refresh Interval") {
                 Picker("Refresh every", selection: $refreshInterval) {
                     Text("30 seconds").tag(30)
                     Text("60 seconds").tag(60)
                     Text("5 minutes").tag(300)
                 }
                 .pickerStyle(.menu)
+                Text("Controls both UI updates and Codex data fetch frequency.")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
             }
         }
         .formStyle(.grouped)
