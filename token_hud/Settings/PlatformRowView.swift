@@ -309,9 +309,12 @@ struct PlatformRowView: View {
     @ViewBuilder private func quotaRow(_ quota: Quota) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(quotaLabel(quota)).font(.caption2).foregroundColor(.secondary)
-            ProgressView(value: quota.usedFraction)
-                .progressViewStyle(.linear)
-                .tint(quota.usedFraction > 0.8 ? .red : .accentColor)
+            if quota.total != nil {
+                // Has a cap: show progress bar
+                ProgressView(value: quota.usedFraction)
+                    .progressViewStyle(.linear)
+                    .tint(quota.usedFraction > 0.8 ? .red : .accentColor)
+            }
             Text(quotaRemainingString(quota)).font(.caption2).foregroundColor(.secondary)
         }
     }
@@ -326,7 +329,7 @@ struct PlatformRowView: View {
     private func quotaLabel(_ quota: Quota) -> String {
         switch quota.type {
         case .time:
-            let hours = quota.total / 3600
+            let hours = (quota.total ?? 0) / 3600
             return hours >= 24 ? "\(Int(hours / 24))d window" : "\(Int(hours))h window"
         case .money:    return "Balance"
         case .tokens:   return "Tokens"
@@ -335,12 +338,27 @@ struct PlatformRowView: View {
     }
 
     private func quotaRemainingString(_ quota: Quota) -> String {
+        // For no-cap quotas, show usage instead of remaining
+        guard quota.total != nil else {
+            switch quota.type {
+            case .tokens:   return formatTokens(quota.used) + " used"
+            case .money:    return String(format: "$%.2f used", quota.used)
+            case .requests: return "\(Int(quota.used)) used"
+            case .time:     return formatDuration(quota.used) + " used"
+            }
+        }
         switch quota.type {
         case .time:     return formatDuration(quota.remaining) + " left"
         case .money:    return String(format: "$%.2f left", quota.remaining)
-        case .tokens:   return "\(Int(quota.remaining / 1000))k left"
+        case .tokens:   return formatTokens(quota.remaining) + " left"
         case .requests: return "\(Int(quota.remaining)) left"
         }
+    }
+
+    private func formatTokens(_ t: Double) -> String {
+        if t >= 1_000_000 { return String(format: "%.1fM", t / 1_000_000) }
+        if t >= 1_000 { return String(format: "%.0fk", t / 1_000) }
+        return "\(Int(t))"
     }
 
     private func formatDuration(_ seconds: Double) -> String {

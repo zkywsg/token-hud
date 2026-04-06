@@ -41,9 +41,9 @@ struct WidgetRenderer: View {
             guard let session = svc.currentSession,
                   let tokens  = session.tokens,
                   let quota   = svc.quotas.first(where: { $0.type == .tokens }),
-                  quota.total > 0
+                  let qTotal  = quota.total, qTotal > 0
             else { return 0 }
-            return tokens / quota.total
+            return tokens / qTotal
         case .resetCountdown:
             guard let q = quotaFor(type: .time),
                   let resetsAt = q.resetsAt
@@ -51,7 +51,7 @@ struct WidgetRenderer: View {
             let fmt = ISO8601DateFormatter()
             guard let date = fmt.date(from: resetsAt) else { return 0 }
             let remaining = date.timeIntervalSinceNow
-            let total = q.total
+            let total = q.total ?? 0
             return max(0, min(1, remaining / max(total, 1)))
         }
     }

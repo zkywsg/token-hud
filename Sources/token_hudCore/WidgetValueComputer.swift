@@ -4,15 +4,19 @@ import Foundation
 public enum WidgetValueComputer {
 
     public static func remainingValue(for quota: Quota) -> Double {
-        quota.total - quota.used
+        (quota.total ?? 0) - quota.used
     }
 
     public static func usageFraction(for quota: Quota) -> Double {
-        guard quota.total > 0 else { return 0 }
-        return quota.used / quota.total
+        guard let total = quota.total, total > 0 else { return 0 }
+        return quota.used / total
     }
 
     public static func formattedRemaining(quota: Quota) -> String {
+        // For quotas with no cap, show the used amount instead of remaining
+        guard quota.total != nil else {
+            return formattedUsed(quota: quota)
+        }
         let remaining = remainingValue(for: quota)
         switch quota.type {
         case .time:
@@ -23,6 +27,16 @@ public enum WidgetValueComputer {
             return formatTokens(remaining)
         case .requests:
             return String(Int(remaining))
+        }
+    }
+
+    /// Format the used amount (for quotas with no hard cap).
+    public static func formattedUsed(quota: Quota) -> String {
+        switch quota.type {
+        case .time:     return formatSeconds(quota.used)
+        case .money:    return String(format: "$%.2f", quota.used)
+        case .tokens:   return formatTokens(quota.used)
+        case .requests: return String(Int(quota.used))
         }
     }
 

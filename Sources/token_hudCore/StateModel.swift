@@ -7,13 +7,16 @@ public enum QuotaType: String, Codable, Sendable {
 
 public struct Quota: Codable, Sendable {
     public let type: QuotaType
-    public let total: Double
+    public let total: Double?        // nil = no hard cap (e.g. Codex subscription)
     public let used: Double
     public let unit: String
     public let resetsAt: String?   // ISO 8601
 
-    public var remaining: Double { total - used }
-    public var usedFraction: Double { total > 0 ? (used / total) : 0 }
+    public var remaining: Double { (total ?? 0) - used }
+    public var usedFraction: Double {
+        guard let t = total, t > 0 else { return 0 }
+        return used / t
+    }
 }
 
 public struct SessionSnapshot: Codable, Sendable {
@@ -71,12 +74,12 @@ public struct StateFile: Codable, Sendable {
             "codex": Service(
                 label: "Codex",
                 quotas: [
-                    Quota(type: .money, total: 120.0, used: 4.20, unit: "USD", resetsAt: nil)
+                    Quota(type: .tokens, total: nil, used: 31_592_669, unit: "tokens", resetsAt: nil)
                 ],
                 currentSession: SessionSnapshot(
                     id: "codex-preview",
                     startedAt: ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: -86400)),
-                    tokens: 42_000, time: nil, money: 4.20, requests: nil
+                    tokens: 31_592_669, time: nil, money: nil, requests: nil
                 )
             )
         ]

@@ -1,12 +1,13 @@
 // token_hud/State/CodexFetcher.swift
 import Foundation
 import Observation
+import SQLite3
 
-/// Fetches Codex billing/usage data on a configurable timer and writes it
-/// into ~/.token-hud/state.json under the "codex" key.
+/// Reads Codex usage data from the local ~/.codex/state_5.sqlite database
+/// and writes it into ~/.token-hud/state.json under the "codex" key.
 ///
-/// Lifecycle: init → starts timer + fires immediately.
-/// Call stop() before the object is discarded.
+/// No network requests are made — all data comes from Codex's own SQLite store.
+/// Lifecycle: init → starts timer + fires immediately. Call stop() before discarding.
 @Observable
 @MainActor
 final class CodexFetcher {
@@ -17,12 +18,6 @@ final class CodexFetcher {
     private var currentInterval: Int = 0
     private var defaultsObserver: NSObjectProtocol?
     private var initialFetchTask: Task<Void, Never>?
-
-    /// Returns today as "YYYY-MM-DD". Safe to call from any isolation context.
-    nonisolated private static func todayString() -> String {
-        let comps = Calendar.current.dateComponents([.year, .month, .day], from: Date())
-        return String(format: "%04d-%02d-%02d", comps.year ?? 2000, comps.month ?? 1, comps.day ?? 1)
-    }
 
     init() {
         defaultsObserver = NotificationCenter.default.addObserver(
@@ -72,168 +67,127 @@ final class CodexFetcher {
     func fetch() async {
         isFetching = true
         defer { isFetching = false }
-        let authPath = (NSHomeDirectory() as NSString)
-            .appendingPathComponent(".codex/auth.json")
 
+        // Read email from auth.json (best-effort, non-blocking)
+        let email = readCodexEmail()
+
+        // Query local SQLite for this month's token usage
+        let result = await Task.detached(priority: .utility) {
+            CodexFetcher.queryMonthlyTokens()
+        }.value
+
+        switch result {
+        case .failure(let error):
+            write(buildCodexErrorService(error: "\(error)"))
+        case .success(let tokens):
+            write(buildCodexLocalService(tokensUsed: tokens, email: email))
+        }
+    }
+
+    // MARK: - Local data sources
+
+    /// Read the authenticated user's email from ~/.codex/auth.json (synchronous, tiny file).
+    private func readCodexEmail() -> String? {
+        let path = (NSHomeDirectory() as NSString).appendingPathComponent(".codex/auth.json")
         guard
-            let data   = FileManager.default.contents(atPath: authPath),
-            let json   = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let tokens = json["tokens"] as? [String: Any],
-            let access = tokens["access_token"] as? String
-        else {
-            write(buildCodexErrorService(error: "notConfigured"))
-            return
-        }
-
-        guard !isCodexTokenExpired(token: access) else {
-            write(buildCodexErrorService(error: "tokenExpired"))
-            return
-        }
-
-        async let usageResult  = fetchBillingUsage(token: access)
-        async let subResult    = fetchSubscription(token: access)
-        async let tokResult    = fetchTokenUsage(token: access)
-
-        let (usage, sub, toks) = await (usageResult, subResult, tokResult)
-
-        // Network errors preserve existing quota data (stale data > no data)
-        if case .failure(.networkError) = usage {
-            writeError("networkError", preserveExisting: true); return
-        }
-        if case .failure(.networkError) = sub {
-            writeError("networkError", preserveExisting: true); return
-        }
-        // Auth/HTTP errors clear quota data (something is wrong that needs fixing)
-        if case .failure(let e) = usage {
-            writeError(e.label, preserveExisting: false); return
-        }
-        if case .failure(let e) = sub {
-            writeError(e.label, preserveExisting: false); return
-        }
-
-        let costUsd    = (try? usage.get()) ?? 0
-        let limitUsd   = (try? sub.get()) ?? 0
-        // fetchTokenUsage is optional — if it fails, token count defaults to 0 (quota/cost data still shows)
-        let tokensUsed = (try? toks.get()) ?? 0
-
-        write(buildCodexService(
-            costUsd: costUsd,
-            costLimitUsd: limitUsd,
-            tokensUsed: tokensUsed
-        ))
+            let data  = FileManager.default.contents(atPath: path),
+            let json  = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let email = json["email"] as? String
+        else { return nil }
+        return email
     }
 
-    // MARK: - API calls
+    enum SQLiteError: Error { case dbNotFound, dbOpenFailed, dateError, queryFailed }
 
-    private enum FetchError: Error {
-        case networkError, forbidden, httpError(Int)
+    /// Query ~/.codex/state_5.sqlite for this month's total tokens_used.
+    /// Runs off the main actor (called via Task.detached).
+    nonisolated private static func queryMonthlyTokens() -> Result<Int, SQLiteError> {
+        let dbPath = (NSHomeDirectory() as NSString)
+            .appendingPathComponent(".codex/state_5.sqlite")
 
-        var label: String {
-            switch self {
-            case .networkError:      return "networkError"
-            case .forbidden:         return "apiForbidden"
-            case .httpError(let c):  return "apiError(\(c))"
-            }
+        guard FileManager.default.fileExists(atPath: dbPath) else {
+            return .failure(.dbNotFound)
         }
-    }
 
-    nonisolated private func fetchBillingUsage(token: String) async -> Result<Double, FetchError> {
+        var db: OpaquePointer?
+        // Open read-only so we don't interfere with Codex's write-ahead log
+        guard sqlite3_open_v2(dbPath, &db, SQLITE_OPEN_READONLY | SQLITE_OPEN_NOMUTEX, nil) == SQLITE_OK else {
+            return .failure(.dbOpenFailed)
+        }
+        defer { sqlite3_close(db) }
+
+        // Current month boundary in Unix seconds
+        let calendar = Calendar.current
         let now = Date()
-        let comps = Calendar.current.dateComponents([.year, .month], from: now)
-        let startDate = String(format: "%04d-%02d-01", comps.year ?? 2000, comps.month ?? 1)
-        let endDate = CodexFetcher.todayString()
+        let comps = calendar.dateComponents([.year, .month], from: now)
+        guard let monthStart = calendar.date(from: comps) else {
+            return .failure(.dateError)
+        }
 
-        var urlComps = URLComponents(string: "https://api.openai.com/dashboard/billing/usage")!
-        urlComps.queryItems = [
-            URLQueryItem(name: "start_date", value: startDate),
-            URLQueryItem(name: "end_date",   value: endDate),
-        ]
-        var req = URLRequest(url: urlComps.url!)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        let startTs = Int64(monthStart.timeIntervalSince1970)
 
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse else { return .failure(.httpError(0)) }
-            if http.statusCode == 403 { return .failure(.forbidden) }
-            guard http.statusCode == 200 else { return .failure(.httpError(http.statusCode)) }
-            struct R: Decodable {
-                let totalUsage: Double
-                enum CodingKeys: String, CodingKey { case totalUsage = "total_usage" }
-            }
-            return .success((try JSONDecoder().decode(R.self, from: data)).totalUsage / 100.0)
-        } catch { return .failure(.networkError) }
+        let sql = """
+            SELECT COALESCE(SUM(tokens_used), 0)
+            FROM threads
+            WHERE tokens_used IS NOT NULL
+              AND tokens_used > 0
+              AND created_at >= ?
+            """
+
+        var stmt: OpaquePointer?
+        guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK else {
+            return .failure(.queryFailed)
+        }
+        defer { sqlite3_finalize(stmt) }
+
+        sqlite3_bind_int64(stmt, 1, startTs)
+
+        guard sqlite3_step(stmt) == SQLITE_ROW else {
+            return .failure(.queryFailed)
+        }
+
+        let total = Int(sqlite3_column_int64(stmt, 0))
+        return .success(total)
     }
 
-    nonisolated private func fetchSubscription(token: String) async -> Result<Double, FetchError> {
-        var req = URLRequest(url: URL(string: "https://api.openai.com/dashboard/billing/subscription")!)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    // MARK: - Service builders
 
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse else { return .failure(.httpError(0)) }
-            if http.statusCode == 403 { return .failure(.forbidden) }
-            guard http.statusCode == 200 else { return .failure(.httpError(http.statusCode)) }
-            struct R: Decodable {
-                let hardLimitUsd: Double
-                enum CodingKeys: String, CodingKey { case hardLimitUsd = "hard_limit_usd" }
-            }
-            let decoded = try JSONDecoder().decode(R.self, from: data)
-            return .success(decoded.hardLimitUsd)
-        } catch { return .failure(.networkError) }
+    /// Build a Service from local SQLite data (token count only, no billing data).
+    private func buildCodexLocalService(tokensUsed: Int, email: String?) -> Service {
+        let calendar = Calendar.current
+        let now = Date()
+        let firstOfMonth = calendar.date(
+            from: calendar.dateComponents([.year, .month], from: now)
+        ) ?? now
+        let startedAt = ISO8601DateFormatter().string(from: firstOfMonth)
+
+        return Service(
+            label: "Codex",
+            quotas: [
+                Quota(
+                    type: .tokens,
+                    total: nil,          // Codex subscription has no hard token cap
+                    used: Double(tokensUsed),
+                    unit: "tokens",
+                    resetsAt: nil
+                )
+            ],
+            currentSession: SessionSnapshot(
+                id: "codex-monthly",
+                startedAt: startedAt,
+                tokens: Double(tokensUsed),
+                time: nil,
+                money: nil,
+                requests: nil
+            ),
+            error: nil
+        )
     }
 
-    nonisolated private func fetchTokenUsage(token: String) async -> Result<Int, FetchError> {
-        var comps = URLComponents(string: "https://api.openai.com/v1/usage")!
-        comps.queryItems = [URLQueryItem(name: "date", value: CodexFetcher.todayString())]
-        var req = URLRequest(url: comps.url!)
-        req.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+    // MARK: - Write helpers
 
-        do {
-            let (data, resp) = try await URLSession.shared.data(for: req)
-            guard let http = resp as? HTTPURLResponse else { return .failure(.httpError(0)) }
-            if http.statusCode == 403 { return .failure(.forbidden) }
-            guard http.statusCode == 200 else { return .failure(.httpError(http.statusCode)) }
-            struct Entry: Decodable {
-                let nContextTokensTotal: Int
-                let nGeneratedTokensTotal: Int
-                enum CodingKeys: String, CodingKey {
-                    case nContextTokensTotal   = "n_context_tokens_total"
-                    case nGeneratedTokensTotal = "n_generated_tokens_total"
-                }
-            }
-            struct R: Decodable { let data: [Entry] }
-            let decoded = try JSONDecoder().decode(R.self, from: data)
-            let total = decoded.data.reduce(0) { $0 + $1.nContextTokensTotal + $1.nGeneratedTokensTotal }
-            return .success(total)
-        } catch { return .failure(.networkError) }
-    }
-
-    // MARK: - Write
-
-    // Write a fully-built service (success path).
     private func write(_ service: Service) {
         let (path, existing) = readStateFile()
-        let updated = mergeCodexService(service, into: existing)
-        persist(updated, to: path)
-    }
-
-    // Write only an error flag.
-    // When preserveExisting is true and the current state.json already has
-    // Codex quota data, the quotas are kept so the overlay stays populated.
-    private func writeError(_ error: String, preserveExisting: Bool) {
-        let (path, existing) = readStateFile()
-        let currentCodex = existing?.services["codex"]
-        let service: Service
-        if preserveExisting, let prev = currentCodex, !prev.quotas.isEmpty {
-            service = Service(
-                label: prev.label,
-                quotas: prev.quotas,
-                currentSession: prev.currentSession,
-                error: error
-            )
-        } else {
-            service = buildCodexErrorService(error: error)
-        }
         let updated = mergeCodexService(service, into: existing)
         persist(updated, to: path)
     }

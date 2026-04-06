@@ -11,11 +11,16 @@ final class NotchWindowManager {
     private var rightHostingView: NSHostingView<AnyView>?
     private let stateWatcher: StateWatcher
     private let widgetStore: WidgetStore
+    private let appFilterStore: AppFilterStore
+    private let appWatcher: AppWatcher
     private var screenObserver: NSObjectProtocol?
 
-    init(stateWatcher: StateWatcher, widgetStore: WidgetStore) {
-        self.stateWatcher = stateWatcher
-        self.widgetStore  = widgetStore
+    init(stateWatcher: StateWatcher, widgetStore: WidgetStore,
+         appFilterStore: AppFilterStore, appWatcher: AppWatcher) {
+        self.stateWatcher    = stateWatcher
+        self.widgetStore     = widgetStore
+        self.appFilterStore  = appFilterStore
+        self.appWatcher      = appWatcher
     }
 
     func setup() {
@@ -26,12 +31,18 @@ final class NotchWindowManager {
         }
         // Non-notch: no overlay windows; AppDelegate creates a status item.
 
+        // Wire up app-filter visibility
+        appWatcher.onChange = { [weak self] bundleID in
+            self?.updateVisibility(for: bundleID)
+        }
+        updateVisibility(for: appWatcher.frontmostBundleID)
+
         screenObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didChangeScreenParametersNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.handleScreenChange()
+            Task { @MainActor [weak self] in self?.handleScreenChange() }
         }
     }
 
@@ -155,5 +166,36 @@ final class NotchWindowManager {
             (rightWindow, rightHostingView) = makeOverlayWindow(side: .right, screen: screen)
         }
         positionWindows(screen: screen)
+        updateVisibility(for: appWatcher.frontmostBundleID)
+    }
+
+    // MARK: - App Filter Visibility
+
+    private func updateVisibility(for bundleID: String?) {
+        if appFilterStore.isAllowed(bundleID) {
+            showWindows()
+        } else {
+            hideWindowsWithFade()
+        }
+    }
+
+    private func showWindows() {
+        leftWindow?.alphaValue = 1.0
+        rightWindow?.alphaValue = 1.0
+        leftWindow?.orderFrontRegardless()
+        rightWindow?.orderFrontRegardless()
+    }
+
+    private func hideWindowsWithFade() {
+        NSAnimationContext.runAnimationGroup({ ctx in
+            ctx.duration = 0.3
+            leftWindow?.animator().alphaValue = 0.0
+            rightWindow?.animator().alphaValue = 0.0
+        }, completionHandler: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.leftWindow?.orderOut(nil)
+                self?.rightWindow?.orderOut(nil)
+            }
+        })
     }
 }
