@@ -9,7 +9,6 @@
 /* Begin PBXBuildFile section */
 		00FB77F857B34F21612C0819 /* WidgetStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5D0791EBB1B5070024A40B1A /* WidgetStore.swift */; };
 		083A42F6672126C58765CA1C /* StateModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A9DADE13CB5357B82D092F1 /* StateModel.swift */; };
-		0FD327A9B929ECF82F7E5026 /* LeftSideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = EFE72328706E7A623FF4E81E /* LeftSideView.swift */; };
 		1A4DF4EA8A197C0122B6CD88 /* WidgetRenderer.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8A4772EC1DF06224545FA80 /* WidgetRenderer.swift */; };
 		1E77F3C6F81AD0564F14824C /* WidgetConfig.swift in Sources */ = {isa = PBXBuildFile; fileRef = ECD0698516FDF9871FFF5C6F /* WidgetConfig.swift */; };
 		2A9E20D63E0CC0F34118AF32 /* WidgetValueComputer.swift in Sources */ = {isa = PBXBuildFile; fileRef = 984F43F8D4E91F9EBD3E415A /* WidgetValueComputer.swift */; };
@@ -23,9 +22,7 @@
 		81ED33E7C8C83E4E7B86F2C3 /* WidgetListEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 15FA515D5AD06D073A0B6352 /* WidgetListEditor.swift */; };
 		94DD2048172D83044FB1C880 /* token_hudApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B354BB4B28539F177EE68A /* token_hudApp.swift */; };
 		A97C40BDDCBA9F970EC4DD4E /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFB3E874F27CEB54B2DF5487 /* AppDelegate.swift */; };
-		C04189CC4BA2C75DAF9B2A15 /* NotchWindowManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 38C4EE03DEB973E73B766DE2 /* NotchWindowManager.swift */; };
 		CC1E55CA118A407A193EE65A /* BarWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66EE1EED049C463DEC42FEF8 /* BarWidget.swift */; };
-		F50A4E58A9068B53EF6F19C3 /* RightSideView.swift in Sources */ = {isa = PBXBuildFile; fileRef = C8373E4390D298807A0BBF1D /* RightSideView.swift */; };
 		F6839D66065414BB4F75A4DB /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */; };
 		AA0001000000000000000001 /* AppFilterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0001000000000000000001F /* AppFilterStore.swift */; };
 		AA0002000000000000000002 /* AppWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0002000000000000000002F /* AppWatcher.swift */; };
@@ -34,11 +31,14 @@
 		AA0005000000000000000005 /* PlatformRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0005000000000000000005F /* PlatformRowView.swift */; };
 		AA0006000000000000000006 /* CodexFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0006000000000000000006F /* CodexFetcher.swift */; };
 		AA0007000000000000000007 /* CodexJWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0007000000000000000007F /* CodexJWT.swift */; };
+		B2E72E5AF7679D603F9E8C4C /* FloatingPanelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B413E9CB441FD4841B6D318 /* FloatingPanelManager.swift */; };
+		721774A73B32A46B6F38E8E7 /* FloatingPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6569A286AF3B5F44D42D43 /* FloatingPanelView.swift */; };
+		7569DB94B92AFDE51D96FD87 /* GlobalHotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10FEFB7F97451821F83925F9 /* GlobalHotkeyManager.swift */; };
+		AA0008000000000000000008 /* GroupedOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0008000000000000000008F /* GroupedOverlayView.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
 		15FA515D5AD06D073A0B6352 /* WidgetListEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetListEditor.swift; sourceTree = "<group>"; };
-		38C4EE03DEB973E73B766DE2 /* NotchWindowManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchWindowManager.swift; sourceTree = "<group>"; };
 		5D0791EBB1B5070024A40B1A /* WidgetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetStore.swift; sourceTree = "<group>"; };
 		5FB21BF5542FE6CA4AED10F7 /* RingWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingWidget.swift; sourceTree = "<group>"; };
 		66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
@@ -55,11 +55,9 @@
 		BE6F423D97166F8C00033C38 /* token_hud.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = token_hud.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0B2D7C7E9909F98C9E209AA /* token_hud-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "token_hud-Bridging-Header.h"; sourceTree = "<group>"; };
 		C64092BD47770FC0CCEB8EFB /* TextWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TextWidget.swift; sourceTree = "<group>"; };
-		C8373E4390D298807A0BBF1D /* RightSideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RightSideView.swift; sourceTree = "<group>"; };
 		C8A4772EC1DF06224545FA80 /* WidgetRenderer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetRenderer.swift; sourceTree = "<group>"; };
 		CF286D60C8084A91D44CA0C6 /* token_hud.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = token_hud.entitlements; sourceTree = "<group>"; };
 		ECD0698516FDF9871FFF5C6F /* WidgetConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetConfig.swift; sourceTree = "<group>"; };
-		EFE72328706E7A623FF4E81E /* LeftSideView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LeftSideView.swift; sourceTree = "<group>"; };
 		FEF8CB8AF9790BE508616B5B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		AA0001000000000000000001F /* AppFilterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFilterStore.swift; sourceTree = "<group>"; };
 		AA0002000000000000000002F /* AppWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppWatcher.swift; sourceTree = "<group>"; };
@@ -68,6 +66,10 @@
 		AA0005000000000000000005F /* PlatformRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformRowView.swift; sourceTree = "<group>"; };
 		AA0006000000000000000006F /* CodexFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexFetcher.swift; sourceTree = "<group>"; };
 		AA0007000000000000000007F /* CodexJWT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexJWT.swift; sourceTree = "<group>"; };
+		4B413E9CB441FD4841B6D318 /* FloatingPanelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelManager.swift; sourceTree = "<group>"; };
+		8F6569A286AF3B5F44D42D43 /* FloatingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelView.swift; sourceTree = "<group>"; };
+		10FEFB7F97451821F83925F9 /* GlobalHotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyManager.swift; sourceTree = "<group>"; };
+		AA0008000000000000000008F /* GroupedOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupedOverlayView.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -111,9 +113,10 @@
 		35D2F1286C8D357411BF85B2 /* Overlay */ = {
 			isa = PBXGroup;
 			children = (
-				EFE72328706E7A623FF4E81E /* LeftSideView.swift */,
-				38C4EE03DEB973E73B766DE2 /* NotchWindowManager.swift */,
-				C8373E4390D298807A0BBF1D /* RightSideView.swift */,
+				4B413E9CB441FD4841B6D318 /* FloatingPanelManager.swift */,
+				8F6569A286AF3B5F44D42D43 /* FloatingPanelView.swift */,
+				AA0008000000000000000008F /* GroupedOverlayView.swift */,
+				10FEFB7F97451821F83925F9 /* GlobalHotkeyManager.swift */,
 			);
 			path = Overlay;
 			sourceTree = "<group>";
@@ -252,9 +255,6 @@
 				A97C40BDDCBA9F970EC4DD4E /* AppDelegate.swift in Sources */,
 				CC1E55CA118A407A193EE65A /* BarWidget.swift in Sources */,
 				7FC68D4F2A998421648D471A /* KeychainHelper.swift in Sources */,
-				0FD327A9B929ECF82F7E5026 /* LeftSideView.swift in Sources */,
-				C04189CC4BA2C75DAF9B2A15 /* NotchWindowManager.swift in Sources */,
-				F50A4E58A9068B53EF6F19C3 /* RightSideView.swift in Sources */,
 				2F3FC258A169010C69071DF0 /* RingWidget.swift in Sources */,
 				7CC1B02E7A74E8059111F008 /* ServiceConfig.swift in Sources */,
 				5EC4C18A0B0DBEBDEB8F072A /* SessionKeyExtractor.swift in Sources */,
@@ -275,6 +275,10 @@
 				AA0005000000000000000005 /* PlatformRowView.swift in Sources */,
 				AA0006000000000000000006 /* CodexFetcher.swift in Sources */,
 				AA0007000000000000000007 /* CodexJWT.swift in Sources */,
+				B2E72E5AF7679D603F9E8C4C /* FloatingPanelManager.swift in Sources */,
+				721774A73B32A46B6F38E8E7 /* FloatingPanelView.swift in Sources */,
+				7569DB94B92AFDE51D96FD87 /* GlobalHotkeyManager.swift in Sources */,
+				AA0008000000000000000008 /* GroupedOverlayView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
