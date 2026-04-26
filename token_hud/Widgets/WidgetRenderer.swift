@@ -4,23 +4,35 @@ import SwiftUI
 struct WidgetRenderer: View {
     let config: WidgetConfig
     let state: StateFile?
+    var showServiceLabel: Bool = false
+
+    @AppStorage("widgetSizeScale") private var widgetSizeScale = 1.0
 
     private var service: Service? { state?.services[config.service] }
 
     var body: some View {
-        Group {
-            switch config.style {
-            case .ring:
-                RingWidget(fraction: fraction, label: formattedValue, size: 30)
-            case .bar:
-                BarWidget(fraction: fraction, label: formattedValue, width: 60)
-            case .text:
-                TextWidget(text: formattedValue, subtext: nil)
-            case .aggregate:
-                AggregateWidget(icon: icon, value: formattedValue)
+        VStack(spacing: 1) {
+            Group {
+                switch config.style {
+                case .ring:
+                    RingWidget(fraction: fraction, label: formattedValue, size: 22 * widgetSizeScale)
+                case .bar:
+                    BarWidget(fraction: fraction, label: formattedValue, width: 60 * widgetSizeScale)
+                case .text:
+                    TextWidget(text: formattedValue, subtext: nil)
+                case .aggregate:
+                    AggregateWidget(icon: icon, value: formattedValue)
+                }
+            }
+            .help(tooltipText)
+
+            if showServiceLabel {
+                Text(service?.label ?? config.service)
+                    .font(.system(size: 8, weight: .regular, design: .rounded))
+                    .foregroundColor(.white.opacity(0.5))
+                    .lineLimit(1)
             }
         }
-        .help(tooltipText)
     }
 
     // MARK: - Computed values
@@ -53,6 +65,32 @@ struct WidgetRenderer: View {
             let remaining = date.timeIntervalSinceNow
             let total = q.total ?? 0
             return max(0, min(1, remaining / max(total, 1)))
+        case .inputTokens:
+            guard let val = svc.currentSession?.inputTokens,
+                  let quota = svc.quotas.first(where: { $0.type == .tokens }),
+                  let total = quota.total, total > 0
+            else { return 0 }
+            return val / total
+        case .outputTokens:
+            guard let val = svc.currentSession?.outputTokens,
+                  let quota = svc.quotas.first(where: { $0.type == .tokens }),
+                  let total = quota.total, total > 0
+            else { return 0 }
+            return val / total
+        case .dailyTokens:
+            return quotaFraction(type: .dailyTokens)
+        case .monthlyTokens:
+            return quotaFraction(type: .monthlyTokens)
+        case .costSpent:
+            guard let val = svc.currentSession?.costSpent,
+                  let quota = svc.quotas.first(where: { $0.type == .money }),
+                  let total = quota.total, total > 0
+            else { return 0 }
+            return val / total
+        case .dailyRequests:
+            return quotaFraction(type: .dailyRequests)
+        case .monthlyRequests:
+            return quotaFraction(type: .monthlyRequests)
         }
     }
 
@@ -61,6 +99,12 @@ struct WidgetRenderer: View {
         switch config.metric {
         case .remainingTime:
             guard let q = quotaFor(type: .time) else { return "—" }
+            // Codex time quotas are rate-limit windows expressed as usage percentages.
+            // Show remaining capacity as a percentage; for other services show actual time.
+            if config.service == "codex" {
+                let remaining = 1.0 - WidgetValueComputer.usageFraction(for: q)
+                return String(format: "%.0f%%", remaining * 100)
+            }
             return WidgetValueComputer.formattedRemaining(quota: q)
         case .tokensRemaining:
             guard let q = quotaFor(type: .tokens) else { return "—" }
@@ -79,6 +123,24 @@ struct WidgetRenderer: View {
                   let s = WidgetValueComputer.countdownString(to: r)
             else { return "—" }
             return s
+        case .inputTokens:
+            return WidgetValueComputer.formattedInputTokens(svc.currentSession)
+        case .outputTokens:
+            return WidgetValueComputer.formattedOutputTokens(svc.currentSession)
+        case .costSpent:
+            return WidgetValueComputer.formattedCostSpent(svc.currentSession)
+        case .dailyTokens:
+            guard let q = quotaFor(type: .dailyTokens) else { return "—" }
+            return WidgetValueComputer.formattedRemaining(quota: q)
+        case .monthlyTokens:
+            guard let q = quotaFor(type: .monthlyTokens) else { return "—" }
+            return WidgetValueComputer.formattedRemaining(quota: q)
+        case .dailyRequests:
+            guard let q = quotaFor(type: .dailyRequests) else { return "—" }
+            return WidgetValueComputer.formattedRemaining(quota: q)
+        case .monthlyRequests:
+            guard let q = quotaFor(type: .monthlyRequests) else { return "—" }
+            return WidgetValueComputer.formattedRemaining(quota: q)
         }
     }
 
@@ -90,6 +152,13 @@ struct WidgetRenderer: View {
         case .balance:         return "dollarsign.circle"
         case .sessionTokens:   return "arrow.up.circle"
         case .usagePercent:    return "chart.bar"
+        case .inputTokens:     return "arrow.down.circle"
+        case .outputTokens:    return "arrow.up.circle"
+        case .dailyTokens:     return "calendar"
+        case .monthlyTokens:   return "calendar.circle"
+        case .costSpent:       return "dollarsign.circle.fill"
+        case .dailyRequests:   return "number.circle"
+        case .monthlyRequests: return "number.circle.fill"
         }
     }
 
@@ -100,7 +169,9 @@ struct WidgetRenderer: View {
     // MARK: - Helpers
 
     private func quotaFor(type: QuotaType) -> Quota? {
-        service?.quotas.first { $0.type == type }
+        let matching = service?.quotas.filter { $0.type == type } ?? []
+        let idx = config.quotaIndex
+        return idx < matching.count ? matching[idx] : matching.first
     }
 
     private func quotaFraction(type: QuotaType) -> Double {
