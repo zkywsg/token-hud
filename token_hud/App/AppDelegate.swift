@@ -17,7 +17,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var codexFetcher: CodexFetcher!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.accessory)
+        NSApp.setActivationPolicy(.regular)
+        NSApp.applicationIconImage = Self.makeAppIcon()
 
         stateWatcher    = StateWatcher()
         widgetStore     = WidgetStore()
@@ -61,6 +62,66 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         floatingPanelManager.teardown()
         hotkeyManager.teardown()
         codexFetcher.stop()
+    }
+
+    // MARK: - App Icon
+
+    private static func makeAppIcon() -> NSImage {
+        let size = NSSize(width: 128, height: 128)
+        let image = NSImage(size: size)
+        image.lockFocus()
+
+        guard let ctx = NSGraphicsContext.current?.cgContext else {
+            image.unlockFocus()
+            return image
+        }
+
+        // Background: rounded rect with gradient
+        let bgRect = NSRect(origin: .zero, size: size).insetBy(dx: 4, dy: 4)
+        let bgPath = NSBezierPath(roundedRect: bgRect, xRadius: 22, yRadius: 22)
+        ctx.saveGState()
+        bgPath.addClip()
+
+        let gradient = CGGradient(
+            colorsSpace: CGColorSpaceCreateDeviceRGB(),
+            colors: [
+                CGColor(red: 0.15, green: 0.15, blue: 0.22, alpha: 1),
+                CGColor(red: 0.08, green: 0.08, blue: 0.14, alpha: 1)
+            ] as CFArray,
+            locations: [0, 1]
+        )!
+        ctx.drawLinearGradient(gradient,
+                               start: CGPoint(x: 64, y: 128),
+                               end: CGPoint(x: 64, y: 0),
+                               options: [])
+        ctx.restoreGState()
+
+        // Hexagon grid icon from SF Symbol
+        let symbolConfig = NSImage.SymbolConfiguration(pointSize: 64, weight: .medium)
+        guard let symbolImage = NSImage(systemSymbolName: "circle.hexagongrid.fill",
+                                        accessibilityDescription: nil)?
+            .withSymbolConfiguration(symbolConfig) else {
+            image.unlockFocus()
+            return image
+        }
+
+        let symbolRect = NSRect(
+            x: (size.width - 64) / 2,
+            y: (size.height - 64) / 2,
+            width: 64, height: 64
+        )
+
+        // Tint with accent color
+        let tinted = symbolImage.copy() as! NSImage
+        tinted.lockFocus()
+        NSColor(red: 0.4, green: 0.7, blue: 1.0, alpha: 1.0).set()
+        NSRect(origin: .zero, size: tinted.size).fill(using: .sourceAtop)
+        tinted.unlockFocus()
+
+        tinted.draw(in: symbolRect, from: .zero, operation: .sourceOver, fraction: 1.0)
+
+        image.unlockFocus()
+        return image
     }
 
     // MARK: - Status Bar
