@@ -47,6 +47,18 @@ private let presets: [WidgetPreset] = [
     WidgetPreset(config: WidgetConfig(service: "deepseek",  metric: .monthlyTokens,   style: .ring)),
     WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .costSpent,       style: .text)),
     WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .monthlyRequests, style: .aggregate)),
+    // New derived metrics & styles
+    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .sessionDuration, style: .countdown)),
+    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .tokensPerMinute, style: .text)),
+    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .rateLimitStatus, style: .status)),
+    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .sessionTokens,   style: .multi)),
+    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .remainingTime,   style: .countdown)),
+    WidgetPreset(config: WidgetConfig(service: "openai",    metric: .costPerRequest,  style: .text)),
+    WidgetPreset(config: WidgetConfig(service: "openai",    metric: .inputOutputRatio,style: .aggregate)),
+    WidgetPreset(config: WidgetConfig(service: "codex",     metric: .rateLimitStatus, style: .status)),
+    WidgetPreset(config: WidgetConfig(service: "gemini",    metric: .tokensPerMinute, style: .text)),
+    WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .sessionDuration, style: .countdown)),
+    WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .sessionTokens,   style: .modelBreakdown)),
 ]
 
 // MARK: - Widget List Editor
@@ -301,12 +313,13 @@ private struct CustomWidgetSheet: View {
     @Environment(\.dismiss) var dismiss
 
     private var availableMetrics: [WidgetMetric] {
+        let derived: [WidgetMetric] = [.sessionDuration, .tokensPerMinute, .inputOutputRatio, .costPerRequest, .rateLimitStatus]
         switch service {
-        case "codex":     return [.sessionTokens, .remainingTime, .resetCountdown, .usagePercent]
-        case "openai":    return [.balance, .inputTokens, .outputTokens, .costSpent, .dailyRequests, .monthlyRequests, .usagePercent]
-        case "gemini":    return [.inputTokens, .outputTokens, .dailyTokens, .dailyRequests, .costSpent, .usagePercent]
-        case "deepseek":  return [.balance, .inputTokens, .outputTokens, .monthlyTokens, .costSpent, .monthlyRequests, .usagePercent]
-        case "anthropic": return [.balance, .inputTokens, .outputTokens, .costSpent, .monthlyRequests, .usagePercent]
+        case "codex":     return [.sessionTokens, .remainingTime, .resetCountdown, .usagePercent, .sessionDuration, .rateLimitStatus]
+        case "openai":    return [.balance, .inputTokens, .outputTokens, .costSpent, .dailyRequests, .monthlyRequests, .usagePercent] + derived
+        case "gemini":    return [.inputTokens, .outputTokens, .dailyTokens, .dailyRequests, .costSpent, .usagePercent] + derived
+        case "deepseek":  return [.balance, .inputTokens, .outputTokens, .monthlyTokens, .costSpent, .monthlyRequests, .usagePercent] + derived
+        case "anthropic": return [.balance, .inputTokens, .outputTokens, .costSpent, .monthlyRequests, .usagePercent] + derived
         default:          return WidgetMetric.allCases
         }
     }
