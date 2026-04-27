@@ -14,6 +14,9 @@ struct PlatformConfig: Identifiable {
         PlatformConfig(id: "claude", displayName: "Claude", credentialType: .sessionKey),
         PlatformConfig(id: "openai", displayName: "OpenAI", credentialType: .apiKey),
         PlatformConfig(id: "codex", displayName: "Codex", credentialType: .codexLocalAuth),
+        PlatformConfig(id: "gemini", displayName: "Gemini", credentialType: .apiKey),
+        PlatformConfig(id: "deepseek", displayName: "DeepSeek", credentialType: .apiKey),
+        PlatformConfig(id: "anthropic", displayName: "Anthropic API", credentialType: .apiKey),
     ]
 }
 
@@ -135,7 +138,7 @@ struct PlatformRowView: View {
         VStack(alignment: .leading, spacing: 8) {
             switch platform.credentialType {
             case .sessionKey:     claudeCredentials
-            case .apiKey:         openAICredentials
+            case .apiKey:         apiKeyCredentials
             case .codexLocalAuth: codexCredentials
             }
         }
@@ -214,7 +217,7 @@ struct PlatformRowView: View {
         }
     }
 
-    @ViewBuilder private var openAICredentials: some View {
+    @ViewBuilder private var apiKeyCredentials: some View {
         if let key = storedKey {
             HStack {
                 Text("API Key").font(.caption).foregroundColor(.secondary)
@@ -224,13 +227,13 @@ struct PlatformRowView: View {
         }
 
         HStack {
-            SecureField("sk-…", text: $openAIInput)
+            SecureField(apiKeyPlaceholder, text: $openAIInput)
                 .textFieldStyle(.roundedBorder)
             Button("Save") {
                 let key = openAIInput.trimmingCharacters(in: .whitespaces)
                 guard !key.isEmpty else { return }
                 Task {
-                    try? KeychainHelper.saveOpenAIKey(key)
+                    try? KeychainHelper.saveAPIKey(key, for: platform.id)
                     storedKey = key
                     openAIInput = ""
                 }
@@ -238,8 +241,28 @@ struct PlatformRowView: View {
             .disabled(openAIInput.trimmingCharacters(in: .whitespaces).isEmpty)
         }
 
-        Text("platform.openai.com → API keys → Create new secret key")
+        Text(apiKeyHelpText)
             .font(.caption).foregroundColor(.secondary)
+    }
+
+    private var apiKeyPlaceholder: String {
+        switch platform.id {
+        case "openai":    return "sk-…"
+        case "gemini":    return "AIza…"
+        case "deepseek":  return "sk-…"
+        case "anthropic": return "sk-ant-…"
+        default:          return "API key"
+        }
+    }
+
+    private var apiKeyHelpText: String {
+        switch platform.id {
+        case "openai":    return "platform.openai.com → API keys → Create new secret key"
+        case "gemini":    return "aistudio.google.com → API keys → Create API key"
+        case "deepseek":  return "platform.deepseek.com → API keys → Create new secret key"
+        case "anthropic": return "console.anthropic.com → API keys → Create key"
+        default:          return "Enter your API key"
+        }
     }
 
     // MARK: - Metrics
@@ -250,7 +273,7 @@ struct PlatformRowView: View {
                 if let errorMsg = service.error {
                     codexErrorLabel(errorMsg)
                 } else {
-                    ForEach(service.quotas, id: \.type.rawValue) { quota in
+                    ForEach(Array(service.quotas.enumerated()), id: \.offset) { _, quota in
                         quotaRow(quota)
                     }
                 }
@@ -310,10 +333,16 @@ struct PlatformRowView: View {
         VStack(alignment: .leading, spacing: 2) {
             Text(quotaLabel(quota)).font(.caption2).foregroundColor(.secondary)
             if quota.total != nil {
-                // Has a cap: show progress bar
-                ProgressView(value: quota.usedFraction)
-                    .progressViewStyle(.linear)
-                    .tint(quota.usedFraction > 0.8 ? .red : .accentColor)
+                // Has a cap: show progress bar with percentage
+                HStack(spacing: 4) {
+                    ProgressView(value: quota.usedFraction)
+                        .progressViewStyle(.linear)
+                        .tint(quota.usedFraction > 0.8 ? .red : .accentColor)
+                    Text(String(format: "%.0f%%", quota.usedFraction * 100))
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                        .frame(width: 28, alignment: .trailing)
+                }
             }
             Text(quotaRemainingString(quota)).font(.caption2).foregroundColor(.secondary)
         }
@@ -331,9 +360,16 @@ struct PlatformRowView: View {
         case .time:
             let hours = (quota.total ?? 0) / 3600
             return hours >= 24 ? "\(Int(hours / 24))d window" : "\(Int(hours))h window"
-        case .money:    return "Balance"
-        case .tokens:   return "Tokens"
-        case .requests: return "Requests"
+        case .money:          return "Balance"
+        case .tokens:         return "Tokens"
+        case .requests:       return "Requests"
+        case .inputTokens:    return "Input Tokens"
+        case .outputTokens:   return "Output Tokens"
+        case .dailyTokens:    return "Daily Tokens"
+        case .monthlyTokens:  return "Monthly Tokens"
+        case .costSpent:      return "Cost Spent"
+        case .dailyRequests:  return "Daily Requests"
+        case .monthlyRequests: return "Monthly Requests"
         }
     }
 
@@ -341,17 +377,29 @@ struct PlatformRowView: View {
         // For no-cap quotas, show usage instead of remaining
         guard quota.total != nil else {
             switch quota.type {
-            case .tokens:   return formatTokens(quota.used) + " used"
-            case .money:    return String(format: "$%.2f used", quota.used)
-            case .requests: return "\(Int(quota.used)) used"
-            case .time:     return formatDuration(quota.used) + " used"
+            case .time:          return formatDuration(quota.used) + " used"
+            case .money:         return String(format: "$%.2f used", quota.used)
+            case .tokens:        return formatTokens(quota.used) + " used"
+            case .requests:      return "\(Int(quota.used)) used"
+            case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens:
+                return formatTokens(quota.used) + " used"
+            case .dailyRequests, .monthlyRequests:
+                return "\(Int(quota.used)) used"
+            case .costSpent:
+                return String(format: "$%.2f used", quota.used)
             }
         }
         switch quota.type {
-        case .time:     return formatDuration(quota.remaining) + " left"
-        case .money:    return String(format: "$%.2f left", quota.remaining)
-        case .tokens:   return formatTokens(quota.remaining) + " left"
-        case .requests: return "\(Int(quota.remaining)) left"
+        case .time:          return formatDuration(quota.remaining) + " left"
+        case .money:         return String(format: "$%.2f left", quota.remaining)
+        case .tokens:        return formatTokens(quota.remaining) + " left"
+        case .requests:      return "\(Int(quota.remaining)) left"
+        case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens:
+            return formatTokens(quota.remaining) + " left"
+        case .dailyRequests, .monthlyRequests:
+            return "\(Int(quota.remaining)) left"
+        case .costSpent:
+            return String(format: "$%.2f left", quota.remaining)
         }
     }
 
@@ -370,7 +418,7 @@ struct PlatformRowView: View {
     private func loadKey() async {
         switch platform.credentialType {
         case .sessionKey:     storedKey = await extractor.loadFromKeychain()
-        case .apiKey:         storedKey = KeychainHelper.loadOpenAIKey()
+        case .apiKey:         storedKey = KeychainHelper.loadAPIKey(for: platform.id)
         case .codexLocalAuth: loadCodexStatus()
         }
     }
@@ -438,5 +486,242 @@ struct PlatformRowView: View {
             let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }
         return obj
+    }
+}
+
+// MARK: - API Key Group View
+
+struct APIKeyGroupView: View {
+    @Binding var selectedPlatform: String
+    @Environment(StateWatcher.self) private var stateWatcher
+
+    private var apiPlatforms: [PlatformConfig] {
+        PlatformConfig.all.filter { $0.credentialType == .apiKey }
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("API Key 平台").fontWeight(.medium)
+                Spacer()
+                Image(systemName: "chevron.down")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+
+            Divider()
+
+            VStack(spacing: 0) {
+                ForEach(apiPlatforms) { platform in
+                    APIPlatformRow(
+                        platform: platform,
+                        isSelected: selectedPlatform == platform.id
+                    ) {
+                        selectedPlatform = platform.id
+                    }
+                }
+
+                Divider().padding(.horizontal, 12)
+
+                if let service = stateWatcher.currentState?.services[selectedPlatform] {
+                    MetricsDetailView(service: service)
+                        .padding(12)
+                } else {
+                    Text("No data")
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                        .padding(12)
+                }
+            }
+        }
+        .background(Color(NSColor.controlBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+    }
+}
+
+private struct APIPlatformRow: View {
+    let platform: PlatformConfig
+    let isSelected: Bool
+    let onSelect: () -> Void
+    @State private var storedKey: String? = nil
+    @State private var isEditing = false
+    @State private var keyInput: String = ""
+
+    var body: some View {
+        Button(action: onSelect) {
+            HStack(spacing: 8) {
+                Circle()
+                    .fill(storedKey != nil ? Color.green : Color.orange)
+                    .frame(width: 7, height: 7)
+                Text(platform.displayName)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(.primary)
+                Spacer()
+                if let key = storedKey {
+                    Text(maskedKey(key))
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(.secondary)
+                } else {
+                    Text("未配置")
+                        .font(.caption)
+                        .foregroundColor(.orange)
+                }
+                Image(systemName: isSelected ? "chevron.down" : "chevron.right")
+                    .font(.caption2)
+                    .foregroundColor(.secondary)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+            .background(isSelected ? Color.accentColor.opacity(0.08) : Color.clear)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .task { storedKey = KeychainHelper.loadAPIKey(for: platform.id) }
+
+        if isSelected {
+            VStack(spacing: 6) {
+                if isEditing || storedKey == nil {
+                    HStack {
+                        SecureField(apiKeyPlaceholder, text: $keyInput)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Save") {
+                            let key = keyInput.trimmingCharacters(in: .whitespaces)
+                            guard !key.isEmpty else { return }
+                            try? KeychainHelper.saveAPIKey(key, for: platform.id)
+                            storedKey = key
+                            keyInput = ""
+                            isEditing = false
+                        }
+                        .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
+                        if storedKey != nil {
+                            Button("Cancel") { isEditing = false; keyInput = "" }
+                                .font(.caption)
+                        }
+                    }
+                } else {
+                    Button("更换 Key") { isEditing = true }
+                        .font(.caption)
+                        .foregroundColor(.secondary)
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.bottom, 8)
+        }
+    }
+
+    private var apiKeyPlaceholder: String {
+        switch platform.id {
+        case "openai":    return "sk-…"
+        case "gemini":    return "AIza…"
+        case "deepseek":  return "sk-…"
+        case "anthropic": return "sk-ant-…"
+        default:          return "API key"
+        }
+    }
+
+    private func maskedKey(_ key: String) -> String {
+        guard key.count > 10 else { return "••••••••" }
+        return String(key.prefix(6)) + "••••" + String(key.suffix(4))
+    }
+}
+
+private struct MetricsDetailView: View {
+    let service: Service
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let error = service.error {
+                Label(error, systemImage: "exclamationmark.triangle")
+                    .font(.caption).foregroundColor(.yellow)
+            } else {
+                ForEach(Array(service.quotas.enumerated()), id: \.offset) { _, quota in
+                    quotaRow(quota)
+                }
+                if let session = service.currentSession {
+                    sessionSummary(session)
+                }
+            }
+        }
+        .padding(8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(NSColor.windowBackgroundColor))
+        .clipShape(RoundedRectangle(cornerRadius: 6))
+    }
+
+    @ViewBuilder
+    private func quotaRow(_ quota: Quota) -> some View {
+        HStack(spacing: 6) {
+            Text(quotaLabel(quota))
+                .font(.caption2).foregroundColor(.secondary)
+                .frame(width: 90, alignment: .leading)
+            if quota.total != nil {
+                ProgressView(value: quota.usedFraction)
+                    .progressViewStyle(.linear)
+                    .tint(quota.usedFraction > 0.8 ? .red : quota.usedFraction > 0.5 ? .yellow : .accentColor)
+                Text(String(format: "%.0f%%", quota.usedFraction * 100))
+                    .font(.caption2).foregroundColor(.secondary)
+                    .frame(width: 28, alignment: .trailing)
+            }
+            Text(quotaRemainingString(quota))
+                .font(.caption2).foregroundColor(.secondary)
+                .frame(minWidth: 70, alignment: .trailing)
+        }
+    }
+
+    @ViewBuilder
+    private func sessionSummary(_ session: SessionSnapshot) -> some View {
+        HStack(spacing: 4) {
+            Text("会话:").font(.caption2).foregroundColor(.secondary)
+            if let t = session.tokens { Text(formatTokens(t) + " tokens").font(.caption2).foregroundColor(.secondary) }
+            if let m = session.money { Text(String(format: "· $%.2f", m)).font(.caption2).foregroundColor(.secondary) }
+            if let r = session.requests { Text("· \(Int(r)) req").font(.caption2).foregroundColor(.secondary) }
+        }
+    }
+
+    private func quotaLabel(_ quota: Quota) -> String {
+        switch quota.type {
+        case .time: let hours = (quota.total ?? 0) / 3600; return hours >= 24 ? "\(Int(hours/24))d window" : "\(Int(hours))h window"
+        case .money: return "Balance"; case .tokens: return "Tokens"; case .requests: return "Requests"
+        case .inputTokens: return "Input Tokens"; case .outputTokens: return "Output Tokens"
+        case .dailyTokens: return "Daily Tokens"; case .monthlyTokens: return "Monthly Tokens"
+        case .costSpent: return "Cost Spent"; case .dailyRequests: return "Daily Requests"; case .monthlyRequests: return "Monthly Requests"
+        }
+    }
+
+    private func quotaRemainingString(_ quota: Quota) -> String {
+        guard quota.total != nil else {
+            switch quota.type {
+            case .time: return formatDuration(quota.used) + " used"
+            case .money: return String(format: "$%.2f used", quota.used)
+            case .tokens: return formatTokens(quota.used) + " used"
+            case .requests: return "\(Int(quota.used)) used"
+            case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens: return formatTokens(quota.used) + " used"
+            case .dailyRequests, .monthlyRequests: return "\(Int(quota.used)) used"
+            case .costSpent: return String(format: "$%.2f used", quota.used)
+            }
+        }
+        switch quota.type {
+        case .time: return formatDuration(quota.remaining) + " left"
+        case .money: return String(format: "$%.2f left", quota.remaining)
+        case .tokens: return formatTokens(quota.remaining) + " left"
+        case .requests: return "\(Int(quota.remaining)) left"
+        case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens: return formatTokens(quota.remaining) + " left"
+        case .dailyRequests, .monthlyRequests: return "\(Int(quota.remaining)) left"
+        case .costSpent: return String(format: "$%.2f left", quota.remaining)
+        }
+    }
+
+    private func formatTokens(_ t: Double) -> String {
+        if t >= 1_000_000 { return String(format: "%.1fM", t/1_000_000) }
+        if t >= 1_000 { return String(format: "%.0fk", t/1_000) }
+        return "\(Int(t))"
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let s = max(0, Int(seconds))
+        if s >= 3600 { return "\(s/3600)h \((s%3600)/60)m" }
+        return "\(s/60)m"
     }
 }

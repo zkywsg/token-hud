@@ -2,37 +2,38 @@
 import SwiftUI
 
 struct PlatformListView: View {
-    // "claude" starts expanded by default
     @State private var expandedIDs: Set<String> = ["claude"]
+    @State private var selectedAPIPlatform: String = "openai"
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 8) {
-                ForEach(PlatformConfig.all) { platform in
-                    PlatformRowView(
-                        platform: platform,
-                        isExpanded: Binding(
-                            get: { expandedIDs.contains(platform.id) },
-                            set: { expanded in
-                                if expanded { expandedIDs.insert(platform.id) }
-                                else { expandedIDs.remove(platform.id) }
-                            }
-                        )
+            VStack(spacing: 12) {
+                // Group 1: Claude
+                PlatformRowView(
+                    platform: PlatformConfig.all.first { $0.id == "claude" }!,
+                    isExpanded: Binding(
+                        get: { expandedIDs.contains("claude") },
+                        set: { expanded in
+                            if expanded { expandedIDs.insert("claude") }
+                            else { expandedIDs.remove("claude") }
+                        }
                     )
-                }
+                )
 
-                // Placeholder for future platforms
-                HStack {
-                    Image(systemName: "plus.circle")
-                        .foregroundColor(.secondary)
-                    Text("More platforms coming soon")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                }
-                .frame(maxWidth: .infinity)
-                .padding(.vertical, 10)
-                .background(Color(NSColor.controlBackgroundColor).opacity(0.5))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                // Group 2: API Key Platforms
+                APIKeyGroupView(selectedPlatform: $selectedAPIPlatform)
+
+                // Group 3: Codex
+                PlatformRowView(
+                    platform: PlatformConfig.all.first { $0.id == "codex" }!,
+                    isExpanded: Binding(
+                        get: { expandedIDs.contains("codex") },
+                        set: { expanded in
+                            if expanded { expandedIDs.insert("codex") }
+                            else { expandedIDs.remove("codex") }
+                        }
+                    )
+                )
             }
             .padding()
         }
