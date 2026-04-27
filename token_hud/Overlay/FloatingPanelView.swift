@@ -11,8 +11,7 @@ struct FloatingPanelView: View {
         Group {
             if overlayMode == "grouped" {
                 GroupedOverlayView(
-                    leftWidgets: store.leftWidgets,
-                    rightWidgets: store.rightWidgets,
+                    widgets: store.widgets,
                     state: watcher.effectiveState
                 )
                 .padding(12)
@@ -37,15 +36,7 @@ struct FloatingPanelView: View {
 
     private var compactOverlay: some View {
         HStack(spacing: 6) {
-            ForEach(store.leftWidgets) { config in
-                WidgetRenderer(config: config, state: watcher.effectiveState, showServiceLabel: true)
-            }
-
-            if !store.leftWidgets.isEmpty && !store.rightWidgets.isEmpty {
-                Divider().frame(height: 20)
-            }
-
-            ForEach(store.rightWidgets) { config in
+            ForEach(store.widgets) { config in
                 WidgetRenderer(config: config, state: watcher.effectiveState, showServiceLabel: true)
             }
         }

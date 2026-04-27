@@ -15,6 +15,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusItem: NSStatusItem?
     private var settingsController: NSWindowController?
     private var codexFetcher: CodexFetcher!
+    private var apiPlatformFetcher: APIPlatformFetcher!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.regular)
@@ -27,6 +28,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateWatcher.start()
         appWatcher.start()
         codexFetcher = CodexFetcher()
+        apiPlatformFetcher = APIPlatformFetcher()
 
         floatingPanelManager = FloatingPanelManager(
             stateWatcher: stateWatcher,
@@ -62,6 +64,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         floatingPanelManager.teardown()
         hotkeyManager.teardown()
         codexFetcher.stop()
+        apiPlatformFetcher.stop()
     }
 
     // MARK: - App Icon
@@ -212,6 +215,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .environment(stateWatcher)
             .environment(appFilterStore)
             .environment(codexFetcher)
+            .environment(apiPlatformFetcher)
         let win = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
             styleMask: [.titled, .closable, .miniaturizable],

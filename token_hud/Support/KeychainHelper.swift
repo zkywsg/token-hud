@@ -17,7 +17,7 @@ enum KeychainHelper {
         load(account: account)
     }
 
-    // MARK: - OpenAI API key
+    // MARK: - OpenAI API key (legacy convenience)
 
     static func saveOpenAIKey(_ value: String) throws {
         try save(value, account: openAIAccount)
@@ -25,6 +25,26 @@ enum KeychainHelper {
 
     static func loadOpenAIKey() -> String? {
         load(account: openAIAccount)
+    }
+
+    // MARK: - Generic API key (per platform)
+
+    static func saveAPIKey(_ value: String, for platformID: String) throws {
+        try save(value, account: "\(platformID)APIKey")
+    }
+
+    static func loadAPIKey(for platformID: String) -> String? {
+        load(account: "\(platformID)APIKey")
+    }
+
+    // MARK: - MiMo console cookie
+
+    static func saveMiMoConsoleCookie(_ value: String) throws {
+        try save(value, account: "mimoConsoleCookie")
+    }
+
+    static func loadMiMoConsoleCookie() -> String? {
+        load(account: "mimoConsoleCookie")
     }
 
     // MARK: - Generic

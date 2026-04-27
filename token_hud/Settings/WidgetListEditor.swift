@@ -15,6 +15,8 @@ private struct WidgetPreset: Identifiable, Equatable {
         case "gemini":    return "Gemini"
         case "deepseek":  return "DeepSeek"
         case "anthropic": return "Anthropic"
+        case "minimax":   return "MiniMax"
+        case "mimo":      return "MiMo"
         default:          return config.service
         }
     }
@@ -59,6 +61,10 @@ private let presets: [WidgetPreset] = [
     WidgetPreset(config: WidgetConfig(service: "gemini",    metric: .tokensPerMinute, style: .text)),
     WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .sessionDuration, style: .countdown)),
     WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .sessionTokens,   style: .modelBreakdown)),
+    WidgetPreset(config: WidgetConfig(service: "minimax",   metric: .balance,         style: .bar)),
+    WidgetPreset(config: WidgetConfig(service: "minimax",   metric: .monthlyTokens,   style: .ring)),
+    WidgetPreset(config: WidgetConfig(service: "mimo",      metric: .dailyTokens,     style: .ring)),
+    WidgetPreset(config: WidgetConfig(service: "mimo",      metric: .costSpent,       style: .text)),
 ]
 
 // MARK: - Platform Grouped Presets
@@ -66,7 +72,7 @@ private let presets: [WidgetPreset] = [
 private struct PlatformPresetsView: View {
     let onAdd: (WidgetConfig) -> Void
 
-    private let platformOrder = ["claude", "openai", "codex", "gemini", "deepseek", "anthropic"]
+    private let platformOrder = ["claude", "openai", "codex", "gemini", "deepseek", "anthropic", "minimax", "mimo"]
     private var groupedPresets: [(String, [WidgetPreset])] {
         platformOrder.compactMap { service in
             let matching = presets.filter { $0.config.service == service }
@@ -125,6 +131,8 @@ private struct PlatformGroup: View {
         case "gemini": return "Gemini"
         case "deepseek": return "DeepSeek"
         case "anthropic": return "Anthropic"
+        case "minimax":   return "MiniMax"
+        case "mimo":      return "MiMo"
         default: return id
         }
     }
@@ -135,6 +143,7 @@ private struct PlatformGroup: View {
 struct WidgetListEditor: View {
     @Environment(WidgetStore.self) private var store
     @State private var showCustomSheet = false
+    @State private var recentlyDroppedIDs = Set<UUID>()
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -169,7 +178,7 @@ struct WidgetListEditor: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(Color.secondary.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [4]))
                     )
-                    .onDrop(of: [.text], delegate: WidgetListDropDelegate(widgets: Bindable(store).widgets))
+                    .onDrop(of: [.text], delegate: WidgetListDropDelegate(widgets: Bindable(store).widgets, recentlyDroppedIDs: $recentlyDroppedIDs))
             } else {
                 List {
                     ForEach(store.widgets) { widget in
@@ -183,7 +192,7 @@ struct WidgetListEditor: View {
                 }
                 .listStyle(.bordered)
                 .frame(minHeight: 120)
-                .onDrop(of: [.text], delegate: WidgetListDropDelegate(widgets: Bindable(store).widgets))
+                .onDrop(of: [.text], delegate: WidgetListDropDelegate(widgets: Bindable(store).widgets, recentlyDroppedIDs: $recentlyDroppedIDs))
             }
 
             Button { showCustomSheet = true } label: {
@@ -291,6 +300,7 @@ private struct WidgetRow: View {
 
 private struct WidgetListDropDelegate: DropDelegate {
     @Binding var widgets: [WidgetConfig]
+    @Binding var recentlyDroppedIDs: Set<UUID>
 
     func performDrop(info: DropInfo) -> Bool {
         guard let item = info.itemProviders(for: [.text]).first else { return false }
@@ -301,6 +311,12 @@ private struct WidgetListDropDelegate: DropDelegate {
             else { return }
 
             DispatchQueue.main.async {
+                guard !recentlyDroppedIDs.contains(uuid) else { return }
+                recentlyDroppedIDs.insert(uuid)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) {
+                    recentlyDroppedIDs.remove(uuid)
+                }
+
                 if let preset = presets.first(where: { $0.config.id == uuid }) {
                     let newWidget = WidgetConfig(
                         service: preset.config.service,
@@ -336,6 +352,8 @@ private struct CustomWidgetSheet: View {
         case "gemini":    return [.inputTokens, .outputTokens, .dailyTokens, .dailyRequests, .costSpent, .usagePercent] + derived
         case "deepseek":  return [.balance, .inputTokens, .outputTokens, .monthlyTokens, .costSpent, .monthlyRequests, .usagePercent] + derived
         case "anthropic": return [.balance, .inputTokens, .outputTokens, .costSpent, .monthlyRequests, .usagePercent] + derived
+        case "minimax":   return [.balance, .inputTokens, .outputTokens, .monthlyTokens, .costSpent, .usagePercent] + derived
+        case "mimo":      return [.balance, .inputTokens, .outputTokens, .dailyTokens, .costSpent, .dailyRequests, .usagePercent] + derived
         default:          return WidgetMetric.allCases
         }
     }
@@ -350,6 +368,8 @@ private struct CustomWidgetSheet: View {
                     Text("Gemini").tag("gemini")
                     Text("DeepSeek").tag("deepseek")
                     Text("Anthropic API").tag("anthropic")
+                    Text("MiniMax").tag("minimax")
+                    Text("MiMo").tag("mimo")
                 }
                 .onChange(of: service) { _, _ in
                     if !availableMetrics.contains(metric) {

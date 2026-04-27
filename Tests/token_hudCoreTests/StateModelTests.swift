@@ -133,4 +133,76 @@ struct StateModelTests {
         #expect(session.modelBreakdown?.first?.model == "claude-sonnet-4")
         #expect(session.modelBreakdown?.first?.inputTokens == 1000)
     }
+
+    @Test func miniMaxTokenPlanParserBuildsQuotaFromRemainingUsage() throws {
+        let json = """
+        {
+          "data": {
+            "m2_7": {
+              "total_quota": 1000,
+              "remain": 250,
+              "reset_at": "2026-04-01T05:00:00Z"
+            }
+          }
+        }
+        """
+
+        let service = MiniMaxTokenPlanParser.service(
+            from: Data(json.utf8),
+            now: ISO8601DateFormatter().date(from: "2026-04-01T00:00:00Z")!
+        )
+
+        #expect(service?.label == "MiniMax")
+        #expect(service?.quotas.count == 1)
+        #expect(service?.quotas.first?.type == .requests)
+        #expect(service?.quotas.first?.total == 1000)
+        #expect(service?.quotas.first?.used == 750)
+        #expect(service?.quotas.first?.remaining == 250)
+        #expect(service?.currentSession?.requests == 750)
+    }
+
+    @Test func miMoTokenPlanParserBuildsCreditQuotaAndExpiry() throws {
+        let usageJSON = """
+        {
+          "code": 0,
+          "message": "",
+          "data": {
+            "usage": {
+              "percent": 0.99,
+              "items": [
+                { "name": "plan_total_token", "used": 59626924, "limit": 60000000, "percent": 0.99 },
+                { "name": "compensation_total_token", "used": 0, "limit": 0, "percent": 0 }
+              ]
+            }
+          }
+        }
+        """
+        let detailJSON = """
+        {
+          "code": 0,
+          "data": {
+            "planCode": "lite",
+            "planName": "Lite",
+            "currentPeriodEnd": "2026-05-03 23:59:59",
+            "expired": false
+          }
+        }
+        """
+
+        let service = MiMoTokenPlanParser.service(
+            usageData: Data(usageJSON.utf8),
+            detailData: Data(detailJSON.utf8),
+            now: ISO8601DateFormatter().date(from: "2026-04-28T00:00:00Z")!
+        )
+
+        #expect(service?.label == "MiMo Lite")
+        #expect(service?.quotas.count == 1)
+        #expect(service?.quotas.first?.type == .monthlyTokens)
+        #expect(service?.quotas.first?.unit == "credits")
+        #expect(service?.quotas.first?.total == 60000000)
+        #expect(service?.quotas.first?.used == 59626924)
+        #expect(service?.quotas.first?.remaining == 373076)
+        #expect(service?.quotas.first?.resetsAt == "2026-05-03T23:59:59Z")
+        #expect(service?.currentSession?.tokens == 59626924)
+    }
 }

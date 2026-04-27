@@ -1,5 +1,6 @@
 // token_hud/Settings/PlatformRowView.swift
 import SwiftUI
+import WebKit
 
 // MARK: - Model
 
@@ -17,6 +18,8 @@ struct PlatformConfig: Identifiable {
         PlatformConfig(id: "gemini", displayName: "Gemini", credentialType: .apiKey),
         PlatformConfig(id: "deepseek", displayName: "DeepSeek", credentialType: .apiKey),
         PlatformConfig(id: "anthropic", displayName: "Anthropic API", credentialType: .apiKey),
+        PlatformConfig(id: "minimax", displayName: "MiniMax", credentialType: .apiKey),
+        PlatformConfig(id: "mimo", displayName: "MiMo", credentialType: .apiKey),
     ]
 }
 
@@ -34,8 +37,13 @@ struct PlatformRowView: View {
 
     @Environment(StateWatcher.self) private var stateWatcher
     @Environment(CodexFetcher.self) private var codexFetcher
+    @Environment(APIPlatformFetcher.self) private var apiPlatformFetcher
 
     @State private var storedKey: String? = nil
+    @State private var storedMiMoCookie: String? = nil
+    @State private var miMoCookieInput: String = ""
+    @State private var isShowingMiMoConnector = false
+    @State private var miMoConnectorStatus = "打开窗口后请登录 MiMo 控制台。"
 
     // Claude-specific
     @State private var claudeState: ClaudeState = .idle
@@ -50,6 +58,9 @@ struct PlatformRowView: View {
     private var configBadgeColor: Color {
         switch platform.credentialType {
         case .sessionKey, .apiKey:
+            if platform.id == "mimo" {
+                return (storedKey != nil || storedMiMoCookie != nil) ? .green : .orange
+            }
             return storedKey != nil ? .green : .orange
         case .codexLocalAuth:
             switch codexStatus {
@@ -63,6 +74,9 @@ struct PlatformRowView: View {
     private var configBadgeText: String {
         switch platform.credentialType {
         case .sessionKey, .apiKey:
+            if platform.id == "mimo" {
+                return (storedKey != nil || storedMiMoCookie != nil) ? "Configured" : "Not configured"
+            }
             return storedKey != nil ? "Configured" : "Not configured"
         case .codexLocalAuth:
             switch codexStatus {
@@ -92,6 +106,17 @@ struct PlatformRowView: View {
         .background(Color(NSColor.controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .task { await loadKey() }
+        .sheet(isPresented: $isShowingMiMoConnector) {
+            MiMoConsoleConnectorSheet(
+                status: $miMoConnectorStatus,
+                onConnected: { cookie in
+                    try? KeychainHelper.saveMiMoConsoleCookie(cookie)
+                    storedMiMoCookie = cookie
+                    isShowingMiMoConnector = false
+                    Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                }
+            )
+        }
     }
 
     // MARK: - Header
@@ -123,11 +148,33 @@ struct PlatformRowView: View {
     // MARK: - Expanded content
 
     private var expandedContent: some View {
-        HStack(alignment: .top, spacing: 12) {
-            credentialsSection
-                .frame(maxWidth: .infinity, alignment: .leading)
-            metricsSection
-                .frame(width: 145)
+        VStack(spacing: 8) {
+            HStack {
+                Spacer()
+                if platform.id == "codex" {
+                    Button {
+                        Task { await codexFetcher.fetch() }
+                    } label: {
+                        Label("刷新", systemImage: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .disabled(codexFetcher.isFetching)
+                } else if platform.credentialType == .apiKey {
+                    Button {
+                        Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                    } label: {
+                        Label("刷新", systemImage: "arrow.clockwise")
+                            .font(.caption)
+                    }
+                    .disabled(apiPlatformFetcher.isFetching)
+                }
+            }
+            HStack(alignment: .top, spacing: 12) {
+                credentialsSection
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                metricsSection
+                    .frame(width: 145)
+            }
         }
         .padding(12)
     }
@@ -236,6 +283,7 @@ struct PlatformRowView: View {
                     try? KeychainHelper.saveAPIKey(key, for: platform.id)
                     storedKey = key
                     openAIInput = ""
+                    await apiPlatformFetcher.fetchSingle(platform: platform.id)
                 }
             }
             .disabled(openAIInput.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -243,6 +291,39 @@ struct PlatformRowView: View {
 
         Text(apiKeyHelpText)
             .font(.caption).foregroundColor(.secondary)
+
+        if platform.id == "mimo" {
+            Divider().padding(.vertical, 2)
+            if let cookie = storedMiMoCookie {
+                HStack {
+                    Text("Console Cookie").font(.caption).foregroundColor(.secondary)
+                    Spacer()
+                    Text(maskedKey(cookie)).font(.caption.monospaced()).foregroundColor(.secondary)
+                }
+            }
+            HStack {
+                Button("Connect Console") {
+                    miMoConnectorStatus = "打开窗口后请登录 MiMo 控制台。"
+                    isShowingMiMoConnector = true
+                }
+                .font(.caption)
+                SecureField("Paste platform.xiaomimimo.com Cookie", text: $miMoCookieInput)
+                    .textFieldStyle(.roundedBorder)
+                Button("Save Cookie") {
+                    let cookie = miMoCookieInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                    guard !cookie.isEmpty else { return }
+                    Task {
+                        try? KeychainHelper.saveMiMoConsoleCookie(cookie)
+                        storedMiMoCookie = cookie
+                        miMoCookieInput = ""
+                        await apiPlatformFetcher.fetchSingle(platform: platform.id)
+                    }
+                }
+                .disabled(miMoCookieInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+            }
+            Text("用于读取 Token Plan 用量；API key 本身不能访问控制台用量接口。")
+                .font(.caption).foregroundColor(.secondary)
+        }
     }
 
     private var apiKeyPlaceholder: String {
@@ -251,6 +332,8 @@ struct PlatformRowView: View {
         case "gemini":    return "AIza…"
         case "deepseek":  return "sk-…"
         case "anthropic": return "sk-ant-…"
+        case "minimax":   return "eyJ…"
+        case "mimo":      return "sk-…"
         default:          return "API key"
         }
     }
@@ -261,6 +344,8 @@ struct PlatformRowView: View {
         case "gemini":    return "aistudio.google.com → API keys → Create API key"
         case "deepseek":  return "platform.deepseek.com → API keys → Create new secret key"
         case "anthropic": return "console.anthropic.com → API keys → Create key"
+        case "minimax":   return "platform.minimax.io → API keys → Create new secret key"
+        case "mimo":      return "platform.xiaomimimo.com → API keys → Create new secret key"
         default:          return "Enter your API key"
         }
     }
@@ -272,32 +357,32 @@ struct PlatformRowView: View {
             if let service = stateWatcher.currentState?.services[platform.id] {
                 if let errorMsg = service.error {
                     codexErrorLabel(errorMsg)
+                } else if service.quotas.isEmpty, service.currentSession == nil {
+                    noQuotaDataLabel
                 } else {
+                    if platform.id == "codex", case .configured(_, let plan) = codexStatus {
+                        HStack {
+                            Text("订阅").font(.caption2).foregroundColor(.secondary)
+                            Spacer()
+                            Text(plan.capitalized)
+                                .font(.caption2)
+                                .fontWeight(.semibold)
+                                .foregroundColor(.accentColor)
+                        }
+                    }
                     ForEach(Array(service.quotas.enumerated()), id: \.offset) { _, quota in
                         quotaRow(quota)
+                    }
+                    if let session = service.currentSession {
+                        sessionSummary(session)
                     }
                 }
             } else {
                 Text("No data").font(.caption).foregroundColor(.secondary)
             }
-            if platform.credentialType == .codexLocalAuth {
+            if shouldShowRefreshButton {
                 Divider()
-                Button {
-                    Task { await codexFetcher.fetch() }
-                } label: {
-                    if codexFetcher.isFetching {
-                        HStack(spacing: 4) {
-                            ProgressView().controlSize(.mini)
-                            Text("Refreshing…").font(.caption2)
-                        }
-                    } else {
-                        Label("Refresh", systemImage: "arrow.clockwise")
-                            .font(.caption2)
-                    }
-                }
-                .buttonStyle(.plain)
-                .foregroundColor(.secondary)
-                .disabled(codexFetcher.isFetching)
+                refreshButton
             }
         }
         .padding(8)
@@ -329,6 +414,12 @@ struct PlatformRowView: View {
             .foregroundColor(color)
     }
 
+    private var noQuotaDataLabel: some View {
+        Label("API 已连接，平台未提供余额/用量接口", systemImage: "checkmark.circle")
+            .font(.caption)
+            .foregroundColor(.green)
+    }
+
     @ViewBuilder private func quotaRow(_ quota: Quota) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(quotaLabel(quota)).font(.caption2).foregroundColor(.secondary)
@@ -356,50 +447,52 @@ struct PlatformRowView: View {
     }
 
     private func quotaLabel(_ quota: Quota) -> String {
+        if quota.unit.lowercased() == "credits" {
+            return "Credits 用量"
+        }
         switch quota.type {
         case .time:
             let hours = (quota.total ?? 0) / 3600
-            return hours >= 24 ? "\(Int(hours / 24))d window" : "\(Int(hours))h window"
-        case .money:          return "Balance"
-        case .tokens:         return "Tokens"
-        case .requests:       return "Requests"
-        case .inputTokens:    return "Input Tokens"
-        case .outputTokens:   return "Output Tokens"
-        case .dailyTokens:    return "Daily Tokens"
-        case .monthlyTokens:  return "Monthly Tokens"
-        case .costSpent:      return "Cost Spent"
-        case .dailyRequests:  return "Daily Requests"
-        case .monthlyRequests: return "Monthly Requests"
+            return hours >= 24 ? "\(Int(hours / 24)) 天窗口" : "\(Int(hours)) 小时限制"
+        case .money:          return "账户余额"
+        case .tokens:         return "Token 用量"
+        case .requests:       return "请求次数"
+        case .inputTokens:    return "输入 Token"
+        case .outputTokens:   return "输出 Token"
+        case .dailyTokens:    return "日 Token 用量"
+        case .monthlyTokens:  return "月 Token 用量"
+        case .costSpent:      return "已花费"
+        case .dailyRequests:  return "日请求数"
+        case .monthlyRequests: return "月请求数"
         }
     }
 
     private func quotaRemainingString(_ quota: Quota) -> String {
-        // For no-cap quotas, show usage instead of remaining
         guard quota.total != nil else {
             switch quota.type {
-            case .time:          return formatDuration(quota.used) + " used"
-            case .money:         return String(format: "$%.2f used", quota.used)
-            case .tokens:        return formatTokens(quota.used) + " used"
-            case .requests:      return "\(Int(quota.used)) used"
+            case .time:          return formatDuration(quota.used) + " 已用"
+            case .money:         return currencyPrefix(quota.unit) + String(format: "%.2f", quota.used)
+            case .tokens:        return formatTokens(quota.used) + " 已用"
+            case .requests:      return "\(Int(quota.used)) 已用"
             case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens:
-                return formatTokens(quota.used) + " used"
+                return formatTokens(quota.used) + " 已用"
             case .dailyRequests, .monthlyRequests:
-                return "\(Int(quota.used)) used"
+                return "\(Int(quota.used)) 已用"
             case .costSpent:
-                return String(format: "$%.2f used", quota.used)
+                return currencyPrefix(quota.unit) + String(format: "%.2f", quota.used)
             }
         }
         switch quota.type {
-        case .time:          return formatDuration(quota.remaining) + " left"
-        case .money:         return String(format: "$%.2f left", quota.remaining)
-        case .tokens:        return formatTokens(quota.remaining) + " left"
-        case .requests:      return "\(Int(quota.remaining)) left"
+        case .time:          return formatDuration(quota.remaining) + " 剩余"
+        case .money:         return currencyPrefix(quota.unit) + String(format: "%.2f", quota.remaining) + " 剩余"
+        case .tokens:        return formatTokens(quota.remaining) + " 剩余"
+        case .requests:      return "\(Int(quota.remaining)) 剩余"
         case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens:
-            return formatTokens(quota.remaining) + " left"
+            return formatTokens(quota.remaining) + " 剩余"
         case .dailyRequests, .monthlyRequests:
-            return "\(Int(quota.remaining)) left"
+            return "\(Int(quota.remaining)) 剩余"
         case .costSpent:
-            return String(format: "$%.2f left", quota.remaining)
+            return currencyPrefix(quota.unit) + String(format: "%.2f", quota.remaining) + " 剩余"
         }
     }
 
@@ -415,10 +508,76 @@ struct PlatformRowView: View {
         return "\(s / 60)m"
     }
 
+    private func currencyPrefix(_ unit: String) -> String {
+        switch unit.uppercased() {
+        case "CNY": return "¥"
+        case "USD": return "$"
+        default:    return "$"
+        }
+    }
+
+    @ViewBuilder private func sessionSummary(_ session: SessionSnapshot) -> some View {
+        HStack(spacing: 4) {
+            Text("会话:").font(.caption2).foregroundColor(.secondary)
+            if let t = session.tokens { Text(formatTokens(t) + " tokens").font(.caption2).foregroundColor(.secondary) }
+            if let m = session.money { Text("· " + currencyPrefix("USD") + String(format: "%.2f", m)).font(.caption2).foregroundColor(.secondary) }
+            if let r = session.requests { Text("· \(Int(r)) req").font(.caption2).foregroundColor(.secondary) }
+        }
+    }
+
+    private var shouldShowRefreshButton: Bool {
+        platform.credentialType == .codexLocalAuth ||
+        (platform.credentialType == .apiKey && storedKey != nil)
+    }
+
+    private var isRefreshing: Bool {
+        switch platform.credentialType {
+        case .codexLocalAuth:
+            return codexFetcher.isFetching
+        case .apiKey:
+            return apiPlatformFetcher.isFetching
+        case .sessionKey:
+            return false
+        }
+    }
+
+    private var refreshButton: some View {
+        Button {
+            Task {
+                switch platform.credentialType {
+                case .codexLocalAuth:
+                    await codexFetcher.fetch()
+                case .apiKey:
+                    await apiPlatformFetcher.fetchSingle(platform: platform.id)
+                case .sessionKey:
+                    break
+                }
+            }
+        } label: {
+            if isRefreshing {
+                HStack(spacing: 4) {
+                    ProgressView().controlSize(.mini)
+                    Text("Refreshing…").font(.caption2)
+                }
+            } else {
+                Label("Refresh", systemImage: "arrow.clockwise")
+                    .font(.caption2)
+            }
+        }
+        .buttonStyle(.plain)
+        .foregroundColor(.secondary)
+        .disabled(isRefreshing)
+    }
+
     private func loadKey() async {
         switch platform.credentialType {
-        case .sessionKey:     storedKey = await extractor.loadFromKeychain()
-        case .apiKey:         storedKey = KeychainHelper.loadAPIKey(for: platform.id)
+        case .sessionKey:
+            storedKey = await extractor.loadFromKeychain()
+        case .apiKey:
+            storedKey = KeychainHelper.loadAPIKey(for: platform.id)
+            if platform.id == "mimo" {
+                storedMiMoCookie = KeychainHelper.loadMiMoConsoleCookie()
+            }
         case .codexLocalAuth: loadCodexStatus()
         }
     }
@@ -494,6 +653,7 @@ struct PlatformRowView: View {
 struct APIKeyGroupView: View {
     @Binding var selectedPlatform: String
     @Environment(StateWatcher.self) private var stateWatcher
+    @Environment(APIPlatformFetcher.self) private var apiPlatformFetcher
 
     private var apiPlatforms: [PlatformConfig] {
         PlatformConfig.all.filter { $0.credentialType == .apiKey }
@@ -504,9 +664,14 @@ struct APIKeyGroupView: View {
             HStack {
                 Text("API Key 平台").fontWeight(.medium)
                 Spacer()
-                Image(systemName: "chevron.down")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
+                Button {
+                    Task { await apiPlatformFetcher.fetchSingle(platform: selectedPlatform) }
+                } label: {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.caption)
+                }
+                .buttonStyle(.plain)
+                .disabled(apiPlatformFetcher.isFetching)
             }
             .padding(.horizontal, 12)
             .padding(.vertical, 10)
@@ -529,10 +694,18 @@ struct APIKeyGroupView: View {
                     MetricsDetailView(service: service)
                         .padding(12)
                 } else {
-                    Text("No data")
-                        .font(.caption)
-                        .foregroundColor(.secondary)
-                        .padding(12)
+                    VStack(spacing: 4) {
+                        if KeychainHelper.loadAPIKey(for: selectedPlatform) != nil {
+                            Text("API key 已配置，暂无数据")
+                                .font(.caption).foregroundColor(.secondary)
+                            Text("点击刷新按钮获取最新状态")
+                                .font(.caption2).foregroundColor(.secondary)
+                        } else {
+                            Text("未配置 API key")
+                                .font(.caption).foregroundColor(.orange)
+                        }
+                    }
+                    .padding(12)
                 }
             }
         }
@@ -546,14 +719,19 @@ private struct APIPlatformRow: View {
     let isSelected: Bool
     let onSelect: () -> Void
     @State private var storedKey: String? = nil
+    @State private var storedMiMoCookie: String? = nil
     @State private var isEditing = false
     @State private var keyInput: String = ""
+    @State private var cookieInput: String = ""
+    @State private var isShowingMiMoConnector = false
+    @State private var miMoConnectorStatus = "打开窗口后请登录 MiMo 控制台。"
+    @Environment(APIPlatformFetcher.self) private var apiPlatformFetcher
 
     var body: some View {
         Button(action: onSelect) {
             HStack(spacing: 8) {
                 Circle()
-                    .fill(storedKey != nil ? Color.green : Color.orange)
+                    .fill(isConfigured ? Color.green : Color.orange)
                     .frame(width: 7, height: 7)
                 Text(platform.displayName)
                     .font(.system(size: 13, weight: .medium))
@@ -563,7 +741,7 @@ private struct APIPlatformRow: View {
                     Text(maskedKey(key))
                         .font(.system(size: 11, design: .monospaced))
                         .foregroundColor(.secondary)
-                } else {
+                } else if !isConfigured {
                     Text("未配置")
                         .font(.caption)
                         .foregroundColor(.orange)
@@ -578,7 +756,12 @@ private struct APIPlatformRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .task { storedKey = KeychainHelper.loadAPIKey(for: platform.id) }
+        .task {
+            storedKey = KeychainHelper.loadAPIKey(for: platform.id)
+            if platform.id == "mimo" {
+                storedMiMoCookie = KeychainHelper.loadMiMoConsoleCookie()
+            }
+        }
 
         if isSelected {
             VStack(spacing: 6) {
@@ -593,6 +776,7 @@ private struct APIPlatformRow: View {
                             storedKey = key
                             keyInput = ""
                             isEditing = false
+                            Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
                         }
                         .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
                         if storedKey != nil {
@@ -605,10 +789,62 @@ private struct APIPlatformRow: View {
                         .font(.caption)
                         .foregroundColor(.secondary)
                 }
+
+                if platform.id == "mimo" {
+                    Divider().padding(.vertical, 2)
+                    if let cookie = storedMiMoCookie {
+                        HStack {
+                            Text("Console Cookie")
+                                .font(.caption)
+                                .foregroundColor(.secondary)
+                            Spacer()
+                            Text(maskedKey(cookie))
+                                .font(.system(size: 11, design: .monospaced))
+                                .foregroundColor(.secondary)
+                        }
+                    }
+                    HStack {
+                        Button("Connect Console") {
+                            miMoConnectorStatus = "打开窗口后请登录 MiMo 控制台。"
+                            isShowingMiMoConnector = true
+                        }
+                        .font(.caption)
+                        SecureField("Paste platform.xiaomimimo.com Cookie", text: $cookieInput)
+                            .textFieldStyle(.roundedBorder)
+                        Button("Save Cookie") {
+                            let cookie = cookieInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                            guard !cookie.isEmpty else { return }
+                            try? KeychainHelper.saveMiMoConsoleCookie(cookie)
+                            storedMiMoCookie = cookie
+                            cookieInput = ""
+                            Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                        }
+                        .disabled(cookieInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                    }
+                    Text("Token Plan 用量需要控制台登录态 Cookie；API key 只能用于模型调用。")
+                        .font(.caption2)
+                        .foregroundColor(.secondary)
+                }
             }
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
         }
+        EmptyView()
+            .sheet(isPresented: $isShowingMiMoConnector) {
+                MiMoConsoleConnectorSheet(
+                    status: $miMoConnectorStatus,
+                    onConnected: { cookie in
+                        try? KeychainHelper.saveMiMoConsoleCookie(cookie)
+                        storedMiMoCookie = cookie
+                        isShowingMiMoConnector = false
+                        Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                    }
+                )
+            }
+    }
+
+    private var isConfigured: Bool {
+        storedKey != nil || (platform.id == "mimo" && storedMiMoCookie != nil)
     }
 
     private var apiKeyPlaceholder: String {
@@ -617,6 +853,8 @@ private struct APIPlatformRow: View {
         case "gemini":    return "AIza…"
         case "deepseek":  return "sk-…"
         case "anthropic": return "sk-ant-…"
+        case "minimax":   return "eyJ…"
+        case "mimo":      return "sk-…"
         default:          return "API key"
         }
     }
@@ -624,6 +862,128 @@ private struct APIPlatformRow: View {
     private func maskedKey(_ key: String) -> String {
         guard key.count > 10 else { return "••••••••" }
         return String(key.prefix(6)) + "••••" + String(key.suffix(4))
+    }
+}
+
+private struct MiMoConsoleConnectorSheet: View {
+    @Binding var status: String
+    let onConnected: (String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("连接 MiMo 控制台")
+                    .font(.headline)
+                Spacer()
+                Text(status)
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+            }
+
+            MiMoConsoleConnectorView(status: $status, onConnected: onConnected)
+                .frame(width: 980, height: 680)
+        }
+        .padding(14)
+        .frame(width: 1008, height: 730)
+    }
+}
+
+private struct MiMoConsoleConnectorView: NSViewRepresentable {
+    @Binding var status: String
+    let onConnected: (String) -> Void
+
+    func makeCoordinator() -> Coordinator {
+        Coordinator(status: $status, onConnected: onConnected)
+    }
+
+    func makeNSView(context: Context) -> WKWebView {
+        let configuration = WKWebViewConfiguration()
+        configuration.websiteDataStore = .default()
+        let webView = WKWebView(frame: .zero, configuration: configuration)
+        webView.navigationDelegate = context.coordinator
+        context.coordinator.webView = webView
+
+        if let url = URL(string: "https://platform.xiaomimimo.com/console/plan-manage") {
+            webView.load(URLRequest(url: url))
+        }
+        return webView
+    }
+
+    func updateNSView(_ nsView: WKWebView, context: Context) {}
+
+    final class Coordinator: NSObject, WKNavigationDelegate {
+        @Binding private var status: String
+        private let onConnected: (String) -> Void
+        weak var webView: WKWebView?
+        private var didConnect = false
+        private var isChecking = false
+
+        init(status: Binding<String>, onConnected: @escaping (String) -> Void) {
+            self._status = status
+            self.onConnected = onConnected
+        }
+
+        func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
+            checkConnection()
+        }
+
+        func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
+            status = "页面加载失败：\(error.localizedDescription)"
+        }
+
+        func webView(_ webView: WKWebView, didFailProvisionalNavigation navigation: WKNavigation!, withError error: Error) {
+            status = "页面加载失败：\(error.localizedDescription)"
+        }
+
+        private func checkConnection() {
+            guard !didConnect, !isChecking, let webView else { return }
+            isChecking = true
+            status = "正在检测 MiMo Token Plan 登录状态..."
+
+            let script = """
+            fetch('/api/v1/tokenPlan/usage', { credentials: 'include' })
+              .then(response => response.text())
+              .catch(error => JSON.stringify({ code: -1, message: String(error) }))
+            """
+
+            webView.evaluateJavaScript(script) { [weak self, weak webView] result, error in
+                guard let self else { return }
+                self.isChecking = false
+
+                if let error {
+                    self.status = "检测失败：\(error.localizedDescription)"
+                    return
+                }
+
+                guard
+                    let text = result as? String,
+                    let data = text.data(using: .utf8),
+                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                    (json["code"] as? Int) == 0
+                else {
+                    self.status = "请完成登录，登录后会自动连接。"
+                    return
+                }
+
+                self.status = "登录已确认，正在保存 MiMo Cookie..."
+                webView?.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
+                    guard let self else { return }
+                    let cookieHeader = cookies
+                        .filter { $0.domain.contains("xiaomimimo.com") }
+                        .map { "\($0.name)=\($0.value)" }
+                        .joined(separator: "; ")
+
+                    guard !cookieHeader.isEmpty else {
+                        self.status = "未找到 MiMo Cookie，请刷新页面后重试。"
+                        return
+                    }
+
+                    self.didConnect = true
+                    self.status = "已连接 MiMo 控制台。"
+                    self.onConnected(cookieHeader)
+                }
+            }
+        }
     }
 }
 
@@ -635,6 +995,9 @@ private struct MetricsDetailView: View {
             if let error = service.error {
                 Label(error, systemImage: "exclamationmark.triangle")
                     .font(.caption).foregroundColor(.yellow)
+            } else if service.quotas.isEmpty, service.currentSession == nil {
+                Label("API 已连接，平台未提供余额/用量接口", systemImage: "checkmark.circle")
+                    .font(.caption).foregroundColor(.green)
             } else {
                 ForEach(Array(service.quotas.enumerated()), id: \.offset) { _, quota in
                     quotaRow(quota)
@@ -675,41 +1038,42 @@ private struct MetricsDetailView: View {
         HStack(spacing: 4) {
             Text("会话:").font(.caption2).foregroundColor(.secondary)
             if let t = session.tokens { Text(formatTokens(t) + " tokens").font(.caption2).foregroundColor(.secondary) }
-            if let m = session.money { Text(String(format: "· $%.2f", m)).font(.caption2).foregroundColor(.secondary) }
+            if let m = session.money { Text("· " + currencyPrefix("USD") + String(format: "%.2f", m)).font(.caption2).foregroundColor(.secondary) }
             if let r = session.requests { Text("· \(Int(r)) req").font(.caption2).foregroundColor(.secondary) }
         }
     }
 
     private func quotaLabel(_ quota: Quota) -> String {
+        if quota.unit.lowercased() == "credits" { return "Credits 用量" }
         switch quota.type {
-        case .time: let hours = (quota.total ?? 0) / 3600; return hours >= 24 ? "\(Int(hours/24))d window" : "\(Int(hours))h window"
-        case .money: return "Balance"; case .tokens: return "Tokens"; case .requests: return "Requests"
-        case .inputTokens: return "Input Tokens"; case .outputTokens: return "Output Tokens"
-        case .dailyTokens: return "Daily Tokens"; case .monthlyTokens: return "Monthly Tokens"
-        case .costSpent: return "Cost Spent"; case .dailyRequests: return "Daily Requests"; case .monthlyRequests: return "Monthly Requests"
+        case .time: let hours = (quota.total ?? 0) / 3600; return hours >= 24 ? "\(Int(hours/24)) 天窗口" : "\(Int(hours)) 小时限制"
+        case .money: return "账户余额"; case .tokens: return "Token 用量"; case .requests: return "请求次数"
+        case .inputTokens: return "输入 Token"; case .outputTokens: return "输出 Token"
+        case .dailyTokens: return "日 Token 用量"; case .monthlyTokens: return "月 Token 用量"
+        case .costSpent: return "已花费"; case .dailyRequests: return "日请求数"; case .monthlyRequests: return "月请求数"
         }
     }
 
     private func quotaRemainingString(_ quota: Quota) -> String {
         guard quota.total != nil else {
             switch quota.type {
-            case .time: return formatDuration(quota.used) + " used"
-            case .money: return String(format: "$%.2f used", quota.used)
-            case .tokens: return formatTokens(quota.used) + " used"
-            case .requests: return "\(Int(quota.used)) used"
-            case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens: return formatTokens(quota.used) + " used"
-            case .dailyRequests, .monthlyRequests: return "\(Int(quota.used)) used"
-            case .costSpent: return String(format: "$%.2f used", quota.used)
+            case .time: return formatDuration(quota.used) + " 已用"
+            case .money: return currencyPrefix(quota.unit) + String(format: "%.2f", quota.used)
+            case .tokens: return formatTokens(quota.used) + " 已用"
+            case .requests: return "\(Int(quota.used)) 已用"
+            case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens: return formatTokens(quota.used) + " 已用"
+            case .dailyRequests, .monthlyRequests: return "\(Int(quota.used)) 已用"
+            case .costSpent: return currencyPrefix(quota.unit) + String(format: "%.2f", quota.used)
             }
         }
         switch quota.type {
-        case .time: return formatDuration(quota.remaining) + " left"
-        case .money: return String(format: "$%.2f left", quota.remaining)
-        case .tokens: return formatTokens(quota.remaining) + " left"
-        case .requests: return "\(Int(quota.remaining)) left"
-        case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens: return formatTokens(quota.remaining) + " left"
-        case .dailyRequests, .monthlyRequests: return "\(Int(quota.remaining)) left"
-        case .costSpent: return String(format: "$%.2f left", quota.remaining)
+        case .time: return formatDuration(quota.remaining) + " 剩余"
+        case .money: return currencyPrefix(quota.unit) + String(format: "%.2f", quota.remaining) + " 剩余"
+        case .tokens: return formatTokens(quota.remaining) + " 剩余"
+        case .requests: return "\(Int(quota.remaining)) 剩余"
+        case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens: return formatTokens(quota.remaining) + " 剩余"
+        case .dailyRequests, .monthlyRequests: return "\(Int(quota.remaining)) 剩余"
+        case .costSpent: return currencyPrefix(quota.unit) + String(format: "%.2f", quota.remaining) + " 剩余"
         }
     }
 
@@ -723,5 +1087,13 @@ private struct MetricsDetailView: View {
         let s = max(0, Int(seconds))
         if s >= 3600 { return "\(s/3600)h \((s%3600)/60)m" }
         return "\(s/60)m"
+    }
+
+    private func currencyPrefix(_ unit: String) -> String {
+        switch unit.uppercased() {
+        case "CNY": return "¥"
+        case "USD": return "$"
+        default:    return "$"
+        }
     }
 }

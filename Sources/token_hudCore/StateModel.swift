@@ -171,7 +171,278 @@ public struct StateFile: Codable, Sendable {
                         ModelUsage(model: "claude-opus-4-20250514", inputTokens: 10_000, outputTokens: 4_000, costSpent: 0.23, requests: 1)
                     ]
                 )
+            ),
+            "minimax": Service(
+                label: "MiniMax",
+                quotas: [
+                    Quota(type: .money, total: 20.0, used: 5.50, unit: "USD", resetsAt: nil),
+                    Quota(type: .monthlyTokens, total: 3_000_000, used: 850_000, unit: "tokens", resetsAt: nil)
+                ],
+                currentSession: SessionSnapshot(
+                    id: "minimax-preview",
+                    startedAt: ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: -1200)),
+                    tokens: 15_000, requests: 4,
+                    inputTokens: 10_000, outputTokens: 5_000, costSpent: 0.08
+                )
+            ),
+            "mimo": Service(
+                label: "MiMo",
+                quotas: [
+                    Quota(type: .money, total: 15.0, used: 2.80, unit: "USD", resetsAt: nil),
+                    Quota(type: .dailyTokens, total: 500_000, used: 120_000, unit: "tokens",
+                          resetsAt: ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: 43200)))
+                ],
+                currentSession: SessionSnapshot(
+                    id: "mimo-preview",
+                    startedAt: ISO8601DateFormatter().string(from: Date(timeIntervalSinceNow: -800)),
+                    tokens: 8_500, requests: 3,
+                    inputTokens: 6_000, outputTokens: 2_500, costSpent: 0.04
+                )
             )
         ]
     )
+}
+
+public enum MiniMaxTokenPlanParser {
+    public static func service(from data: Data, now: Date = Date()) -> Service? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) else { return nil }
+
+        let quotas = quotaRecords(in: root)
+            .reduce(into: [Quota]()) { result, record in
+                guard
+                    let total = record.total,
+                    total > 0,
+                    let used = record.used(total: total)
+                else { return }
+
+                let type = quotaType(for: record)
+                let unit = quotaUnit(for: type)
+                result.append(Quota(
+                    type: type,
+                    total: total,
+                    used: max(0, min(total, used)),
+                    unit: unit,
+                    resetsAt: record.resetString
+                ))
+            }
+
+        guard !quotas.isEmpty else { return nil }
+
+        let requests = quotas
+            .filter { $0.unit == "requests" }
+            .map(\.used)
+            .reduce(0, +)
+
+        return Service(
+            label: "MiniMax",
+            quotas: quotas,
+            currentSession: SessionSnapshot(
+                id: "minimax-token-plan",
+                startedAt: ISO8601DateFormatter().string(from: now),
+                tokens: nil,
+                time: nil,
+                money: nil,
+                requests: requests > 0 ? requests : nil
+            ),
+            error: nil
+        )
+    }
+
+    private struct QuotaRecord {
+        let path: String
+        let values: [String: Any]
+
+        var total: Double? {
+            firstNumber([
+                "total", "total_quota", "totalQuota", "quota", "quota_limit",
+                "quotaLimit", "limit", "max", "maximum"
+            ])
+        }
+
+        var remaining: Double? {
+            firstNumber([
+                "remaining", "remain", "remains", "left", "available",
+                "available_quota", "availableQuota", "unused"
+            ])
+        }
+
+        var resetString: String? {
+            for key in ["resets_at", "resetsAt", "reset_at", "resetAt", "expire_at", "expireAt"] {
+                if let text = values[key] as? String, !text.isEmpty {
+                    return normalizedDateString(text)
+                }
+                if let timestamp = numberValue(values[key]) {
+                    return ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: timestamp))
+                }
+            }
+            return nil
+        }
+
+        func used(total: Double) -> Double? {
+            if let used = firstNumber(["used", "usage", "consumed", "used_quota", "usedQuota"]) {
+                return used
+            }
+            if let remaining {
+                return total - remaining
+            }
+            return nil
+        }
+
+        private func firstNumber(_ keys: [String]) -> Double? {
+            for key in keys {
+                if let number = Self.numberValue(values[key]) { return number }
+            }
+            return nil
+        }
+
+        private static func numberValue(_ value: Any?) -> Double? {
+            switch value {
+            case let value as Double: return value
+            case let value as Int: return Double(value)
+            case let value as NSNumber: return value.doubleValue
+            case let value as String:
+                return Double(value.trimmingCharacters(in: .whitespacesAndNewlines))
+            default:
+                return nil
+            }
+        }
+
+        private func numberValue(_ value: Any?) -> Double? {
+            Self.numberValue(value)
+        }
+
+        private func normalizedDateString(_ value: String) -> String {
+            if ISO8601DateFormatter().date(from: value) != nil { return value }
+            if let timestamp = Double(value) {
+                return ISO8601DateFormatter().string(from: Date(timeIntervalSince1970: timestamp))
+            }
+            return value
+        }
+    }
+
+    private static func quotaRecords(in value: Any, path: String = "") -> [QuotaRecord] {
+        if let array = value as? [Any] {
+            return array.enumerated().flatMap { index, item in
+                quotaRecords(in: item, path: "\(path)/\(index)")
+            }
+        }
+
+        guard let dict = value as? [String: Any] else { return [] }
+
+        let hasTotal = QuotaRecord(path: path, values: dict).total != nil
+        let hasUsage = QuotaRecord(path: path, values: dict).remaining != nil ||
+            QuotaRecord(path: path, values: dict).used(total: 1) != nil
+        let current = hasTotal && hasUsage ? [QuotaRecord(path: path, values: dict)] : []
+
+        let children = dict.flatMap { key, child in
+            quotaRecords(in: child, path: path.isEmpty ? key : "\(path)/\(key)")
+        }
+        return current + children
+    }
+
+    private static func quotaType(for record: QuotaRecord) -> QuotaType {
+        let haystack = (record.path + " " + record.values.keys.joined(separator: " ")).lowercased()
+        if haystack.contains("token") { return haystack.contains("daily") ? .dailyTokens : .monthlyTokens }
+        if haystack.contains("request") || haystack.contains("m2") || haystack.contains("text") {
+            return haystack.contains("daily") ? .dailyRequests : .requests
+        }
+        if haystack.contains("cost") || haystack.contains("spent") { return .costSpent }
+        return .requests
+    }
+
+    private static func quotaUnit(for type: QuotaType) -> String {
+        switch type {
+        case .tokens, .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens:
+            return "tokens"
+        case .money, .costSpent:
+            return "USD"
+        case .time:
+            return "seconds"
+        case .requests, .dailyRequests, .monthlyRequests:
+            return "requests"
+        }
+    }
+}
+
+public enum MiMoTokenPlanParser {
+    public static func service(usageData: Data, detailData: Data?, now: Date = Date()) -> Service? {
+        guard
+            let usageRoot = try? JSONSerialization.jsonObject(with: usageData) as? [String: Any],
+            (usageRoot["code"] as? Int) == 0,
+            let usageDataObject = usageRoot["data"] as? [String: Any],
+            let usage = usageDataObject["usage"] as? [String: Any],
+            let items = usage["items"] as? [[String: Any]]
+        else { return nil }
+
+        guard
+            let planItem = items.first(where: { ($0["name"] as? String) == "plan_total_token" }),
+            let used = numberValue(planItem["used"]),
+            let limit = numberValue(planItem["limit"]),
+            limit > 0
+        else { return nil }
+
+        let detail = parseDetail(detailData)
+        let planName = detail.planName.map { " \($0)" } ?? ""
+
+        return Service(
+            label: "MiMo\(planName)",
+            quotas: [
+                Quota(
+                    type: .monthlyTokens,
+                    total: limit,
+                    used: max(0, min(limit, used)),
+                    unit: "credits",
+                    resetsAt: detail.currentPeriodEnd
+                )
+            ],
+            currentSession: SessionSnapshot(
+                id: "mimo-token-plan",
+                startedAt: ISO8601DateFormatter().string(from: now),
+                tokens: used,
+                time: nil,
+                money: nil,
+                requests: nil
+            ),
+            error: nil
+        )
+    }
+
+    private static func parseDetail(_ data: Data?) -> (planName: String?, currentPeriodEnd: String?) {
+        guard
+            let data,
+            let root = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            (root["code"] as? Int) == 0,
+            let detail = root["data"] as? [String: Any]
+        else { return (nil, nil) }
+
+        let planName = detail["planName"] as? String
+        let periodEnd = (detail["currentPeriodEnd"] as? String).flatMap(normalizedDateString)
+        return (planName, periodEnd)
+    }
+
+    private static func numberValue(_ value: Any?) -> Double? {
+        switch value {
+        case let value as Double: return value
+        case let value as Int: return Double(value)
+        case let value as NSNumber: return value.doubleValue
+        case let value as String:
+            return Double(value.trimmingCharacters(in: .whitespacesAndNewlines))
+        default:
+            return nil
+        }
+    }
+
+    private static func normalizedDateString(_ value: String) -> String? {
+        if ISO8601DateFormatter().date(from: value) != nil { return value }
+
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "yyyy-MM-dd HH:mm:ss"
+        if let date = formatter.date(from: value) {
+            return ISO8601DateFormatter().string(from: date)
+        }
+
+        return nil
+    }
 }

@@ -61,6 +61,7 @@ final class StateWatcher {
             // File doesn't exist yet — retry after 2s on main queue
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
                 guard let self, self.isRunning else { return }
+                self.readNow()
                 self.startWatching()
             }
             return
