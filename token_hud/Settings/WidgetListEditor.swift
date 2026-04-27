@@ -61,13 +61,80 @@ private let presets: [WidgetPreset] = [
     WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .sessionTokens,   style: .modelBreakdown)),
 ]
 
-// MARK: - Widget List Editor
+// MARK: - Platform Grouped Presets
+
+private struct PlatformPresetsView: View {
+    let onAdd: (WidgetConfig) -> Void
+
+    private let platformOrder = ["claude", "openai", "codex", "gemini", "deepseek", "anthropic"]
+    private var groupedPresets: [(String, [WidgetPreset])] {
+        platformOrder.compactMap { service in
+            let matching = presets.filter { $0.config.service == service }
+            return matching.isEmpty ? nil : (service, matching)
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text("预设组件")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            ForEach(groupedPresets, id: \.0) { service, servicePresets in
+                PlatformGroup(service: service, presets: servicePresets)
+            }
+        }
+    }
+}
+
+private struct PlatformGroup: View {
+    let service: String
+    let presets: [WidgetPreset]
+    @State private var isExpanded: Bool
+
+    init(service: String, presets: [WidgetPreset]) {
+        self.service = service
+        self.presets = presets
+        _isExpanded = State(initialValue: service == "claude")
+    }
+
+    var body: some View {
+        DisclosureGroup(isExpanded: $isExpanded) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(presets) { preset in
+                        PresetCard(preset: preset)
+                            .onDrag {
+                                NSItemProvider(object: preset.config.id.uuidString as NSString)
+                            }
+                    }
+                }
+                .padding(.vertical, 4)
+            }
+        } label: {
+            Text(platformDisplayName(service))
+                .font(.system(size: 11, weight: .semibold))
+        }
+    }
+
+    private func platformDisplayName(_ id: String) -> String {
+        switch id {
+        case "claude": return "Claude"
+        case "openai": return "OpenAI"
+        case "codex": return "Codex"
+        case "gemini": return "Gemini"
+        case "deepseek": return "DeepSeek"
+        case "anthropic": return "Anthropic"
+        default: return id
+        }
+    }
+}
+
+// MARK: - Main Editor
 
 struct WidgetListEditor: View {
     @Environment(WidgetStore.self) private var store
     @State private var showCustomSheet = false
-
-    @MainActor private var bindableStore: Bindable<WidgetStore> { Bindable(store) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -79,50 +146,52 @@ struct WidgetListEditor: View {
                     .foregroundStyle(.secondary)
             }
 
-            Text("预设组件 — 拖拽到下方区域")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(presets) { preset in
-                        PresetCard(preset: preset)
-                            .onDrag {
-                                NSItemProvider(object: preset.config.id.uuidString as NSString)
-                            }
-                    }
-                    Button { showCustomSheet = true } label: {
-                        VStack(spacing: 4) {
-                            Image(systemName: "plus")
-                                .font(.system(size: 16, weight: .medium))
-                            Text("自定义")
-                                .font(.system(size: 10, weight: .medium))
-                        }
-                        .frame(width: 80, height: 60)
-                        .background(Color.secondary.opacity(0.1))
-                        .clipShape(RoundedRectangle(cornerRadius: 8))
-                    }
-                    .buttonStyle(.plain)
-                }
+            // Top: Grouped presets
+            PlatformPresetsView { config in
+                store.widgets.append(config)
             }
 
             Divider()
 
-            HStack(alignment: .top, spacing: 16) {
-                DropZone(
-                    title: "左侧",
-                    widgets: bindableStore.leftWidgets,
-                    store: store,
-                    side: .left
-                )
-                Divider()
-                DropZone(
-                    title: "右侧",
-                    widgets: bindableStore.rightWidgets,
-                    store: store,
-                    side: .right
-                )
+            // Bottom: Active widgets
+            Text("已添加组件")
+                .font(.caption)
+                .foregroundColor(.secondary)
+
+            if store.widgets.isEmpty {
+                Text("拖拽组件到此处")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 80)
+                    .background(Color.secondary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [4]))
+                    )
+                    .onDrop(of: [.text], delegate: WidgetListDropDelegate(widgets: Bindable(store).widgets))
+            } else {
+                List {
+                    ForEach(store.widgets) { widget in
+                        WidgetRow(widget: widget) {
+                            store.widgets.removeAll { $0.id == widget.id }
+                        }
+                    }
+                    .onMove { from, to in
+                        store.widgets.move(fromOffsets: from, toOffset: to)
+                    }
+                }
+                .listStyle(.bordered)
+                .frame(minHeight: 120)
+                .onDrop(of: [.text], delegate: WidgetListDropDelegate(widgets: Bindable(store).widgets))
             }
+
+            Button { showCustomSheet = true } label: {
+                Label("自定义组件", systemImage: "plus")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
         .padding()
         .sheet(isPresented: $showCustomSheet) {
@@ -163,54 +232,6 @@ private struct PresetCard: View {
     }
 }
 
-// MARK: - Drop Zone
-
-enum WidgetSide {
-    case left, right
-}
-
-private struct DropZone: View {
-    let title: String
-    @Binding var widgets: [WidgetConfig]
-    let store: WidgetStore
-    let side: WidgetSide
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text(title)
-                .font(.headline)
-
-            if widgets.isEmpty {
-                Text("拖拽组件到此处")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 80)
-                    .background(Color.secondary.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.secondary.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [4]))
-                    )
-            } else {
-                VStack(spacing: 4) {
-                    ForEach(widgets) { widget in
-                        WidgetRow(widget: widget) {
-                            widgets.removeAll { $0.id == widget.id }
-                        }
-                    }
-                    .onMove { from, to in widgets.move(fromOffsets: from, toOffset: to) }
-                }
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .onDrop(of: [.text], delegate: WidgetDropDelegate(
-            side: side,
-            store: store,
-            widgets: $widgets
-        ))
-    }
-}
-
 // MARK: - Widget Row
 
 private struct WidgetRow: View {
@@ -240,8 +261,6 @@ private struct WidgetRow: View {
         }
         .padding(.horizontal, 8)
         .padding(.vertical, 6)
-        .background(Color.secondary.opacity(0.06))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
     }
 
     private func metricIcon(_ metric: WidgetMetric) -> String {
@@ -270,9 +289,7 @@ private struct WidgetRow: View {
 
 // MARK: - Drop Delegate
 
-private struct WidgetDropDelegate: DropDelegate {
-    let side: WidgetSide
-    let store: WidgetStore
+private struct WidgetListDropDelegate: DropDelegate {
     @Binding var widgets: [WidgetConfig]
 
     func performDrop(info: DropInfo) -> Bool {
@@ -298,7 +315,7 @@ private struct WidgetDropDelegate: DropDelegate {
     }
 
     func validateDrop(info: DropInfo) -> Bool {
-        return info.hasItemsConforming(to: [.text])
+        info.hasItemsConforming(to: [.text])
     }
 }
 
@@ -309,7 +326,6 @@ private struct CustomWidgetSheet: View {
     @State private var service = "claude"
     @State private var metric: WidgetMetric = .remainingTime
     @State private var style: WidgetStyle = .ring
-    @State private var side: WidgetSide = .left
     @Environment(\.dismiss) var dismiss
 
     private var availableMetrics: [WidgetMetric] {
@@ -350,10 +366,6 @@ private struct CustomWidgetSheet: View {
                         Text($0.displayName).tag($0)
                     }
                 }
-                Picker("位置", selection: $side) {
-                    Text("左侧").tag(WidgetSide.left)
-                    Text("右侧").tag(WidgetSide.right)
-                }
             }
             .navigationTitle("自定义组件")
             .toolbar {
@@ -363,15 +375,12 @@ private struct CustomWidgetSheet: View {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("添加") {
                         let cfg = WidgetConfig(service: service, metric: metric, style: style)
-                        switch side {
-                        case .left:  store.leftWidgets.append(cfg)
-                        case .right: store.rightWidgets.append(cfg)
-                        }
+                        store.widgets.append(cfg)
                         dismiss()
                     }
                 }
             }
         }
-        .frame(width: 320, height: 280)
+        .frame(width: 320, height: 240)
     }
 }
