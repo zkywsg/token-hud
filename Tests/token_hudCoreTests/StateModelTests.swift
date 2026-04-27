@@ -69,13 +69,38 @@ struct StateModelTests {
     }
 
     @Test func decodesAllQuotaTypes() throws {
-        for typeStr in ["time", "tokens", "money", "requests"] {
+        for typeStr in ["time", "tokens", "money", "requests",
+                        "input_tokens", "output_tokens", "daily_tokens",
+                        "monthly_tokens", "daily_requests", "monthly_requests", "cost_spent"] {
             let json = """
             {"version":1,"updatedAt":"2026-04-01T00:00:00Z","services":{"s":{"label":"S","quotas":[{"type":"\(typeStr)","total":100,"used":10,"unit":"x"}],"currentSession":null}}}
             """
             let state = try JSONDecoder().decode(StateFile.self, from: Data(json.utf8))
             #expect(state.services["s"]?.quotas.first != nil)
         }
+    }
+
+    @Test func sessionSnapshotNewFieldsNilWhenAbsent() throws {
+        let json = """
+        {"version":1,"updatedAt":"2026-04-01T00:00:00Z","services":{"s":{"label":"S","quotas":[],"currentSession":{"id":"x","startedAt":"2026-04-01T00:00:00Z","tokens":100}}}}
+        """
+        let state = try JSONDecoder().decode(StateFile.self, from: Data(json.utf8))
+        let session = state.services["s"]?.currentSession
+        #expect(session?.tokens == 100)
+        #expect(session?.inputTokens == nil)
+        #expect(session?.outputTokens == nil)
+        #expect(session?.costSpent == nil)
+    }
+
+    @Test func sessionSnapshotNewFieldsDecodeWhenPresent() throws {
+        let json = """
+        {"version":1,"updatedAt":"2026-04-01T00:00:00Z","services":{"s":{"label":"S","quotas":[],"currentSession":{"id":"x","startedAt":"2026-04-01T00:00:00Z","tokens":100,"inputTokens":60,"outputTokens":40,"costSpent":0.55}}}}
+        """
+        let state = try JSONDecoder().decode(StateFile.self, from: Data(json.utf8))
+        let session = state.services["s"]?.currentSession
+        #expect(session?.inputTokens == 60)
+        #expect(session?.outputTokens == 40)
+        #expect(session?.costSpent == 0.55)
     }
 
     @Test func serviceErrorIsNilWhenKeyAbsent() throws {
@@ -89,5 +114,23 @@ struct StateModelTests {
         """
         let state = try JSONDecoder().decode(StateFile.self, from: Data(json.utf8))
         #expect(state.services["codex"]?.error == "tokenExpired")
+    }
+
+    @Test func modelBreakdownNilWhenAbsent() throws {
+        let json = """
+        {"id":"x","startedAt":"2026-04-01T00:00:00Z"}
+        """
+        let session = try JSONDecoder().decode(SessionSnapshot.self, from: Data(json.utf8))
+        #expect(session.modelBreakdown == nil)
+    }
+
+    @Test func modelBreakdownDecodesWhenPresent() throws {
+        let json = """
+        {"id":"x","startedAt":"2026-04-01T00:00:00Z","modelBreakdown":[{"model":"claude-sonnet-4","inputTokens":1000,"outputTokens":500,"costSpent":0.05,"requests":2}]}
+        """
+        let session = try JSONDecoder().decode(SessionSnapshot.self, from: Data(json.utf8))
+        #expect(session.modelBreakdown?.count == 1)
+        #expect(session.modelBreakdown?.first?.model == "claude-sonnet-4")
+        #expect(session.modelBreakdown?.first?.inputTokens == 1000)
     }
 }
