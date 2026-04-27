@@ -22,6 +22,14 @@ struct WidgetRenderer: View {
                     TextWidget(text: formattedValue, subtext: nil)
                 case .aggregate:
                     AggregateWidget(icon: icon, value: formattedValue)
+                case .multi:
+                    MultiWidget(service: service, config: config, state: state)
+                case .countdown:
+                    CountdownWidget(fraction: fraction, label: formattedValue)
+                case .status:
+                    StatusWidget(fraction: fraction, label: formattedValue)
+                case .modelBreakdown:
+                    ModelBreakdownWidget(service: service)
                 }
             }
             .help(tooltipText)
@@ -91,6 +99,34 @@ struct WidgetRenderer: View {
             return quotaFraction(type: .dailyRequests)
         case .monthlyRequests:
             return quotaFraction(type: .monthlyRequests)
+        case .sessionDuration:
+            guard let session = svc.currentSession else { return 0 }
+            return min(1, WidgetValueComputer.sessionDurationSeconds(from: session) / 28800)
+        case .tokensPerMinute:
+            guard let session = svc.currentSession,
+                  let tokens = session.tokens,
+                  WidgetValueComputer.sessionDurationSeconds(from: session) > 60
+            else { return 0 }
+            let rate = tokens / (WidgetValueComputer.sessionDurationSeconds(from: session) / 60)
+            return min(1, rate / 200)
+        case .inputOutputRatio:
+            guard let input = svc.currentSession?.inputTokens,
+                  let output = svc.currentSession?.outputTokens,
+                  (input + output) > 0
+            else { return 0 }
+            return input / (input + output)
+        case .costPerRequest:
+            guard let cost = svc.currentSession?.costSpent,
+                  let quota = svc.quotas.first(where: { $0.type == .money }),
+                  let total = quota.total, total > 0
+            else { return 0 }
+            return cost / total
+        case .rateLimitStatus:
+            let fractions = svc.quotas.compactMap { q -> Double? in
+                guard q.total != nil, q.total! > 0 else { return nil }
+                return q.used / q.total!
+            }
+            return fractions.max() ?? 0
         }
     }
 
@@ -141,6 +177,25 @@ struct WidgetRenderer: View {
         case .monthlyRequests:
             guard let q = quotaFor(type: .monthlyRequests) else { return "—" }
             return WidgetValueComputer.formattedRemaining(quota: q)
+        case .sessionDuration:
+            guard let session = svc.currentSession else { return "—" }
+            return WidgetValueComputer.sessionDuration(from: session)
+        case .tokensPerMinute:
+            guard let session = svc.currentSession else { return "—" }
+            return WidgetValueComputer.tokensPerMinute(from: session)
+        case .inputOutputRatio:
+            guard let session = svc.currentSession else { return "—" }
+            return WidgetValueComputer.inputOutputRatio(from: session)
+        case .costPerRequest:
+            guard let session = svc.currentSession else { return "—" }
+            return WidgetValueComputer.costPerRequest(from: session)
+        case .rateLimitStatus:
+            let fractions = svc.quotas.compactMap { q -> Double? in
+                guard let t = q.total, t > 0 else { return nil }
+                return q.used / t
+            }
+            guard let max = fractions.max() else { return "—" }
+            return String(format: "%.0f%%", max * 100)
         }
     }
 
@@ -159,6 +214,11 @@ struct WidgetRenderer: View {
         case .costSpent:       return "dollarsign.circle.fill"
         case .dailyRequests:   return "number.circle"
         case .monthlyRequests: return "number.circle.fill"
+        case .sessionDuration:   return "timer"
+        case .tokensPerMinute:   return "bolt.fill"
+        case .inputOutputRatio:  return "arrow.left.arrow.right"
+        case .costPerRequest:    return "dollarsign.arrow.circlepath"
+        case .rateLimitStatus:   return "exclamationmark.triangle"
         }
     }
 
