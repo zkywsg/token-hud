@@ -10,13 +10,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var widgetStore: WidgetStore!
     private var appFilterStore: AppFilterStore!
     private var appWatcher: AppWatcher!
-    private var windowManager: NotchWindowManager!
+    private var floatingPanelManager: FloatingPanelManager!
+    private var hotkeyManager: GlobalHotkeyManager!
     private var statusItem: NSStatusItem?
     private var settingsController: NSWindowController?
     private var codexFetcher: CodexFetcher!
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
+        NSApp.setActivationPolicy(.accessory)
 
         stateWatcher    = StateWatcher()
         widgetStore     = WidgetStore()
@@ -26,13 +27,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appWatcher.start()
         codexFetcher = CodexFetcher()
 
-        windowManager = NotchWindowManager(
+        floatingPanelManager = FloatingPanelManager(
             stateWatcher: stateWatcher,
-            widgetStore: widgetStore,
-            appFilterStore: appFilterStore,
-            appWatcher: appWatcher
+            widgetStore: widgetStore
         )
-        windowManager.setup()
+        floatingPanelManager.setup()
+
+        hotkeyManager = GlobalHotkeyManager()
+        hotkeyManager.onHotkey = { [weak self] in
+            self?.floatingPanelManager.toggle()
+        }
+        hotkeyManager.setup()
+
+        if !GlobalHotkeyManager.isAccessibilityEnabled {
+            GlobalHotkeyManager.requestAccessibility()
+        }
 
         setupStatusBar()
     }
@@ -49,7 +58,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         stateWatcher.stop()
         appWatcher.stop()
-        windowManager.teardown()
+        floatingPanelManager.teardown()
+        hotkeyManager.teardown()
         codexFetcher.stop()
     }
 
@@ -60,8 +70,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         item.button?.image = NSImage(systemSymbolName: "circle.hexagongrid",
                                      accessibilityDescription: "token_hud")
         item.button?.image?.size = NSSize(width: 16, height: 16)
-        item.menu = buildMenu()
+        item.button?.sendAction(on: [.leftMouseUp, .rightMouseUp])
+        item.button?.action = #selector(statusBarButtonClicked(_:))
+        item.button?.target = self
         statusItem = item
+    }
+
+    @objc private func statusBarButtonClicked(_ sender: NSStatusBarButton) {
+        guard let event = NSApp.currentEvent else { return }
+        if event.type == .rightMouseUp {
+            let menu = buildMenu()
+            statusItem?.menu = menu
+            sender.menu = menu
+            sender.performClick(nil)
+            // Clear menu after showing so left-click works next time
+            DispatchQueue.main.async { [weak self] in
+                self?.statusItem?.menu = nil
+            }
+        } else {
+            statusItem?.menu = nil
+            openSettings()
+        }
     }
 
     private func buildMenu() -> NSMenu {
@@ -72,6 +101,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             action: #selector(openSettings),
             keyEquivalent: ","
         ))
+        menu.addItem(.separator())
+
+        let panelItem = NSMenuItem(
+            title: "Toggle Floating Panel",
+            action: #selector(toggleFloatingPanel),
+            keyEquivalent: "f"
+        )
+        panelItem.keyEquivalentModifierMask = [.command, .option]
+        menu.addItem(panelItem)
         menu.addItem(.separator())
 
         let launchItem = NSMenuItem(
@@ -93,6 +131,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         return menu
     }
 
+    // MARK: - Floating Panel
+
+    @objc private func toggleFloatingPanel() {
+        floatingPanelManager.toggle()
+    }
+
     // MARK: - Settings
 
     @objc private func openSettings() {
@@ -108,7 +152,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .environment(appFilterStore)
             .environment(codexFetcher)
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 520, height: 480),
+            contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
