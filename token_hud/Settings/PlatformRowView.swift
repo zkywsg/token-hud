@@ -270,6 +270,16 @@ struct PlatformRowView: View {
                 Text("API Key").font(.caption).foregroundColor(.secondary)
                 Spacer()
                 Text(maskedKey(key)).font(.caption.monospaced()).foregroundColor(.secondary)
+                Button("删除") {
+                    try? KeychainHelper.deleteAPIKey(for: platform.id)
+                    if platform.id == "mimo" {
+                        try? KeychainHelper.deleteMiMoConsoleCookie()
+                        storedMiMoCookie = nil
+                    }
+                    storedKey = nil
+                    openAIInput = ""
+                }
+                .font(.caption).foregroundColor(.red)
             }
         }
 
@@ -299,6 +309,15 @@ struct PlatformRowView: View {
                     Text("Console Cookie").font(.caption).foregroundColor(.secondary)
                     Spacer()
                     Text(maskedKey(cookie)).font(.caption.monospaced()).foregroundColor(.secondary)
+                    Button {
+                        try? KeychainHelper.deleteMiMoConsoleCookie()
+                        storedMiMoCookie = nil
+                    } label: {
+                        Image(systemName: "xmark.circle.fill")
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                    }
+                    .buttonStyle(.plain)
                 }
             }
             HStack {
@@ -307,9 +326,9 @@ struct PlatformRowView: View {
                     isShowingMiMoConnector = true
                 }
                 .font(.caption)
-                SecureField("Paste platform.xiaomimimo.com Cookie", text: $miMoCookieInput)
+                SecureField("Paste Cookie", text: $miMoCookieInput)
                     .textFieldStyle(.roundedBorder)
-                Button("Save Cookie") {
+                Button("Save") {
                     let cookie = miMoCookieInput.trimmingCharacters(in: .whitespacesAndNewlines)
                     guard !cookie.isEmpty else { return }
                     Task {
@@ -321,7 +340,7 @@ struct PlatformRowView: View {
                 }
                 .disabled(miMoCookieInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
-            Text("用于读取 Token Plan 用量；API key 本身不能访问控制台用量接口。")
+            Text("Token Plan 用量需要控制台登录态 Cookie；API key 只能用于模型调用。")
                 .font(.caption).foregroundColor(.secondary)
         }
     }
@@ -756,6 +775,17 @@ private struct APIPlatformRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .sheet(isPresented: $isShowingMiMoConnector) {
+            MiMoConsoleConnectorSheet(
+                status: $miMoConnectorStatus,
+                onConnected: { cookie in
+                    try? KeychainHelper.saveMiMoConsoleCookie(cookie)
+                    storedMiMoCookie = cookie
+                    isShowingMiMoConnector = false
+                    Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                }
+            )
+        }
         .task {
             storedKey = KeychainHelper.loadAPIKey(for: platform.id)
             if platform.id == "mimo" {
@@ -785,9 +815,24 @@ private struct APIPlatformRow: View {
                         }
                     }
                 } else {
-                    Button("更换 Key") { isEditing = true }
+                    HStack(spacing: 8) {
+                        Button("更换 Key") { isEditing = true }
+                            .font(.caption)
+                            .foregroundColor(.secondary)
+                        Spacer()
+                        Button("删除配置") {
+                            try? KeychainHelper.deleteAPIKey(for: platform.id)
+                            if platform.id == "mimo" {
+                                try? KeychainHelper.deleteMiMoConsoleCookie()
+                                storedMiMoCookie = nil
+                            }
+                            storedKey = nil
+                            keyInput = ""
+                            isEditing = false
+                        }
                         .font(.caption)
-                        .foregroundColor(.secondary)
+                        .foregroundColor(.red)
+                    }
                 }
 
                 if platform.id == "mimo" {
@@ -801,6 +846,15 @@ private struct APIPlatformRow: View {
                             Text(maskedKey(cookie))
                                 .font(.system(size: 11, design: .monospaced))
                                 .foregroundColor(.secondary)
+                            Button {
+                                try? KeychainHelper.deleteMiMoConsoleCookie()
+                                storedMiMoCookie = nil
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .font(.caption)
+                                    .foregroundColor(.secondary)
+                            }
+                            .buttonStyle(.plain)
                         }
                     }
                     HStack {
@@ -809,9 +863,9 @@ private struct APIPlatformRow: View {
                             isShowingMiMoConnector = true
                         }
                         .font(.caption)
-                        SecureField("Paste platform.xiaomimimo.com Cookie", text: $cookieInput)
+                        SecureField("Paste Cookie", text: $cookieInput)
                             .textFieldStyle(.roundedBorder)
-                        Button("Save Cookie") {
+                        Button("Save") {
                             let cookie = cookieInput.trimmingCharacters(in: .whitespacesAndNewlines)
                             guard !cookie.isEmpty else { return }
                             try? KeychainHelper.saveMiMoConsoleCookie(cookie)
@@ -829,18 +883,6 @@ private struct APIPlatformRow: View {
             .padding(.horizontal, 12)
             .padding(.bottom, 8)
         }
-        EmptyView()
-            .sheet(isPresented: $isShowingMiMoConnector) {
-                MiMoConsoleConnectorSheet(
-                    status: $miMoConnectorStatus,
-                    onConnected: { cookie in
-                        try? KeychainHelper.saveMiMoConsoleCookie(cookie)
-                        storedMiMoCookie = cookie
-                        isShowingMiMoConnector = false
-                        Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
-                    }
-                )
-            }
     }
 
     private var isConfigured: Bool {
@@ -917,6 +959,7 @@ private struct MiMoConsoleConnectorView: NSViewRepresentable {
         weak var webView: WKWebView?
         private var didConnect = false
         private var isChecking = false
+        private nonisolated(unsafe) var pollTimer: Timer?
 
         init(status: Binding<String>, onConnected: @escaping (String) -> Void) {
             self._status = status
@@ -935,10 +978,27 @@ private struct MiMoConsoleConnectorView: NSViewRepresentable {
             status = "页面加载失败：\(error.localizedDescription)"
         }
 
+        func stopPolling() {
+            pollTimer?.invalidate()
+            pollTimer = nil
+        }
+
+        deinit {
+            let timer = pollTimer
+            Task { @MainActor in timer?.invalidate() }
+        }
+
+        private func startPolling() {
+            guard pollTimer == nil else { return }
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+                DispatchQueue.main.async { self?.checkConnection() }
+            }
+        }
+
         private func checkConnection() {
             guard !didConnect, !isChecking, let webView else { return }
             isChecking = true
-            status = "正在检测 MiMo Token Plan 登录状态..."
+            status = "正在检测 MiMo 登录状态..."
 
             let script = """
             fetch('/api/v1/tokenPlan/usage', { credentials: 'include' })
@@ -952,6 +1012,7 @@ private struct MiMoConsoleConnectorView: NSViewRepresentable {
 
                 if let error {
                     self.status = "检测失败：\(error.localizedDescription)"
+                    self.startPolling()
                     return
                 }
 
@@ -961,11 +1022,14 @@ private struct MiMoConsoleConnectorView: NSViewRepresentable {
                     let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
                     (json["code"] as? Int) == 0
                 else {
-                    self.status = "请完成登录，登录后会自动连接。"
+                    self.status = "请登录 MiMo 控制台，登录后自动获取。"
+                    self.startPolling()
                     return
                 }
 
-                self.status = "登录已确认，正在保存 MiMo Cookie..."
+                self.status = "登录已确认，正在保存 Cookie..."
+                DispatchQueue.main.async { self.stopPolling() }
+
                 webView?.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
                     guard let self else { return }
                     let cookieHeader = cookies
@@ -975,6 +1039,7 @@ private struct MiMoConsoleConnectorView: NSViewRepresentable {
 
                     guard !cookieHeader.isEmpty else {
                         self.status = "未找到 MiMo Cookie，请刷新页面后重试。"
+                        self.startPolling()
                         return
                     }
 

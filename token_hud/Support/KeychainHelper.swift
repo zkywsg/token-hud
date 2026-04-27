@@ -47,6 +47,16 @@ enum KeychainHelper {
         load(account: "mimoConsoleCookie")
     }
 
+    static func deleteMiMoConsoleCookie() throws {
+        try delete(account: "mimoConsoleCookie")
+    }
+
+    // MARK: - Delete
+
+    static func deleteAPIKey(for platformID: String) throws {
+        try delete(account: "\(platformID)APIKey")
+    }
+
     // MARK: - Generic
 
     private static func save(_ value: String, account: String) throws {
@@ -76,5 +86,14 @@ enum KeychainHelper {
         let status = SecItemCopyMatching(query as CFDictionary, &result)
         guard status == errSecSuccess, let data = result as? Data else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    private static func delete(account: String) throws {
+        let query: [CFString: Any] = [
+            kSecClass:       kSecClassGenericPassword,
+            kSecAttrService: service,
+            kSecAttrAccount: account,
+        ]
+        SecItemDelete(query as CFDictionary)
     }
 }
