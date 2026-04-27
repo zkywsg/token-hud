@@ -27,6 +27,12 @@ public enum WidgetValueComputer {
             return formatTokens(remaining)
         case .requests:
             return String(Int(remaining))
+        case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens:
+            return formatTokens(remaining)
+        case .dailyRequests, .monthlyRequests:
+            return String(Int(remaining))
+        case .costSpent:
+            return String(format: "$%.2f", remaining)
         }
     }
 
@@ -37,6 +43,12 @@ public enum WidgetValueComputer {
         case .money:    return String(format: "$%.2f", quota.used)
         case .tokens:   return formatTokens(quota.used)
         case .requests: return String(Int(quota.used))
+        case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens:
+            return formatTokens(quota.used)
+        case .dailyRequests, .monthlyRequests:
+            return String(Int(quota.used))
+        case .costSpent:
+            return String(format: "$%.2f", quota.used)
         }
     }
 
@@ -45,12 +57,68 @@ public enum WidgetValueComputer {
         return formatTokens(t)
     }
 
+    public static func formattedInputTokens(_ session: SessionSnapshot?) -> String {
+        guard let t = session?.inputTokens else { return "—" }
+        return formatTokens(t)
+    }
+
+    public static func formattedOutputTokens(_ session: SessionSnapshot?) -> String {
+        guard let t = session?.outputTokens else { return "—" }
+        return formatTokens(t)
+    }
+
+    public static func formattedCostSpent(_ session: SessionSnapshot?) -> String {
+        guard let c = session?.costSpent else { return "—" }
+        return String(format: "$%.2f", c)
+    }
+
     public static func countdownString(to resetsAt: String) -> String? {
         let fmt = ISO8601DateFormatter()
         guard let date = fmt.date(from: resetsAt) else { return nil }
         let secs = date.timeIntervalSinceNow
         guard secs > 0 else { return "↺ now" }
         return "↺ " + formatSeconds(secs)
+    }
+
+    // MARK: - Derived metrics
+
+    public static func sessionDurationSeconds(from session: SessionSnapshot) -> Double {
+        let fmt = ISO8601DateFormatter()
+        guard let start = fmt.date(from: session.startedAt) else { return 0 }
+        return max(0, Date().timeIntervalSince(start))
+    }
+
+    public static func sessionDuration(from session: SessionSnapshot) -> String {
+        formatSeconds(sessionDurationSeconds(from: session))
+    }
+
+    public static func tokensPerMinute(from session: SessionSnapshot) -> String {
+        let duration = sessionDurationSeconds(from: session)
+        guard duration > 60, let tokens = session.tokens else { return "—" }
+        let rate = tokens / (duration / 60)
+        if rate >= 1000 { return String(format: "%.1fk/min", rate / 1000) }
+        return String(format: "%.0f/min", rate)
+    }
+
+    public static func inputOutputRatio(from session: SessionSnapshot) -> String {
+        guard let input = session.inputTokens, let output = session.outputTokens, output > 0 else { return "—" }
+        let ratio = input / output
+        return String(format: "%.1f:1", ratio)
+    }
+
+    public static func costPerRequest(from session: SessionSnapshot) -> String {
+        guard let cost = session.costSpent, let reqs = session.requests, reqs > 0 else { return "—" }
+        return String(format: "$%.2f", cost / reqs)
+    }
+
+    public static func formattedModelTokens(_ usage: ModelUsage) -> String {
+        let total = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+        return formatTokens(total)
+    }
+
+    public static func formattedModelCost(_ usage: ModelUsage) -> String {
+        guard let cost = usage.costSpent else { return "—" }
+        return String(format: "$%.2f", cost)
     }
 
     // MARK: - Private helpers
