@@ -21,10 +21,14 @@ private struct WidgetPreset: Identifiable, Equatable {
 
     var styleIcon: String {
         switch config.style {
-        case .ring:      return "◯"
-        case .bar:       return "▬"
-        case .text:      return "T"
-        case .aggregate: return "Σ"
+        case .ring:             return "◯"
+        case .bar:              return "▬"
+        case .text:             return "T"
+        case .aggregate:        return "Σ"
+        case .multi:            return "⊞"
+        case .countdown:        return "◎"
+        case .status:           return "●"
+        case .modelBreakdown:   return "⊞"
         }
     }
 }
@@ -230,19 +234,24 @@ private struct WidgetRow: View {
 
     private func metricIcon(_ metric: WidgetMetric) -> String {
         switch metric {
-        case .remainingTime:   return "clock"
-        case .resetCountdown:  return "arrow.clockwise"
-        case .tokensRemaining: return "text.bubble"
-        case .balance:         return "dollarsign.circle"
-        case .sessionTokens:   return "arrow.up.circle"
-        case .usagePercent:    return "chart.bar"
-        case .inputTokens:     return "arrow.down.circle"
-        case .outputTokens:    return "arrow.up.circle"
-        case .dailyTokens:     return "calendar"
-        case .monthlyTokens:   return "calendar.circle"
-        case .costSpent:       return "dollarsign.circle.fill"
-        case .dailyRequests:   return "number.circle"
-        case .monthlyRequests: return "number.circle.fill"
+        case .remainingTime:    return "clock"
+        case .resetCountdown:   return "arrow.clockwise"
+        case .tokensRemaining:  return "text.bubble"
+        case .balance:          return "dollarsign.circle"
+        case .sessionTokens:    return "arrow.up.circle"
+        case .usagePercent:     return "chart.bar"
+        case .inputTokens:      return "arrow.down.circle"
+        case .outputTokens:     return "arrow.up.circle"
+        case .dailyTokens:      return "calendar"
+        case .monthlyTokens:    return "calendar.circle"
+        case .costSpent:        return "dollarsign.circle.fill"
+        case .dailyRequests:    return "number.circle"
+        case .monthlyRequests:  return "number.circle.fill"
+        case .sessionDuration:  return "timer"
+        case .tokensPerMinute:  return "bolt"
+        case .inputOutputRatio: return "arrow.left.arrow.right"
+        case .costPerRequest:   return "dollarsign.arrow.circlepath"
+        case .rateLimitStatus:  return "exclamationmark.triangle"
         }
     }
 }

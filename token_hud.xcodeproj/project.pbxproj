@@ -35,6 +35,10 @@
 		721774A73B32A46B6F38E8E7 /* FloatingPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6569A286AF3B5F44D42D43 /* FloatingPanelView.swift */; };
 		7569DB94B92AFDE51D96FD87 /* GlobalHotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10FEFB7F97451821F83925F9 /* GlobalHotkeyManager.swift */; };
 		AA0008000000000000000008 /* GroupedOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0008000000000000000008F /* GroupedOverlayView.swift */; };
+			BB00010000000000000000B1 /* MultiWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010000000000000000F1 /* MultiWidget.swift */; };
+			BB00020000000000000000B2 /* CountdownWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00020000000000000000F2 /* CountdownWidget.swift */; };
+			BB00030000000000000000B3 /* StatusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00030000000000000000F3 /* StatusWidget.swift */; };
+			BB00040000000000000000B4 /* ModelBreakdownWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00040000000000000000F4 /* ModelBreakdownWidget.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -70,6 +74,10 @@
 		8F6569A286AF3B5F44D42D43 /* FloatingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelView.swift; sourceTree = "<group>"; };
 		10FEFB7F97451821F83925F9 /* GlobalHotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyManager.swift; sourceTree = "<group>"; };
 		AA0008000000000000000008F /* GroupedOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupedOverlayView.swift; sourceTree = "<group>"; };
+			BB00010000000000000000F1 /* MultiWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWidget.swift; sourceTree = "<group>"; };
+			BB00020000000000000000F2 /* CountdownWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountdownWidget.swift; sourceTree = "<group>"; };
+			BB00030000000000000000F3 /* StatusWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusWidget.swift; sourceTree = "<group>"; };
+			BB00040000000000000000F4 /* ModelBreakdownWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelBreakdownWidget.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXGroup section */
@@ -165,7 +173,11 @@
 			children = (
 				868DD929F1D2119F6B8D9A12 /* AggregateWidget.swift */,
 				66EE1EED049C463DEC42FEF8 /* BarWidget.swift */,
+				BB00020000000000000000F2 /* CountdownWidget.swift */,
+				BB00040000000000000000F4 /* ModelBreakdownWidget.swift */,
+				BB00010000000000000000F1 /* MultiWidget.swift */,
 				5FB21BF5542FE6CA4AED10F7 /* RingWidget.swift */,
+				BB00030000000000000000F3 /* StatusWidget.swift */,
 				C64092BD47770FC0CCEB8EFB /* TextWidget.swift */,
 				ECD0698516FDF9871FFF5C6F /* WidgetConfig.swift */,
 				C8A4772EC1DF06224545FA80 /* WidgetRenderer.swift */,
@@ -279,6 +291,10 @@
 				721774A73B32A46B6F38E8E7 /* FloatingPanelView.swift in Sources */,
 				7569DB94B92AFDE51D96FD87 /* GlobalHotkeyManager.swift in Sources */,
 				AA0008000000000000000008 /* GroupedOverlayView.swift in Sources */,
+					BB00010000000000000000B1 /* MultiWidget.swift in Sources */,
+					BB00020000000000000000B2 /* CountdownWidget.swift in Sources */,
+					BB00030000000000000000B3 /* StatusWidget.swift in Sources */,
+					BB00040000000000000000B4 /* ModelBreakdownWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
