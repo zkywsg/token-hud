@@ -207,7 +207,15 @@ public enum MiniMaxTokenPlanParser {
     public static func service(from data: Data, now: Date = Date()) -> Service? {
         guard let root = try? JSONSerialization.jsonObject(with: data) else { return nil }
 
-        let quotas = quotaRecords(in: root)
+        // MiniMax wraps successful responses in { base_resp: { status_code: 0 }, data: { ... } }.
+        let target: Any
+        if let dict = root as? [String: Any], let dataObj = dict["data"] {
+            target = dataObj
+        } else {
+            target = root
+        }
+
+        let quotas = quotaRecords(in: target)
             .reduce(into: [Quota]()) { result, record in
                 guard
                     let total = record.total,
@@ -347,6 +355,8 @@ public enum MiniMaxTokenPlanParser {
             return haystack.contains("daily") ? .dailyRequests : .requests
         }
         if haystack.contains("cost") || haystack.contains("spent") { return .costSpent }
+        if haystack.contains("balance") || haystack.contains("money") || haystack.contains("credit")
+            || haystack.contains("amount") || haystack.contains("cash") { return .money }
         return .requests
     }
 

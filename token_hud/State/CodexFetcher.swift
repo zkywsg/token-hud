@@ -561,7 +561,7 @@ final class APIPlatformFetcher {
 
     /// MiniMax Token Plan usage API.
     /// Official docs expose usage remaining at:
-    /// https://www.minimax.io/v1/api/openplatform/coding_plan/remains
+    /// https://www.minimax.io/v1/token_plan/remains
     /// Standard pay-as-you-go Open Platform keys can still validate via /v1/models,
     /// but MiniMax does not document a public balance endpoint for those keys.
     private nonisolated func fetchMiniMax() async -> Service? {
@@ -570,7 +570,7 @@ final class APIPlatformFetcher {
             return nil
         }
 
-        var usageRequest = URLRequest(url: URL(string: "https://www.minimax.io/v1/api/openplatform/coding_plan/remains")!)
+        var usageRequest = URLRequest(url: URL(string: "https://www.minimax.io/v1/token_plan/remains")!)
         usageRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         usageRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
         usageRequest.timeoutInterval = 15
@@ -583,28 +583,53 @@ final class APIPlatformFetcher {
                 return nil
             }
 
-            print("[MiniMax] GET /coding_plan/remains → status \(httpResponse.statusCode)")
+            print("[MiniMax] GET /token_plan/remains → status \(httpResponse.statusCode)")
 
             if httpResponse.statusCode == 401 {
                 print("[MiniMax] 401 from remains — invalid API key")
                 return Service(label: "MiniMax", quotas: [], currentSession: nil, error: "Invalid API key")
             }
 
-            if (200..<300).contains(httpResponse.statusCode),
-               let service = MiniMaxTokenPlanParser.service(from: data) {
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                print("[MiniMax] remains request failed: \(httpResponse.statusCode)")
+                // Fall through to /v1/models fallback below
+                return await fetchMiniMaxViaModels(apiKey: apiKey)
+            }
+
+            // MiniMax wraps business errors inside HTTP 200 with base_resp.
+            if let json = try JSONSerialization.jsonObject(with: data) as? [String: Any],
+               let baseResp = json["base_resp"] as? [String: Any] {
+                let code = baseResp["status_code"] as? Int ?? -1
+                let msg = baseResp["status_msg"] as? String ?? "Unknown error"
+                print("[MiniMax] base_resp: code=\(code) msg=\(msg)")
+                if code == 1004 {
+                    return Service(label: "MiniMax", quotas: [], currentSession: nil, error: "Invalid API key")
+                }
+                if code == 1013 {
+                    // 1013 usually means "not a token plan key" (Open Platform key)
+                    return await fetchMiniMaxViaModels(apiKey: apiKey)
+                }
+                if code != 0 {
+                    return Service(label: "MiniMax", quotas: [], currentSession: nil, error: msg)
+                }
+                // code == 0: success — continue to parse
+            }
+
+            if let service = MiniMaxTokenPlanParser.service(from: data) {
                 print("[MiniMax] parsed Token Plan usage: quotas=\(service.quotas.count)")
                 return service
             }
 
-            if (200..<300).contains(httpResponse.statusCode) {
-                print("[MiniMax] remains returned 2xx but no quota fields could be parsed")
-            } else {
-                print("[MiniMax] remains request failed: \(httpResponse.statusCode)")
-            }
+            print("[MiniMax] remains returned 2xx but no quota fields could be parsed")
         } catch {
             print("[MiniMax] remains network error: \(error.localizedDescription)")
         }
 
+        return await fetchMiniMaxViaModels(apiKey: apiKey)
+    }
+
+    /// Fallback for Open Platform (pay-as-you-go) keys: validate via /v1/models.
+    private nonisolated func fetchMiniMaxViaModels(apiKey: String) async -> Service? {
         var request = URLRequest(url: URL(string: "https://api.minimax.io/v1/models")!)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 15

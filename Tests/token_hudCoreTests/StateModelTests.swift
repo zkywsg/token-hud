@@ -161,6 +161,70 @@ struct StateModelTests {
         #expect(service?.currentSession?.requests == 750)
     }
 
+    @Test func miniMaxTokenPlanParserHandlesModelRemains() throws {
+        let json = """
+        {
+          "base_resp": {
+            "status_code": 0,
+            "status_msg": ""
+          },
+          "data": {
+            "model_remains": {
+              "MiniMax-M2.7": {
+                "total_quota": 1500,
+                "remain": 1200,
+                "reset_at": "2026-04-01T05:00:00Z"
+              },
+              "speech-2.8": {
+                "total_quota": 4000,
+                "remain": 3500,
+                "reset_at": "2026-04-02T00:00:00Z"
+              }
+            }
+          }
+        }
+        """
+
+        let service = MiniMaxTokenPlanParser.service(
+            from: Data(json.utf8),
+            now: ISO8601DateFormatter().date(from: "2026-04-01T00:00:00Z")!
+        )
+
+        #expect(service?.label == "MiniMax")
+        #expect(service?.quotas.count == 2)
+
+        let m27 = service?.quotas.first { $0.unit == "requests" }
+        #expect(m27?.total == 1500)
+        #expect(m27?.used == 300)
+        #expect(m27?.remaining == 1200)
+    }
+
+    @Test func miniMaxTokenPlanParserRecognizesBalanceField() throws {
+        let json = """
+        {
+          "data": {
+            "balance": {
+              "total": 100.0,
+              "remaining": 45.5,
+              "currency": "CNY"
+            }
+          }
+        }
+        """
+
+        let service = MiniMaxTokenPlanParser.service(
+            from: Data(json.utf8),
+            now: ISO8601DateFormatter().date(from: "2026-04-01T00:00:00Z")!
+        )
+
+        #expect(service?.label == "MiniMax")
+        #expect(service?.quotas.count == 1)
+        #expect(service?.quotas.first?.type == .money)
+        #expect(service?.quotas.first?.total == 100.0)
+        #expect(service?.quotas.first?.used == 54.5)
+        #expect(service?.quotas.first?.remaining == 45.5)
+    }
+
     @Test func miMoTokenPlanParserBuildsCreditQuotaAndExpiry() throws {
         let usageJSON = """
         {

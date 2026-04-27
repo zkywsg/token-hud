@@ -910,6 +910,7 @@ private struct APIPlatformRow: View {
 private struct MiMoConsoleConnectorSheet: View {
     @Binding var status: String
     let onConnected: (String) -> Void
+    @Environment(\.dismiss) private var dismiss
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -920,6 +921,8 @@ private struct MiMoConsoleConnectorSheet: View {
                 Text(status)
                     .font(.caption)
                     .foregroundColor(.secondary)
+                Button("关闭") { dismiss() }
+                    .font(.caption)
             }
 
             MiMoConsoleConnectorView(status: $status, onConnected: onConnected)
@@ -967,7 +970,10 @@ private struct MiMoConsoleConnectorView: NSViewRepresentable {
         }
 
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            checkConnection()
+            // Delay slightly so cookies set by the just-loaded page are available.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1) { [weak self] in
+                self?.checkConnection()
+            }
         }
 
         func webView(_ webView: WKWebView, didFail navigation: WKNavigation!, withError error: Error) {
@@ -990,63 +996,58 @@ private struct MiMoConsoleConnectorView: NSViewRepresentable {
 
         private func startPolling() {
             guard pollTimer == nil else { return }
-            pollTimer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
+            pollTimer = Timer.scheduledTimer(withTimeInterval: 4, repeats: true) { [weak self] _ in
                 DispatchQueue.main.async { self?.checkConnection() }
             }
         }
 
+        /// Read cookies from the WebView's cookie store and make a native HTTP request
+        /// to verify login. Much more reliable than evaluateJavaScript with promises.
         private func checkConnection() {
             guard !didConnect, !isChecking, let webView else { return }
             isChecking = true
             status = "正在检测 MiMo 登录状态..."
 
-            let script = """
-            fetch('/api/v1/tokenPlan/usage', { credentials: 'include' })
-              .then(response => response.text())
-              .catch(error => JSON.stringify({ code: -1, message: String(error) }))
-            """
-
-            webView.evaluateJavaScript(script) { [weak self, weak webView] result, error in
+            webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
                 guard let self else { return }
-                self.isChecking = false
 
-                if let error {
-                    self.status = "检测失败：\(error.localizedDescription)"
-                    self.startPolling()
-                    return
-                }
+                let relevant = cookies.filter { $0.domain.contains("xiaomimimo.com") }
+                let cookieHeader = relevant
+                    .map { "\($0.name)=\($0.value)" }
+                    .joined(separator: "; ")
 
-                guard
-                    let text = result as? String,
-                    let data = text.data(using: .utf8),
-                    let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                    (json["code"] as? Int) == 0
-                else {
+                guard !cookieHeader.isEmpty else {
+                    self.isChecking = false
                     self.status = "请登录 MiMo 控制台，登录后自动获取。"
                     self.startPolling()
                     return
                 }
 
-                self.status = "登录已确认，正在保存 Cookie..."
-                DispatchQueue.main.async { self.stopPolling() }
+                var request = URLRequest(url: URL(string: "https://platform.xiaomimimo.com/api/v1/tokenPlan/usage")!)
+                request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
+                request.timeoutInterval = 12
 
-                webView?.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
-                    guard let self else { return }
-                    let cookieHeader = cookies
-                        .filter { $0.domain.contains("xiaomimimo.com") }
-                        .map { "\($0.name)=\($0.value)" }
-                        .joined(separator: "; ")
+                URLSession.shared.dataTask(with: request) { data, response, error in
+                    DispatchQueue.main.async {
+                        self.isChecking = false
 
-                    guard !cookieHeader.isEmpty else {
-                        self.status = "未找到 MiMo Cookie，请刷新页面后重试。"
-                        self.startPolling()
-                        return
+                        guard let data,
+                              let httpResponse = response as? HTTPURLResponse,
+                              (200..<300).contains(httpResponse.statusCode),
+                              let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                              (json["code"] as? Int) == 0
+                        else {
+                            self.status = "请登录 MiMo 控制台，登录后自动获取。"
+                            self.startPolling()
+                            return
+                        }
+
+                        self.stopPolling()
+                        self.didConnect = true
+                        self.status = "已连接 MiMo 控制台。"
+                        self.onConnected(cookieHeader)
                     }
-
-                    self.didConnect = true
-                    self.status = "已连接 MiMo 控制台。"
-                    self.onConnected(cookieHeader)
-                }
+                }.resume()
             }
         }
     }
