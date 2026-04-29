@@ -4,6 +4,7 @@ import SwiftUI
 struct BarWidget: View {
     let fraction: Double   // 0.0 – 1.0 (used/total)
     let label: String
+    var detail: String? = nil
     let width: CGFloat
 
     var body: some View {
@@ -11,7 +12,8 @@ struct BarWidget: View {
             Text(label)
                 .font(.system(size: 9, weight: .medium, design: .rounded))
                 .foregroundColor(.white.opacity(0.9))
-                .lineLimit(1)
+            .lineLimit(1)
+            .minimumScaleFactor(0.65)
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
@@ -26,6 +28,14 @@ struct BarWidget: View {
                 }
             }
             .frame(height: 4)
+
+            if let detail {
+                Text(detail)
+                    .font(.system(size: 7, weight: .regular, design: .rounded))
+                    .foregroundColor(.white.opacity(0.6))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.7)
+            }
         }
         .frame(width: width)
     }

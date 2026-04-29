@@ -34,6 +34,40 @@ struct StateModelTests {
     }
     """
 
+    @Test func mimoCookieHeaderPrefersMostSpecificCookieForTokenPlan() throws {
+        let url = try #require(URL(string: "https://platform.xiaomimimo.com/api/v1/tokenPlan/usage"))
+        let oldSession = try #require(HTTPCookie(properties: [
+            .domain: ".xiaomimimo.com",
+            .path: "/",
+            .name: "session",
+            .value: "old",
+            .secure: "TRUE"
+        ]))
+        let currentSession = try #require(HTTPCookie(properties: [
+            .domain: "platform.xiaomimimo.com",
+            .path: "/",
+            .name: "session",
+            .value: "current",
+            .secure: "TRUE"
+        ]))
+        let consoleOnly = try #require(HTTPCookie(properties: [
+            .domain: "platform.xiaomimimo.com",
+            .path: "/console",
+            .name: "console_only",
+            .value: "skip",
+            .secure: "TRUE"
+        ]))
+
+        let header = MiMoCookieHeaderBuilder.header(
+            from: [oldSession, consoleOnly, currentSession],
+            for: url
+        )
+
+        #expect(header.contains("session=current"))
+        #expect(!header.contains("session=old"))
+        #expect(!header.contains("console_only=skip"))
+    }
+
     @Test func decodesVersion() throws {
         let state = try JSONDecoder().decode(StateFile.self, from: Data(fullStateJSON.utf8))
         #expect(state.version == 1)

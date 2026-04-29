@@ -33,6 +33,80 @@ struct WidgetValueComputerTests {
         #expect(WidgetValueComputer.formattedCredits(373_076) == "373.1k")
     }
 
+    @Test func formattedMiMoTokenPlanExpiryShowsAbsoluteDate() {
+        let service = Service(
+            label: "MiMo Lite",
+            quotas: [
+                Quota(
+                    type: .monthlyTokens,
+                    total: 60_000_000,
+                    used: 59_626_924,
+                    unit: "credits",
+                    resetsAt: "2026-05-03T23:59:59Z"
+                )
+            ],
+            currentSession: nil
+        )
+
+        #expect(WidgetValueComputer.formattedMiMoTokenPlanExpiry(service) == "05/03 23:59")
+    }
+
+    @Test func formattedMiMoTokenPlanExpiryShowsExpiredLogin() {
+        let service = Service(
+            label: "MiMo",
+            quotas: [],
+            currentSession: nil,
+            error: "Console login expired"
+        )
+
+        #expect(WidgetValueComputer.formattedMiMoTokenPlanExpiry(service) == "登录过期")
+    }
+
+    @Test func formattedMiMoTokenPlanExpiryShowsMissingTime() {
+        let service = Service(
+            label: "MiMo Lite",
+            quotas: [
+                Quota(type: .monthlyTokens, total: 60_000_000, used: 1_000_000, unit: "credits", resetsAt: nil)
+            ],
+            currentSession: nil
+        )
+
+        #expect(WidgetValueComputer.formattedMiMoTokenPlanExpiry(service) == "无到期时间")
+    }
+
+    @Test func codexRateLimitDisplayIncludesRemainingPercentAndResetCountdown() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let resetsAt = ISO8601DateFormatter().string(from: now.addingTimeInterval(90 * 60))
+        let quota = Quota(type: .time, total: 18_000, used: 4_500, unit: "seconds", resetsAt: resetsAt)
+
+        let display = WidgetValueComputer.codexRateLimitDisplay(quota, now: now)
+
+        #expect(display.value == "75% 5 hours")
+        #expect(display.detail == "↺ 1h 30m")
+    }
+
+    @Test func codexRateLimitDisplayUsesCompactSevenDayLabel() {
+        let now = Date(timeIntervalSince1970: 1_800_000_000)
+        let resetsAt = ISO8601DateFormatter().string(from: now.addingTimeInterval(3 * 86400))
+        let quota = Quota(type: .time, total: 604_800, used: 302_400, unit: "seconds", resetsAt: resetsAt)
+
+        let display = WidgetValueComputer.codexRateLimitDisplay(quota, now: now)
+
+        #expect(display.value == "50% 7day")
+        #expect(display.detail == "↺ 3d 0h")
+    }
+
+    @Test func codexSubscriptionStatusIncludesPlanName() {
+        let service = Service(label: "Codex Plus", quotas: [], currentSession: nil)
+
+        #expect(WidgetValueComputer.codexSubscriptionStatus(service) == "Plus 已订阅")
+    }
+
+    @Test func codexServiceLabelIncludesKnownPlan() {
+        #expect(WidgetValueComputer.codexServiceLabel(plan: "plus") == "Codex Plus")
+        #expect(WidgetValueComputer.codexServiceLabel(plan: "unknown") == "Codex")
+    }
+
     @Test func sessionTokensFormatted() {
         let session = SessionSnapshot(id: "x", startedAt: "2026-04-01T00:00:00Z",
                                       tokens: 1500, time: nil, money: nil, requests: nil)

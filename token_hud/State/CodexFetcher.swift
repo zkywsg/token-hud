@@ -68,7 +68,7 @@ final class CodexFetcher {
         isFetching = true
         defer { isFetching = false }
 
-        let email = readCodexEmail()
+        let identity = readCodexIdentity()
 
         let result = await Task.detached(priority: .utility) {
             CodexFetcher.queryMonthlyUsage()
@@ -84,15 +84,21 @@ final class CodexFetcher {
                 tokensUsed: usage.monthlyTokens,
                 primary: usage.primary,
                 secondary: usage.secondary,
-                email: email
+                email: identity.email,
+                plan: identity.plan
             ))
         }
     }
 
     // MARK: - Local data sources
 
-    /// Read the authenticated user's email from ~/.codex/auth.json (synchronous, tiny file).
-    private func readCodexEmail() -> String? {
+    private struct CodexIdentity {
+        let email: String?
+        let plan: String?
+    }
+
+    /// Read the authenticated user's identity from ~/.codex/auth.json (synchronous, tiny file).
+    private func readCodexIdentity() -> CodexIdentity {
         let path = (NSHomeDirectory() as NSString).appendingPathComponent(".codex/auth.json")
         guard
             let data   = FileManager.default.contents(atPath: path),
@@ -101,7 +107,7 @@ final class CodexFetcher {
             let idTok  = tokens["id_token"] as? String,
             let parts  = Optional(idTok.components(separatedBy: ".")),
             parts.count == 3
-        else { return nil }
+        else { return CodexIdentity(email: nil, plan: nil) }
         var b64 = parts[1]
             .replacingOccurrences(of: "-", with: "+")
             .replacingOccurrences(of: "_", with: "/")
@@ -109,10 +115,13 @@ final class CodexFetcher {
         if rem > 0 { b64 += String(repeating: "=", count: 4 - rem) }
         guard
             let data2   = Data(base64Encoded: b64),
-            let payload = try? JSONSerialization.jsonObject(with: data2) as? [String: Any],
-            let email   = payload["email"] as? String
-        else { return nil }
-        return email
+            let payload = try? JSONSerialization.jsonObject(with: data2) as? [String: Any]
+        else { return CodexIdentity(email: nil, plan: nil) }
+        let auth = payload["auth"] as? [String: Any]
+        return CodexIdentity(
+            email: payload["email"] as? String,
+            plan: auth?["chatgpt_plan_type"] as? String
+        )
     }
 
     // MARK: - JSONL types
@@ -269,7 +278,8 @@ final class CodexFetcher {
         tokensUsed: Int,
         primary:    RateLimitInfo?,
         secondary:  RateLimitInfo?,
-        email:      String?
+        email:      String?,
+        plan:       String?
     ) -> Service {
         let calendar     = Calendar.current
         let now          = Date()
@@ -306,7 +316,7 @@ final class CodexFetcher {
         }
 
         return Service(
-            label: "Codex",
+            label: WidgetValueComputer.codexServiceLabel(plan: plan),
             quotas: quotas,
             currentSession: SessionSnapshot(
                 id:        "codex-monthly",

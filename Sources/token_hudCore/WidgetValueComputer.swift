@@ -2,6 +2,15 @@
 import Foundation
 
 public enum WidgetValueComputer {
+    public struct ValueWithDetail: Equatable, Sendable {
+        public let value: String
+        public let detail: String?
+
+        public init(value: String, detail: String?) {
+            self.value = value
+            self.detail = detail
+        }
+    }
 
     public static func remainingValue(for quota: Quota) -> Double {
         (quota.total ?? 0) - quota.used
@@ -41,6 +50,58 @@ public enum WidgetValueComputer {
         return formatTokens(credits)
     }
 
+    public static func formattedMiMoTokenPlanExpiry(_ service: Service?) -> String {
+        guard let service else { return "—" }
+        if service.error == "Console login expired" {
+            return "登录过期"
+        }
+        guard let resetsAt = service.quotas.first(where: { $0.unit.lowercased() == "credits" })?.resetsAt else {
+            return "无到期时间"
+        }
+        let isoFormatter = ISO8601DateFormatter()
+        guard let date = isoFormatter.date(from: resetsAt) else {
+            return "无到期时间"
+        }
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(secondsFromGMT: 0)
+        formatter.dateFormat = "MM/dd HH:mm"
+        return formatter.string(from: date)
+    }
+
+    public static func codexRateLimitDisplay(_ quota: Quota, now: Date = Date()) -> ValueWithDetail {
+        let remaining = 1.0 - usageFraction(for: quota)
+        let label = codexRateLimitWindowLabel(quota)
+        let value = String(format: "%.0f%% %@", remaining * 100, label)
+        let detail = quota.resetsAt.flatMap { countdownString(to: $0, now: now) }
+        return ValueWithDetail(value: value, detail: detail)
+    }
+
+    public static func codexSubscriptionStatus(_ service: Service?) -> String {
+        guard let service else { return "未连接" }
+        if service.error != nil { return "异常" }
+        let plan = service.label
+            .replacingOccurrences(of: "Codex", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        let planName = plan.isEmpty ? "Codex" : plan
+        return "\(planName) 已订阅"
+    }
+
+    public static func codexServiceLabel(plan: String?) -> String {
+        guard let plan = plan?.trimmingCharacters(in: .whitespacesAndNewlines),
+              !plan.isEmpty,
+              plan.lowercased() != "unknown"
+        else { return "Codex" }
+        return "Codex \(plan.capitalized)"
+    }
+
+    private static func codexRateLimitWindowLabel(_ quota: Quota) -> String {
+        let seconds = Int(quota.total ?? 0)
+        if seconds >= 604_800 { return "7day" }
+        if seconds >= 18_000 { return "5 hours" }
+        return "limit"
+    }
+
     /// Format the used amount (for quotas with no hard cap).
     public static func formattedUsed(quota: Quota) -> String {
         switch quota.type {
@@ -78,9 +139,13 @@ public enum WidgetValueComputer {
     }
 
     public static func countdownString(to resetsAt: String) -> String? {
+        countdownString(to: resetsAt, now: Date())
+    }
+
+    public static func countdownString(to resetsAt: String, now: Date) -> String? {
         let fmt = ISO8601DateFormatter()
         guard let date = fmt.date(from: resetsAt) else { return nil }
-        let secs = date.timeIntervalSinceNow
+        let secs = date.timeIntervalSince(now)
         guard secs > 0 else { return "↺ now" }
         return "↺ " + formatSeconds(secs)
     }
@@ -130,8 +195,10 @@ public enum WidgetValueComputer {
 
     private static func formatSeconds(_ secs: Double) -> String {
         let total = Int(secs)
-        let h = total / 3600
+        let d = total / 86400
+        let h = (total % 86400) / 3600
         let m = (total % 3600) / 60
+        if d > 0 { return "\(d)d \(h)h" }
         if h > 0 { return "\(h)h \(m)m" }
         return "\(m)m"
     }

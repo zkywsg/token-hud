@@ -96,6 +96,12 @@ private func metricTitle(_ widget: WidgetConfig) -> String {
     if widget.service == "codex", widget.metric == .remainingTime {
         return widget.quotaIndex == 1 ? "7 天剩余量" : "5 小时剩余量"
     }
+    if widget.service == "mimo", widget.metric == .resetCountdown {
+        return "Token Plan 到期时间"
+    }
+    if widget.service == "mimo", widget.metric == .remainingTime {
+        return "Token Plan 到期时间"
+    }
     return widget.metric.displayName
 }
 
@@ -408,7 +414,7 @@ private struct CustomWidgetSheet: View {
                 }
                 Picker("指标", selection: $metric) {
                     ForEach(availableMetrics, id: \.self) {
-                        Text($0.displayName).tag($0)
+                        Text(metricTitle(WidgetConfig(service: service, metric: $0, style: style))).tag($0)
                     }
                 }
                 Picker("样式", selection: $style) {

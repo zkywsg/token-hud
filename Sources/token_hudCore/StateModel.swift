@@ -457,3 +457,53 @@ public enum MiMoTokenPlanParser {
         return nil
     }
 }
+
+public enum MiMoCookieHeaderBuilder {
+    public static func header(from cookies: [HTTPCookie], for url: URL) -> String {
+        let validCookies = cookies.filter { cookie in
+            guard matches(cookie: cookie, url: url) else { return false }
+            if let expiresDate = cookie.expiresDate, expiresDate <= Date() { return false }
+            return true
+        }
+
+        let deduped = Dictionary(grouping: validCookies, by: \.name).compactMap { _, cookies in
+            cookies.sorted(by: isMoreSpecific).first
+        }
+
+        return deduped
+            .sorted(by: isMoreSpecific)
+            .map { "\($0.name)=\($0.value)" }
+            .joined(separator: "; ")
+    }
+
+    private static func matches(cookie: HTTPCookie, url: URL) -> Bool {
+        guard let host = url.host?.lowercased() else { return false }
+        if cookie.isSecure, url.scheme?.lowercased() != "https" { return false }
+
+        let domain = cookie.domain.lowercased()
+        let normalizedDomain = domain.hasPrefix(".") ? String(domain.dropFirst()) : domain
+        let domainMatches = host == normalizedDomain || host.hasSuffix(".\(normalizedDomain)")
+        guard domainMatches else { return false }
+
+        let requestPath = url.path.isEmpty ? "/" : url.path
+        let cookiePath = cookie.path.isEmpty ? "/" : cookie.path
+        guard requestPath == cookiePath || requestPath.hasPrefix(cookiePath) else { return false }
+        if cookiePath != "/", requestPath.count > cookiePath.count {
+            let index = requestPath.index(requestPath.startIndex, offsetBy: cookiePath.count)
+            guard requestPath[index] == "/" else { return false }
+        }
+        return true
+    }
+
+    private static func isMoreSpecific(_ lhs: HTTPCookie, than rhs: HTTPCookie) -> Bool {
+        let lhsDomain = lhs.domain.hasPrefix(".") ? String(lhs.domain.dropFirst()) : lhs.domain
+        let rhsDomain = rhs.domain.hasPrefix(".") ? String(rhs.domain.dropFirst()) : rhs.domain
+        if lhsDomain.count != rhsDomain.count {
+            return lhsDomain.count > rhsDomain.count
+        }
+        if lhs.path.count != rhs.path.count {
+            return lhs.path.count > rhs.path.count
+        }
+        return lhs.name < rhs.name
+    }
+}

@@ -17,9 +17,14 @@ struct WidgetRenderer: View {
                 case .ring:
                     RingWidget(fraction: fraction, label: formattedValue, size: 22 * widgetSizeScale)
                 case .bar:
-                    BarWidget(fraction: fraction, label: formattedValue, width: 60 * widgetSizeScale)
+                    BarWidget(
+                        fraction: fraction,
+                        label: formattedValue,
+                        detail: formattedDetail,
+                        width: 60 * widgetSizeScale
+                    )
                 case .text:
-                    TextWidget(text: formattedValue, subtext: nil)
+                    TextWidget(text: formattedValue, subtext: formattedDetail)
                 case .aggregate:
                     AggregateWidget(icon: icon, value: formattedValue)
                 case .multi:
@@ -34,11 +39,13 @@ struct WidgetRenderer: View {
             }
             .help(tooltipText)
 
-            Text(widgetCaption)
-                .font(.system(size: 8, weight: .regular, design: .rounded))
-                .foregroundColor(.white.opacity(0.55))
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
+            if !widgetCaption.isEmpty {
+                Text(widgetCaption)
+                    .font(.system(size: 8, weight: .regular, design: .rounded))
+                    .foregroundColor(.white.opacity(0.55))
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.65)
+            }
         }
     }
 
@@ -48,7 +55,12 @@ struct WidgetRenderer: View {
         guard let svc = service else { return 0 }
         switch config.metric {
         case .remainingTime:
-            return quotaFraction(type: .time)
+            guard let q = quotaFor(type: .time) ?? creditQuota() else { return 0 }
+            if q.type == .time { return quotaFraction(type: .time) }
+            guard let resetsAt = q.resetsAt,
+                  let date = ISO8601DateFormatter().date(from: resetsAt)
+            else { return 0 }
+            return max(0, min(1, date.timeIntervalSinceNow / 2_592_000))
         case .tokensRemaining:
             return quotaFraction(type: .tokens)
         case .balance:
@@ -65,13 +77,12 @@ struct WidgetRenderer: View {
             return tokens / qTotal
         case .resetCountdown:
             guard let q = quotaFor(type: .time) ?? creditQuota(),
-                  let resetsAt = q.resetsAt
+                  let resetsAt = q.resetsAt,
+                  let date = ISO8601DateFormatter().date(from: resetsAt)
             else { return 0 }
-            let fmt = ISO8601DateFormatter()
-            guard let date = fmt.date(from: resetsAt) else { return 0 }
             let remaining = date.timeIntervalSinceNow
-            let total = q.total ?? 0
-            return max(0, min(1, remaining / max(total, 1)))
+            let maxSeconds = q.type == .time ? max(q.total ?? 0, 1) : 2_592_000.0 // 30 days for credit quotas
+            return max(0, min(1, remaining / maxSeconds))
         case .inputTokens:
             guard let val = svc.currentSession?.inputTokens,
                   let quota = svc.quotas.first(where: { $0.type == .tokens }),
@@ -150,14 +161,21 @@ struct WidgetRenderer: View {
         guard let svc = service else { return "—" }
         switch config.metric {
         case .remainingTime:
-            guard let q = quotaFor(type: .time) else { return "—" }
+            if config.service == "mimo" {
+                return WidgetValueComputer.formattedMiMoTokenPlanExpiry(service)
+            }
+            guard let q = quotaFor(type: .time) ?? creditQuota() else { return "—" }
             // Codex time quotas are rate-limit windows expressed as usage percentages.
             // Show remaining capacity as a percentage; for other services show actual time.
             if config.service == "codex" {
-                let remaining = 1.0 - WidgetValueComputer.usageFraction(for: q)
-                return String(format: "%.0f%%", remaining * 100)
+                return WidgetValueComputer.codexRateLimitDisplay(q).value
             }
-            return WidgetValueComputer.formattedRemaining(quota: q)
+            if q.type == .time {
+                return WidgetValueComputer.formattedRemaining(quota: q)
+            }
+            // For credit-based quotas (e.g. MiMo), show countdown to reset
+            guard let resetsAt = q.resetsAt else { return "—" }
+            return WidgetValueComputer.countdownString(to: resetsAt) ?? "—"
         case .tokensRemaining:
             guard let q = quotaFor(type: .tokens) else { return "—" }
             return WidgetValueComputer.formattedRemaining(quota: q)
@@ -170,6 +188,9 @@ struct WidgetRenderer: View {
             guard let q = quotaFor(type: .tokens) ?? creditQuota() else { return "—" }
             return String(format: "%.0f%%", WidgetValueComputer.usageFraction(for: q) * 100)
         case .resetCountdown:
+            if config.service == "mimo" {
+                return WidgetValueComputer.formattedMiMoTokenPlanExpiry(service)
+            }
             guard let q = quotaFor(type: .time) ?? creditQuota(),
                   let r = q.resetsAt
             else { return "—" }
@@ -224,11 +245,22 @@ struct WidgetRenderer: View {
         case .sessionCredits:
             return WidgetValueComputer.formattedCredits(svc.currentSession?.tokens)
         case .subscriptionStatus:
+            if config.service == "codex" {
+                return WidgetValueComputer.codexSubscriptionStatus(svc)
+            }
             if svc.error != nil { return "异常" }
             return svc.currentSession == nil && svc.quotas.isEmpty ? "未连接" : "已订阅"
         case .planName:
             return service?.label ?? config.service
         }
+    }
+
+    private var formattedDetail: String? {
+        guard config.service == "codex",
+              config.metric == .remainingTime,
+              let q = quotaFor(type: .time)
+        else { return nil }
+        return WidgetValueComputer.codexRateLimitDisplay(q).detail
     }
 
     private var icon: String {
@@ -282,7 +314,13 @@ struct WidgetRenderer: View {
 
     private var metricTitle: String {
         if config.service == "codex", config.metric == .remainingTime {
-            return config.quotaIndex == 1 ? "7 天剩余量" : "5 小时剩余量"
+            return ""
+        }
+        if config.service == "mimo", config.metric == .resetCountdown {
+            return "Token Plan 到期时间"
+        }
+        if config.service == "mimo", config.metric == .remainingTime {
+            return "Token Plan 到期时间"
         }
         return config.metric.displayName
     }

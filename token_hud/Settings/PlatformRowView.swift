@@ -110,10 +110,14 @@ struct PlatformRowView: View {
             MiMoConsoleConnectorSheet(
                 status: $miMoConnectorStatus,
                 onConnected: { cookie in
-                    try? KeychainHelper.saveMiMoConsoleCookie(cookie)
-                    storedMiMoCookie = cookie
-                    isShowingMiMoConnector = false
-                    Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                    do {
+                        try KeychainHelper.saveMiMoConsoleCookie(cookie)
+                        storedMiMoCookie = cookie
+                        isShowingMiMoConnector = false
+                        Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                    } catch {
+                        miMoConnectorStatus = "保存 Cookie 失败：\(error.localizedDescription)"
+                    }
                 }
             )
         }
@@ -742,10 +746,14 @@ struct APIKeyGroupView: View {
             MiMoConsoleConnectorSheet(
                 status: $miMoConnectorStatus,
                 onConnected: { cookie in
-                    try? KeychainHelper.saveMiMoConsoleCookie(cookie)
-                    miMoCookieRefreshID = UUID()
-                    isShowingMiMoConnector = false
-                    Task { await apiPlatformFetcher.fetchSingle(platform: "mimo") }
+                    do {
+                        try KeychainHelper.saveMiMoConsoleCookie(cookie)
+                        miMoCookieRefreshID = UUID()
+                        isShowingMiMoConnector = false
+                        Task { await apiPlatformFetcher.fetchSingle(platform: "mimo") }
+                    } catch {
+                        miMoConnectorStatus = "保存 Cookie 失败：\(error.localizedDescription)"
+                    }
                 }
             )
         }
@@ -1023,10 +1031,8 @@ private struct MiMoConsoleConnectorView: NSViewRepresentable {
             webView.configuration.websiteDataStore.httpCookieStore.getAllCookies { [weak self] cookies in
                 guard let self else { return }
 
-                let relevant = cookies.filter { $0.domain.contains("xiaomimimo.com") }
-                let cookieHeader = relevant
-                    .map { "\($0.name)=\($0.value)" }
-                    .joined(separator: "; ")
+                let usageURL = URL(string: "https://platform.xiaomimimo.com/api/v1/tokenPlan/usage")!
+                let cookieHeader = MiMoCookieHeaderBuilder.header(from: cookies, for: usageURL)
 
                 guard !cookieHeader.isEmpty else {
                     self.isChecking = false
@@ -1035,7 +1041,7 @@ private struct MiMoConsoleConnectorView: NSViewRepresentable {
                     return
                 }
 
-                var request = URLRequest(url: URL(string: "https://platform.xiaomimimo.com/api/v1/tokenPlan/usage")!)
+                var request = URLRequest(url: usageURL)
                 request.setValue(cookieHeader, forHTTPHeaderField: "Cookie")
                 request.timeoutInterval = 12
 
