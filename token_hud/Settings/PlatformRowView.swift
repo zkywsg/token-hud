@@ -673,6 +673,9 @@ struct APIKeyGroupView: View {
     @Binding var selectedPlatform: String
     @Environment(StateWatcher.self) private var stateWatcher
     @Environment(APIPlatformFetcher.self) private var apiPlatformFetcher
+    @State private var isShowingMiMoConnector = false
+    @State private var miMoConnectorStatus = "打开窗口后请登录 MiMo 控制台。"
+    @State private var miMoCookieRefreshID = UUID()
 
     private var apiPlatforms: [PlatformConfig] {
         PlatformConfig.all.filter { $0.credentialType == .apiKey }
@@ -701,9 +704,14 @@ struct APIKeyGroupView: View {
                 ForEach(apiPlatforms) { platform in
                     APIPlatformRow(
                         platform: platform,
-                        isSelected: selectedPlatform == platform.id
+                        isSelected: selectedPlatform == platform.id,
+                        miMoCookieRefreshID: miMoCookieRefreshID
                     ) {
                         selectedPlatform = platform.id
+                    } onConnectMiMoConsole: {
+                        selectedPlatform = platform.id
+                        miMoConnectorStatus = "打开窗口后请登录 MiMo 控制台。"
+                        isShowingMiMoConnector = true
                     }
                 }
 
@@ -730,20 +738,31 @@ struct APIKeyGroupView: View {
         }
         .background(Color(NSColor.controlBackgroundColor))
         .clipShape(RoundedRectangle(cornerRadius: 8))
+        .sheet(isPresented: $isShowingMiMoConnector) {
+            MiMoConsoleConnectorSheet(
+                status: $miMoConnectorStatus,
+                onConnected: { cookie in
+                    try? KeychainHelper.saveMiMoConsoleCookie(cookie)
+                    miMoCookieRefreshID = UUID()
+                    isShowingMiMoConnector = false
+                    Task { await apiPlatformFetcher.fetchSingle(platform: "mimo") }
+                }
+            )
+        }
     }
 }
 
 private struct APIPlatformRow: View {
     let platform: PlatformConfig
     let isSelected: Bool
+    let miMoCookieRefreshID: UUID
     let onSelect: () -> Void
+    let onConnectMiMoConsole: () -> Void
     @State private var storedKey: String? = nil
     @State private var storedMiMoCookie: String? = nil
     @State private var isEditing = false
     @State private var keyInput: String = ""
     @State private var cookieInput: String = ""
-    @State private var isShowingMiMoConnector = false
-    @State private var miMoConnectorStatus = "打开窗口后请登录 MiMo 控制台。"
     @Environment(APIPlatformFetcher.self) private var apiPlatformFetcher
 
     var body: some View {
@@ -775,19 +794,13 @@ private struct APIPlatformRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .sheet(isPresented: $isShowingMiMoConnector) {
-            MiMoConsoleConnectorSheet(
-                status: $miMoConnectorStatus,
-                onConnected: { cookie in
-                    try? KeychainHelper.saveMiMoConsoleCookie(cookie)
-                    storedMiMoCookie = cookie
-                    isShowingMiMoConnector = false
-                    Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
-                }
-            )
-        }
         .task {
             storedKey = KeychainHelper.loadAPIKey(for: platform.id)
+            if platform.id == "mimo" {
+                storedMiMoCookie = KeychainHelper.loadMiMoConsoleCookie()
+            }
+        }
+        .task(id: miMoCookieRefreshID) {
             if platform.id == "mimo" {
                 storedMiMoCookie = KeychainHelper.loadMiMoConsoleCookie()
             }
@@ -859,8 +872,7 @@ private struct APIPlatformRow: View {
                     }
                     HStack {
                         Button("Connect Console") {
-                            miMoConnectorStatus = "打开窗口后请登录 MiMo 控制台。"
-                            isShowingMiMoConnector = true
+                            onConnectMiMoConsole()
                         }
                         .font(.caption)
                         SecureField("Paste Cookie", text: $cookieInput)

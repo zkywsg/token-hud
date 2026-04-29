@@ -29,6 +29,10 @@ struct WidgetValueComputerTests {
         #expect(WidgetValueComputer.formattedRemaining(quota: tokenQuota) == "850k")
     }
 
+    @Test func formattedCreditsUsesCompactNumberFormatting() {
+        #expect(WidgetValueComputer.formattedCredits(373_076) == "373.1k")
+    }
+
     @Test func sessionTokensFormatted() {
         let session = SessionSnapshot(id: "x", startedAt: "2026-04-01T00:00:00Z",
                                       tokens: 1500, time: nil, money: nil, requests: nil)

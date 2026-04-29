@@ -36,6 +36,11 @@ public enum WidgetValueComputer {
         }
     }
 
+    public static func formattedCredits(_ credits: Double?) -> String {
+        guard let credits else { return "—" }
+        return formatTokens(credits)
+    }
+
     /// Format the used amount (for quotas with no hard cap).
     public static func formattedUsed(quota: Quota) -> String {
         switch quota.type {

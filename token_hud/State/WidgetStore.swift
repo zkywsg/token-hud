@@ -65,10 +65,10 @@ final class WidgetStore {
     }
 
     static let defaultWidgets: [WidgetConfig] = [
-        WidgetConfig(service: "claude", metric: .remainingTime,  style: .ring),
-        WidgetConfig(service: "openai", metric: .balance,        style: .bar),
-        WidgetConfig(service: "codex",  metric: .sessionTokens,  style: .bar),
-        WidgetConfig(service: "claude", metric: .resetCountdown, style: .text),
-        WidgetConfig(service: "claude", metric: .sessionTokens,  style: .aggregate),
+        WidgetConfig(service: "claude", metric: .remainingTime,  style: .bar),
+        WidgetConfig(service: "claude", metric: .sessionTokens,  style: .text),
+        WidgetConfig(service: "codex",  metric: .remainingTime,  style: .bar, quotaIndex: 0),
+        WidgetConfig(service: "codex",  metric: .remainingTime,  style: .bar, quotaIndex: 1),
+        WidgetConfig(service: "codex",  metric: .subscriptionStatus,  style: .text),
     ]
 }

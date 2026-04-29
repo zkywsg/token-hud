@@ -76,6 +76,17 @@ struct MultiWidget: View {
             items.append(SubMetric(label: "时长", value: WidgetValueComputer.sessionDuration(from: session!), icon: "timer"))
             return items
 
+        case .creditsRemaining, .creditsUsed, .sessionCredits:
+            var items: [SubMetric] = []
+            if let q = svc.quotas.first(where: { $0.unit.lowercased() == "credits" }) {
+                items.append(SubMetric(label: "已用", value: WidgetValueComputer.formattedCredits(q.used), icon: "chart.pie"))
+                items.append(SubMetric(label: "剩余", value: WidgetValueComputer.formattedCredits(WidgetValueComputer.remainingValue(for: q)), icon: "creditcard"))
+            }
+            if session?.tokens != nil {
+                items.append(SubMetric(label: "会话", value: WidgetValueComputer.formattedCredits(session?.tokens), icon: "sum"))
+            }
+            return items
+
         default:
             guard session?.tokens != nil else { return [] }
             return [SubMetric(label: "Token", value: WidgetValueComputer.formattedSessionTokens(session), icon: "text.bubble")]

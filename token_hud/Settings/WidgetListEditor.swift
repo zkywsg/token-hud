@@ -35,44 +35,76 @@ private struct WidgetPreset: Identifiable, Equatable {
     }
 }
 
-private let presets: [WidgetPreset] = [
-    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .remainingTime,   style: .ring)),
-    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .resetCountdown,  style: .text)),
-    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .sessionTokens,   style: .aggregate)),
-    WidgetPreset(config: WidgetConfig(service: "openai",    metric: .balance,         style: .bar)),
-    WidgetPreset(config: WidgetConfig(service: "openai",    metric: .costSpent,       style: .text)),
-    WidgetPreset(config: WidgetConfig(service: "codex",     metric: .sessionTokens,   style: .bar)),
-    WidgetPreset(config: WidgetConfig(service: "codex",     metric: .remainingTime,   style: .ring)),
-    WidgetPreset(config: WidgetConfig(service: "gemini",    metric: .dailyTokens,     style: .ring)),
-    WidgetPreset(config: WidgetConfig(service: "gemini",    metric: .dailyRequests,   style: .bar)),
-    WidgetPreset(config: WidgetConfig(service: "deepseek",  metric: .balance,         style: .bar)),
-    WidgetPreset(config: WidgetConfig(service: "deepseek",  metric: .monthlyTokens,   style: .ring)),
-    WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .costSpent,       style: .text)),
-    WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .monthlyRequests, style: .aggregate)),
-    // New derived metrics & styles
-    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .sessionDuration, style: .countdown)),
-    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .tokensPerMinute, style: .text)),
-    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .rateLimitStatus, style: .status)),
-    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .sessionTokens,   style: .multi)),
-    WidgetPreset(config: WidgetConfig(service: "claude",    metric: .remainingTime,   style: .countdown)),
-    WidgetPreset(config: WidgetConfig(service: "openai",    metric: .costPerRequest,  style: .text)),
-    WidgetPreset(config: WidgetConfig(service: "openai",    metric: .inputOutputRatio,style: .aggregate)),
-    WidgetPreset(config: WidgetConfig(service: "codex",     metric: .rateLimitStatus, style: .status)),
-    WidgetPreset(config: WidgetConfig(service: "gemini",    metric: .tokensPerMinute, style: .text)),
-    WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .sessionDuration, style: .countdown)),
-    WidgetPreset(config: WidgetConfig(service: "anthropic", metric: .sessionTokens,   style: .modelBreakdown)),
-    WidgetPreset(config: WidgetConfig(service: "minimax",   metric: .balance,         style: .bar)),
-    WidgetPreset(config: WidgetConfig(service: "minimax",   metric: .monthlyTokens,   style: .ring)),
-    WidgetPreset(config: WidgetConfig(service: "mimo",      metric: .dailyTokens,     style: .ring)),
-    WidgetPreset(config: WidgetConfig(service: "mimo",      metric: .costSpent,       style: .text)),
+private struct WidgetCapability {
+    let service: String
+    let metrics: [WidgetMetric]
+    let presets: [WidgetConfig]
+}
+
+private let widgetCapabilities: [WidgetCapability] = [
+    WidgetCapability(
+        service: "claude",
+        metrics: [.remainingTime, .tokensRemaining, .sessionTokens],
+        presets: [
+            WidgetConfig(service: "claude", metric: .remainingTime, style: .bar),
+            WidgetConfig(service: "claude", metric: .tokensRemaining, style: .bar),
+            WidgetConfig(service: "claude", metric: .sessionTokens, style: .text),
+        ]
+    ),
+    WidgetCapability(
+        service: "codex",
+        metrics: [.remainingTime, .subscriptionStatus],
+        presets: [
+            WidgetConfig(service: "codex", metric: .remainingTime, style: .bar, quotaIndex: 0),
+            WidgetConfig(service: "codex", metric: .remainingTime, style: .bar, quotaIndex: 1),
+            WidgetConfig(service: "codex", metric: .subscriptionStatus, style: .text),
+        ]
+    ),
+    WidgetCapability(
+        service: "deepseek",
+        metrics: [.balance],
+        presets: [
+            WidgetConfig(service: "deepseek", metric: .balance, style: .text),
+        ]
+    ),
+    WidgetCapability(
+        service: "minimax",
+        metrics: [.monthlyTokens, .tokensRemaining, .usagePercent, .balance],
+        presets: [
+            WidgetConfig(service: "minimax", metric: .monthlyTokens, style: .bar),
+            WidgetConfig(service: "minimax", metric: .tokensRemaining, style: .text),
+            WidgetConfig(service: "minimax", metric: .usagePercent, style: .text),
+            WidgetConfig(service: "minimax", metric: .balance, style: .text),
+        ]
+    ),
+    WidgetCapability(
+        service: "mimo",
+        metrics: [.creditsUsed, .planName, .resetCountdown],
+        presets: [
+            WidgetConfig(service: "mimo", metric: .creditsUsed, style: .bar),
+            WidgetConfig(service: "mimo", metric: .planName, style: .text),
+            WidgetConfig(service: "mimo", metric: .resetCountdown, style: .text),
+        ]
+    ),
 ]
+
+private let presets: [WidgetPreset] = widgetCapabilities.flatMap { capability in
+    capability.presets.map { WidgetPreset(config: $0) }
+}
+
+private func metricTitle(_ widget: WidgetConfig) -> String {
+    if widget.service == "codex", widget.metric == .remainingTime {
+        return widget.quotaIndex == 1 ? "7 天剩余量" : "5 小时剩余量"
+    }
+    return widget.metric.displayName
+}
 
 // MARK: - Platform Grouped Presets
 
 private struct PlatformPresetsView: View {
     let onAdd: (WidgetConfig) -> Void
 
-    private let platformOrder = ["claude", "openai", "codex", "gemini", "deepseek", "anthropic", "minimax", "mimo"]
+    private let platformOrder = widgetCapabilities.map(\.service)
     private var groupedPresets: [(String, [WidgetPreset])] {
         platformOrder.compactMap { service in
             let matching = presets.filter { $0.config.service == service }
@@ -219,7 +251,7 @@ private struct PresetCard: View {
             Text(preset.serviceDisplayName)
                 .font(.system(size: 10, weight: .semibold))
                 .foregroundColor(.primary)
-            Text(preset.config.metric.displayName)
+            Text(metricTitle(preset.config))
                 .font(.system(size: 9))
                 .foregroundColor(.secondary)
                 .lineLimit(1)
@@ -254,7 +286,7 @@ private struct WidgetRow: View {
                 .frame(width: 16)
             Text(widget.service)
                 .font(.system(size: 12, weight: .medium))
-            Text(widget.metric.displayName)
+            Text(metricTitle(widget))
                 .font(.system(size: 11))
                 .foregroundColor(.secondary)
             Text("· \(widget.style.displayName)")
@@ -292,8 +324,14 @@ private struct WidgetRow: View {
         case .inputOutputRatio: return "arrow.left.arrow.right"
         case .costPerRequest:   return "dollarsign.arrow.circlepath"
         case .rateLimitStatus:  return "exclamationmark.triangle"
+        case .creditsRemaining: return "creditcard"
+        case .creditsUsed:      return "chart.pie"
+        case .sessionCredits:   return "sum"
+        case .subscriptionStatus:return "checkmark.seal"
+        case .planName:         return "tag"
         }
     }
+
 }
 
 // MARK: - Drop Delegate
@@ -321,7 +359,8 @@ private struct WidgetListDropDelegate: DropDelegate {
                     let newWidget = WidgetConfig(
                         service: preset.config.service,
                         metric: preset.config.metric,
-                        style: preset.config.style
+                        style: preset.config.style,
+                        quotaIndex: preset.config.quotaIndex
                     )
                     widgets.append(newWidget)
                 }
@@ -339,37 +378,28 @@ private struct WidgetListDropDelegate: DropDelegate {
 
 private struct CustomWidgetSheet: View {
     let store: WidgetStore
-    @State private var service = "claude"
+    @State private var service = widgetCapabilities.first?.service ?? "claude"
     @State private var metric: WidgetMetric = .remainingTime
-    @State private var style: WidgetStyle = .ring
+    @State private var style: WidgetStyle = .bar
     @Environment(\.dismiss) var dismiss
 
     private var availableMetrics: [WidgetMetric] {
-        let derived: [WidgetMetric] = [.sessionDuration, .tokensPerMinute, .inputOutputRatio, .costPerRequest, .rateLimitStatus]
-        switch service {
-        case "codex":     return [.sessionTokens, .remainingTime, .resetCountdown, .usagePercent, .sessionDuration, .rateLimitStatus]
-        case "openai":    return [.balance, .inputTokens, .outputTokens, .costSpent, .dailyRequests, .monthlyRequests, .usagePercent] + derived
-        case "gemini":    return [.inputTokens, .outputTokens, .dailyTokens, .dailyRequests, .costSpent, .usagePercent] + derived
-        case "deepseek":  return [.balance, .inputTokens, .outputTokens, .monthlyTokens, .costSpent, .monthlyRequests, .usagePercent] + derived
-        case "anthropic": return [.balance, .inputTokens, .outputTokens, .costSpent, .monthlyRequests, .usagePercent] + derived
-        case "minimax":   return [.balance, .inputTokens, .outputTokens, .monthlyTokens, .costSpent, .usagePercent] + derived
-        case "mimo":      return [.balance, .inputTokens, .outputTokens, .dailyTokens, .costSpent, .dailyRequests, .usagePercent] + derived
-        default:          return WidgetMetric.allCases
-        }
+        widgetCapabilities.first { $0.service == service }?.metrics ?? []
+    }
+
+    private let availableStyles: [WidgetStyle] = [.bar, .text]
+
+    private var serviceOptions: [String] {
+        widgetCapabilities.map(\.service)
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Picker("服务", selection: $service) {
-                    Text("Claude").tag("claude")
-                    Text("OpenAI").tag("openai")
-                    Text("Codex").tag("codex")
-                    Text("Gemini").tag("gemini")
-                    Text("DeepSeek").tag("deepseek")
-                    Text("Anthropic API").tag("anthropic")
-                    Text("MiniMax").tag("minimax")
-                    Text("MiMo").tag("mimo")
+                    ForEach(serviceOptions, id: \.self) { service in
+                        Text(platformDisplayName(service)).tag(service)
+                    }
                 }
                 .onChange(of: service) { _, _ in
                     if !availableMetrics.contains(metric) {
@@ -382,7 +412,7 @@ private struct CustomWidgetSheet: View {
                     }
                 }
                 Picker("样式", selection: $style) {
-                    ForEach(WidgetStyle.allCases, id: \.self) {
+                    ForEach(availableStyles, id: \.self) {
                         Text($0.displayName).tag($0)
                     }
                 }
@@ -402,5 +432,16 @@ private struct CustomWidgetSheet: View {
             }
         }
         .frame(width: 320, height: 240)
+    }
+
+    private func platformDisplayName(_ id: String) -> String {
+        switch id {
+        case "claude": return "Claude"
+        case "codex": return "Codex"
+        case "deepseek": return "DeepSeek"
+        case "minimax": return "MiniMax"
+        case "mimo": return "MiMo"
+        default: return id
+        }
     }
 }

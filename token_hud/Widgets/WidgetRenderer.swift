@@ -34,12 +34,11 @@ struct WidgetRenderer: View {
             }
             .help(tooltipText)
 
-            if showServiceLabel {
-                Text(service?.label ?? config.service)
-                    .font(.system(size: 8, weight: .regular, design: .rounded))
-                    .foregroundColor(.white.opacity(0.5))
-                    .lineLimit(1)
-            }
+            Text(widgetCaption)
+                .font(.system(size: 8, weight: .regular, design: .rounded))
+                .foregroundColor(.white.opacity(0.55))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
         }
     }
 
@@ -55,7 +54,7 @@ struct WidgetRenderer: View {
         case .balance:
             return quotaFraction(type: .money)
         case .usagePercent:
-            guard let q = quotaFor(type: .tokens) else { return 0 }
+            guard let q = quotaFor(type: .tokens) ?? creditQuota() else { return 0 }
             return WidgetValueComputer.usageFraction(for: q)
         case .sessionTokens:
             guard let session = svc.currentSession,
@@ -65,7 +64,7 @@ struct WidgetRenderer: View {
             else { return 0 }
             return tokens / qTotal
         case .resetCountdown:
-            guard let q = quotaFor(type: .time),
+            guard let q = quotaFor(type: .time) ?? creditQuota(),
                   let resetsAt = q.resetsAt
             else { return 0 }
             let fmt = ISO8601DateFormatter()
@@ -127,6 +126,23 @@ struct WidgetRenderer: View {
                 return q.used / q.total!
             }
             return fractions.max() ?? 0
+        case .creditsRemaining:
+            guard let q = creditQuota() else { return 0 }
+            return WidgetValueComputer.usageFraction(for: q)
+        case .creditsUsed:
+            guard let q = creditQuota() else { return 0 }
+            return 1 - WidgetValueComputer.usageFraction(for: q)
+        case .sessionCredits:
+            guard let sessionCredits = svc.currentSession?.tokens,
+                  let q = creditQuota(),
+                  let total = q.total,
+                  total > 0
+            else { return 0 }
+            return sessionCredits / total
+        case .subscriptionStatus:
+            return svc.error == nil ? 1 : 0
+        case .planName:
+            return 0
         }
     }
 
@@ -151,14 +167,17 @@ struct WidgetRenderer: View {
         case .sessionTokens:
             return WidgetValueComputer.formattedSessionTokens(svc.currentSession)
         case .usagePercent:
-            guard let q = quotaFor(type: .tokens) else { return "—" }
+            guard let q = quotaFor(type: .tokens) ?? creditQuota() else { return "—" }
             return String(format: "%.0f%%", WidgetValueComputer.usageFraction(for: q) * 100)
         case .resetCountdown:
-            guard let q = quotaFor(type: .time),
-                  let r = q.resetsAt,
-                  let s = WidgetValueComputer.countdownString(to: r)
+            guard let q = quotaFor(type: .time) ?? creditQuota(),
+                  let r = q.resetsAt
             else { return "—" }
-            return s
+            let fmt = ISO8601DateFormatter()
+            guard let date = fmt.date(from: r) else { return r }
+            let df = DateFormatter()
+            df.dateFormat = "MM/dd HH:mm"
+            return df.string(from: date)
         case .inputTokens:
             return WidgetValueComputer.formattedInputTokens(svc.currentSession)
         case .outputTokens:
@@ -196,6 +215,19 @@ struct WidgetRenderer: View {
             }
             guard let max = fractions.max() else { return "—" }
             return String(format: "%.0f%%", max * 100)
+        case .creditsRemaining:
+            guard let q = creditQuota() else { return "—" }
+            return WidgetValueComputer.formattedCredits(WidgetValueComputer.remainingValue(for: q))
+        case .creditsUsed:
+            guard let q = creditQuota() else { return "—" }
+            return WidgetValueComputer.formattedCredits(q.used)
+        case .sessionCredits:
+            return WidgetValueComputer.formattedCredits(svc.currentSession?.tokens)
+        case .subscriptionStatus:
+            if svc.error != nil { return "异常" }
+            return svc.currentSession == nil && svc.quotas.isEmpty ? "未连接" : "已订阅"
+        case .planName:
+            return service?.label ?? config.service
         }
     }
 
@@ -219,11 +251,21 @@ struct WidgetRenderer: View {
         case .inputOutputRatio:  return "arrow.left.arrow.right"
         case .costPerRequest:    return "dollarsign.arrow.circlepath"
         case .rateLimitStatus:   return "exclamationmark.triangle"
+        case .creditsRemaining:  return "creditcard"
+        case .creditsUsed:       return "chart.pie"
+        case .sessionCredits:    return "sum"
+        case .subscriptionStatus:return "checkmark.seal"
+        case .planName:          return "tag"
         }
     }
 
     private var tooltipText: String {
-        "\(service?.label ?? config.service) · \(config.metric.rawValue)"
+        "\(service?.label ?? config.service) · \(config.metric.displayName)"
+    }
+
+    private var widgetCaption: String {
+        guard showServiceLabel else { return metricTitle }
+        return "\(service?.label ?? config.service) · \(metricTitle)"
     }
 
     // MARK: - Helpers
@@ -232,6 +274,17 @@ struct WidgetRenderer: View {
         let matching = service?.quotas.filter { $0.type == type } ?? []
         let idx = config.quotaIndex
         return idx < matching.count ? matching[idx] : matching.first
+    }
+
+    private func creditQuota() -> Quota? {
+        service?.quotas.first { $0.unit.lowercased() == "credits" }
+    }
+
+    private var metricTitle: String {
+        if config.service == "codex", config.metric == .remainingTime {
+            return config.quotaIndex == 1 ? "7 天剩余量" : "5 小时剩余量"
+        }
+        return config.metric.displayName
     }
 
     private func quotaFraction(type: QuotaType) -> Double {

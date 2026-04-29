@@ -31,9 +31,11 @@ struct BarWidget: View {
     }
 
     private var barColor: Color {
-        switch fraction {
+        // fraction is usage; bar width = 1 - fraction. Color by actual usage.
+        let usage = 1 - fraction
+        switch usage {
         case 0..<0.5:   return .green
-        case 0.5..<0.8: return .yellow
+        case 0..<0.8:   return .yellow
         default:         return .red
         }
     }

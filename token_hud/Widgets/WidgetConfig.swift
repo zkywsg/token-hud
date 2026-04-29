@@ -20,6 +20,11 @@ public enum WidgetMetric: String, Codable, CaseIterable, Sendable {
     case inputOutputRatio  = "input_output_ratio"
     case costPerRequest    = "cost_per_request"
     case rateLimitStatus   = "rate_limit_status"
+    case creditsRemaining  = "credits_remaining"
+    case creditsUsed       = "credits_used"
+    case sessionCredits    = "session_credits"
+    case subscriptionStatus = "subscription_status"
+    case planName          = "plan_name"
 }
 
 public enum WidgetStyle: String, Codable, CaseIterable, Sendable {
@@ -70,6 +75,11 @@ extension WidgetMetric {
         case .inputOutputRatio:  return "输入输出比"
         case .costPerRequest:    return "单次花费"
         case .rateLimitStatus:   return "限制状态"
+        case .creditsRemaining:  return "剩余 Credit"
+        case .creditsUsed:       return "Credit 用量"
+        case .sessionCredits:    return "会话 Credit"
+        case .subscriptionStatus:return "订阅状态"
+        case .planName:          return "套餐名称"
         }
     }
 }

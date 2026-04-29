@@ -216,6 +216,7 @@ public enum MiniMaxTokenPlanParser {
         }
 
         let quotas = quotaRecords(in: target)
+            .sorted { $0.path.localizedStandardCompare($1.path) == .orderedAscending }
             .reduce(into: [Quota]()) { result, record in
                 guard
                     let total = record.total,
