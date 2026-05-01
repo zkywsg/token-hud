@@ -5,10 +5,6 @@ import ServiceManagement
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
-    private enum Defaults {
-        static let didOpenSettingsOnFirstLaunch = "didOpenSettingsOnFirstLaunch"
-    }
-
     private var stateWatcher: StateWatcher!
     private var widgetStore: WidgetStore!
     private var appFilterStore: AppFilterStore!
@@ -53,7 +49,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         setupStatusBar()
         didFinishInitialLaunch = true
 
-        openSettingsOnFirstLaunchIfNeeded()
+        openSettingsOnLaunch()
     }
 
     func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows: Bool) -> Bool {
@@ -210,9 +206,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
     // MARK: - Settings
 
-    private func openSettingsOnFirstLaunchIfNeeded() {
-        guard !UserDefaults.standard.bool(forKey: Defaults.didOpenSettingsOnFirstLaunch) else { return }
-        UserDefaults.standard.set(true, forKey: Defaults.didOpenSettingsOnFirstLaunch)
+    private func openSettingsOnLaunch() {
         DispatchQueue.main.async { [weak self] in
             self?.openSettings()
         }

@@ -8,11 +8,12 @@ DerivedData/
 *.o
 *.d
 
-# Internal planning docs
-docs/
+# 内部计划草稿
+docs/private/
+docs/superpowers/
 
-# Internal AI tooling
+# 内部 AI 工具
 .superpowers/
 
-# SwiftPM Xcode generated files
+# SwiftPM Xcode 生成文件
 .swiftpm/
