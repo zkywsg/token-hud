@@ -2,7 +2,7 @@ import AppKit
 import SwiftUI
 
 @MainActor
-final class FloatingPanelManager {
+final class FloatingPanelManager: NSObject, NSWindowDelegate {
 
     private var window: NSPanel?
     private var hostingView: NSHostingView<AnyView>?
@@ -12,6 +12,7 @@ final class FloatingPanelManager {
     init(stateWatcher: StateWatcher, widgetStore: WidgetStore) {
         self.stateWatcher = stateWatcher
         self.widgetStore = widgetStore
+        super.init()
     }
 
     func setup() {
@@ -61,8 +62,9 @@ final class FloatingPanelManager {
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
         panel.isReleasedWhenClosed = false
-        panel.minSize = NSSize(width: 120, height: 40)
+        panel.minSize = PanelResizeCalculator.minimumSize
         panel.becomesKeyOnlyIfNeeded = true
+        panel.delegate = self
 
         let rootView = AnyView(
             FloatingPanelView()
@@ -74,6 +76,20 @@ final class FloatingPanelManager {
         hostingView = hosting
 
         return panel
+    }
+
+    // MARK: - NSWindowDelegate
+
+    nonisolated func windowDidMove(_ notification: Notification) {
+        Task { @MainActor in
+            saveFrame()
+        }
+    }
+
+    nonisolated func windowDidResize(_ notification: Notification) {
+        Task { @MainActor in
+            saveFrame()
+        }
     }
 
     // MARK: - Frame Persistence

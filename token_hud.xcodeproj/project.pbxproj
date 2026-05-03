@@ -31,6 +31,7 @@
 		AA0005000000000000000005 /* PlatformRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0005000000000000000005F /* PlatformRowView.swift */; };
 		AA0006000000000000000006 /* CodexFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0006000000000000000006F /* CodexFetcher.swift */; };
 		AA0007000000000000000007 /* CodexJWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0007000000000000000007F /* CodexJWT.swift */; };
+		AA0009000000000000000009 /* PanelResizeCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0009000000000000000009F /* PanelResizeCalculator.swift */; };
 		B2E72E5AF7679D603F9E8C4C /* FloatingPanelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B413E9CB441FD4841B6D318 /* FloatingPanelManager.swift */; };
 		721774A73B32A46B6F38E8E7 /* FloatingPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6569A286AF3B5F44D42D43 /* FloatingPanelView.swift */; };
 		7569DB94B92AFDE51D96FD87 /* GlobalHotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10FEFB7F97451821F83925F9 /* GlobalHotkeyManager.swift */; };
@@ -70,6 +71,7 @@
 		AA0005000000000000000005F /* PlatformRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformRowView.swift; sourceTree = "<group>"; };
 		AA0006000000000000000006F /* CodexFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexFetcher.swift; sourceTree = "<group>"; };
 		AA0007000000000000000007F /* CodexJWT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexJWT.swift; sourceTree = "<group>"; };
+		AA0009000000000000000009F /* PanelResizeCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelResizeCalculator.swift; sourceTree = "<group>"; };
 		4B413E9CB441FD4841B6D318 /* FloatingPanelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelManager.swift; sourceTree = "<group>"; };
 		8F6569A286AF3B5F44D42D43 /* FloatingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelView.swift; sourceTree = "<group>"; };
 		10FEFB7F97451821F83925F9 /* GlobalHotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyManager.swift; sourceTree = "<group>"; };
@@ -191,6 +193,7 @@
 				9A9DADE13CB5357B82D092F1 /* StateModel.swift */,
 				984F43F8D4E91F9EBD3E415A /* WidgetValueComputer.swift */,
 				AA0007000000000000000007F /* CodexJWT.swift */,
+				AA0009000000000000000009F /* PanelResizeCalculator.swift */,
 			);
 			name = token_hudCore;
 			path = Sources/token_hudCore;
@@ -287,6 +290,7 @@
 				AA0005000000000000000005 /* PlatformRowView.swift in Sources */,
 				AA0006000000000000000006 /* CodexFetcher.swift in Sources */,
 				AA0007000000000000000007 /* CodexJWT.swift in Sources */,
+				AA0009000000000000000009 /* PanelResizeCalculator.swift in Sources */,
 				B2E72E5AF7679D603F9E8C4C /* FloatingPanelManager.swift in Sources */,
 				721774A73B32A46B6F38E8E7 /* FloatingPanelView.swift in Sources */,
 				7569DB94B92AFDE51D96FD87 /* GlobalHotkeyManager.swift in Sources */,
