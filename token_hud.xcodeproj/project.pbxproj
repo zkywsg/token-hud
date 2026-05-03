@@ -36,6 +36,7 @@
 		721774A73B32A46B6F38E8E7 /* FloatingPanelView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8F6569A286AF3B5F44D42D43 /* FloatingPanelView.swift */; };
 		7569DB94B92AFDE51D96FD87 /* GlobalHotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = 10FEFB7F97451821F83925F9 /* GlobalHotkeyManager.swift */; };
 		AA0008000000000000000008 /* GroupedOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0008000000000000000008F /* GroupedOverlayView.swift */; };
+		AA000A00000000000000000A /* PanelAdaptiveScale.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA000A0000000000000000AF /* PanelAdaptiveScale.swift */; };
 			BB00010000000000000000B1 /* MultiWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00010000000000000000F1 /* MultiWidget.swift */; };
 			BB00020000000000000000B2 /* CountdownWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00020000000000000000F2 /* CountdownWidget.swift */; };
 			BB00030000000000000000B3 /* StatusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = BB00030000000000000000F3 /* StatusWidget.swift */; };
@@ -76,6 +77,7 @@
 		8F6569A286AF3B5F44D42D43 /* FloatingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelView.swift; sourceTree = "<group>"; };
 		10FEFB7F97451821F83925F9 /* GlobalHotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyManager.swift; sourceTree = "<group>"; };
 		AA0008000000000000000008F /* GroupedOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupedOverlayView.swift; sourceTree = "<group>"; };
+		AA000A0000000000000000AF /* PanelAdaptiveScale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelAdaptiveScale.swift; sourceTree = "<group>"; };
 			BB00010000000000000000F1 /* MultiWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWidget.swift; sourceTree = "<group>"; };
 			BB00020000000000000000F2 /* CountdownWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountdownWidget.swift; sourceTree = "<group>"; };
 			BB00030000000000000000F3 /* StatusWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusWidget.swift; sourceTree = "<group>"; };
@@ -126,6 +128,7 @@
 				4B413E9CB441FD4841B6D318 /* FloatingPanelManager.swift */,
 				8F6569A286AF3B5F44D42D43 /* FloatingPanelView.swift */,
 				AA0008000000000000000008F /* GroupedOverlayView.swift */,
+				AA000A0000000000000000AF /* PanelAdaptiveScale.swift */,
 				10FEFB7F97451821F83925F9 /* GlobalHotkeyManager.swift */,
 			);
 			path = Overlay;
@@ -295,6 +298,7 @@
 				721774A73B32A46B6F38E8E7 /* FloatingPanelView.swift in Sources */,
 				7569DB94B92AFDE51D96FD87 /* GlobalHotkeyManager.swift in Sources */,
 				AA0008000000000000000008 /* GroupedOverlayView.swift in Sources */,
+				AA000A00000000000000000A /* PanelAdaptiveScale.swift in Sources */,
 					BB00010000000000000000B1 /* MultiWidget.swift in Sources */,
 					BB00020000000000000000B2 /* CountdownWidget.swift in Sources */,
 					BB00030000000000000000B3 /* StatusWidget.swift in Sources */,

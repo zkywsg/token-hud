@@ -4,6 +4,8 @@ struct StatusWidget: View {
     let fraction: Double
     let label: String
 
+    @Environment(\.panelAdaptiveScale) private var scale
+
     private var color: Color {
         if fraction >= 0.8 { return .red }
         if fraction >= 0.5 { return .yellow }
@@ -17,17 +19,17 @@ struct StatusWidget: View {
     }
 
     var body: some View {
-        HStack(spacing: 5) {
+        HStack(spacing: 5 * scale) {
             Circle()
                 .fill(color)
-                .frame(width: 8, height: 8)
-                .shadow(color: color.opacity(0.6), radius: 3)
+                .frame(width: 8 * scale, height: 8 * scale)
+                .shadow(color: color.opacity(0.6), radius: 3 * scale)
             VStack(alignment: .leading, spacing: 0) {
                 Text(statusText)
-                    .font(.system(size: 9, weight: .semibold, design: .rounded))
+                    .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
                     .foregroundColor(.white)
                 Text(label)
-                    .font(.system(size: 8, weight: .regular, design: .rounded))
+                    .font(.system(size: 8 * scale, weight: .regular, design: .rounded))
                     .foregroundColor(.white.opacity(0.6))
             }
         }

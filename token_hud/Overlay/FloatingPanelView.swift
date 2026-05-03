@@ -9,31 +9,35 @@ struct FloatingPanelView: View {
     @State private var gestureStartScale: CGFloat = 1.0
 
     var body: some View {
-        ZStack(alignment: .bottomTrailing) {
-            overlayContent
-                .padding(12)
-                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                .scaleEffect(scale, anchor: .center)
-                .gesture(
-                    MagnificationGesture()
-                        .onChanged { value in
-                            scale = (gestureStartScale * value)
-                                .clamped(to: 0.5...3.0)
-                        }
-                        .onEnded { _ in
-                            gestureStartScale = scale
-                        }
-                )
+        GeometryReader { geometry in
+            let adaptiveScale = calculateAdaptiveScale(for: geometry.size)
+            ZStack(alignment: .bottomTrailing) {
+                overlayContent
+                    .padding(12 * adaptiveScale)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
+                    .scaleEffect(scale, anchor: .center)
+                    .gesture(
+                        MagnificationGesture()
+                            .onChanged { value in
+                                scale = (gestureStartScale * value)
+                                    .clamped(to: 0.5...3.0)
+                            }
+                            .onEnded { _ in
+                                gestureStartScale = scale
+                            }
+                    )
 
-            PanelResizeGrip()
-                .frame(width: 20, height: 20)
-                .padding(4)
+                PanelResizeGrip()
+                    .frame(width: 20 * adaptiveScale, height: 20 * adaptiveScale)
+                    .padding(4 * adaptiveScale)
+            }
+            .frame(
+                minWidth: PanelResizeCalculator.minimumSize.width,
+                minHeight: PanelResizeCalculator.minimumSize.height
+            )
+            .contentShape(Rectangle())
+            .environment(\.panelAdaptiveScale, adaptiveScale)
         }
-        .frame(
-            minWidth: PanelResizeCalculator.minimumSize.width,
-            minHeight: PanelResizeCalculator.minimumSize.height
-        )
-        .contentShape(Rectangle())
         .onAppear { gestureStartScale = scale }
     }
 
@@ -49,8 +53,31 @@ struct FloatingPanelView: View {
         }
     }
 
+    @ViewBuilder
     private var compactOverlay: some View {
-        HStack(spacing: 6) {
+        CompactOverlayContent()
+    }
+
+    private func calculateAdaptiveScale(for size: CGSize) -> CGFloat {
+        let baseHeight: CGFloat = 60
+        let idealHeight: CGFloat
+        if overlayMode == "grouped" {
+            let serviceCount = Set(store.widgets.map(\.service)).count
+            idealHeight = max(baseHeight, CGFloat(serviceCount) * 32 + 16)
+        } else {
+            idealHeight = baseHeight
+        }
+        return (size.height / idealHeight).clamped(to: 0.5...3.0)
+    }
+}
+
+private struct CompactOverlayContent: View {
+    @Environment(WidgetStore.self) private var store
+    @Environment(StateWatcher.self) private var watcher
+    @Environment(\.panelAdaptiveScale) private var scale
+
+    var body: some View {
+        HStack(spacing: 6 * scale) {
             ForEach(store.widgets) { config in
                 WidgetRenderer(config: config, state: watcher.effectiveState, showServiceLabel: true)
             }

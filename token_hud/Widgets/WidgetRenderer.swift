@@ -7,21 +7,24 @@ struct WidgetRenderer: View {
     var showServiceLabel: Bool = false
 
     @AppStorage("widgetSizeScale") private var widgetSizeScale = 1.0
+    @Environment(\.panelAdaptiveScale) private var adaptiveScale
 
     private var service: Service? { state?.services[config.service] }
 
+    private var effectiveScale: CGFloat { widgetSizeScale * adaptiveScale }
+
     var body: some View {
-        VStack(spacing: 1) {
+        VStack(spacing: 1 * adaptiveScale) {
             Group {
                 switch config.style {
                 case .ring:
-                    RingWidget(fraction: fraction, label: formattedValue, size: 22 * widgetSizeScale)
+                    RingWidget(fraction: fraction, label: formattedValue, size: 22 * effectiveScale)
                 case .bar:
                     BarWidget(
                         fraction: fraction,
                         label: formattedValue,
                         detail: formattedDetail,
-                        width: 60 * widgetSizeScale
+                        width: 60 * effectiveScale
                     )
                 case .text:
                     TextWidget(text: formattedValue, subtext: formattedDetail)
@@ -41,7 +44,7 @@ struct WidgetRenderer: View {
 
             if !widgetCaption.isEmpty {
                 Text(widgetCaption)
-                    .font(.system(size: 8, weight: .regular, design: .rounded))
+                    .font(.system(size: 8 * adaptiveScale, weight: .regular, design: .rounded))
                     .foregroundColor(.white.opacity(0.55))
                     .lineLimit(1)
                     .minimumScaleFactor(0.65)

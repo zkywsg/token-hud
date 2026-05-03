@@ -5,29 +5,31 @@ struct MultiWidget: View {
     let config: WidgetConfig
     let state: StateFile?
 
+    @Environment(\.panelAdaptiveScale) private var scale
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 2 * scale) {
             ForEach(subMetrics, id: \.label) { item in
-                HStack(spacing: 4) {
+                HStack(spacing: 4 * scale) {
                     Image(systemName: item.icon)
-                        .font(.system(size: 7, weight: .bold))
+                        .font(.system(size: 7 * scale, weight: .bold))
                         .foregroundColor(.white.opacity(0.6))
-                        .frame(width: 10)
+                        .frame(width: 10 * scale)
                     Text(item.label)
-                        .font(.system(size: 8, weight: .regular))
+                        .font(.system(size: 8 * scale, weight: .regular))
                         .foregroundColor(.white.opacity(0.5))
-                        .frame(width: 28, alignment: .leading)
+                        .frame(width: 28 * scale, alignment: .leading)
                     Text(item.value)
-                        .font(.system(size: 9, weight: .semibold, design: .rounded))
+                        .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
                         .foregroundColor(.white)
                         .minimumScaleFactor(0.7)
                 }
             }
         }
-        .padding(.horizontal, 6)
-        .padding(.vertical, 4)
+        .padding(.horizontal, 6 * scale)
+        .padding(.vertical, 4 * scale)
         .background(Color.white.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 6))
+        .clipShape(RoundedRectangle(cornerRadius: 6 * scale))
     }
 
     private struct SubMetric {

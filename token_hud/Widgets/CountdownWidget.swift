@@ -5,6 +5,7 @@ struct CountdownWidget: View {
     let label: String
 
     @AppStorage("widgetSizeScale") private var widgetSizeScale = 1.0
+    @Environment(\.panelAdaptiveScale) private var adaptiveScale
 
     private var color: Color {
         if fraction >= 0.8 { return .red }
@@ -12,20 +13,22 @@ struct CountdownWidget: View {
         return .green
     }
 
+    private var effectiveScale: CGFloat { widgetSizeScale * adaptiveScale }
+
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.15), lineWidth: 3 * widgetSizeScale)
+                .stroke(Color.white.opacity(0.15), lineWidth: 3 * effectiveScale)
             Circle()
                 .trim(from: 0, to: fraction)
-                .stroke(color, style: StrokeStyle(lineWidth: 3 * widgetSizeScale, lineCap: .round))
+                .stroke(color, style: StrokeStyle(lineWidth: 3 * effectiveScale, lineCap: .round))
                 .rotationEffect(.degrees(-90))
                 .animation(.easeOut(duration: 0.3), value: fraction)
             Text(label)
-                .font(.system(size: 9 * widgetSizeScale, weight: .bold, design: .rounded))
+                .font(.system(size: 9 * effectiveScale, weight: .bold, design: .rounded))
                 .foregroundColor(.white)
                 .minimumScaleFactor(0.5)
         }
-        .frame(width: 36 * widgetSizeScale, height: 36 * widgetSizeScale)
+        .frame(width: 36 * effectiveScale, height: 36 * effectiveScale)
     }
 }
