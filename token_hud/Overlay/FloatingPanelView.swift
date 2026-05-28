@@ -12,6 +12,10 @@ struct FloatingPanelView: View {
         GeometryReader { geometry in
             let adaptiveScale = calculateAdaptiveScale(for: geometry.size)
             ZStack(alignment: .bottomTrailing) {
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.black.opacity(0.75))
+                    .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
+
                 overlayContent
                     .padding(12 * adaptiveScale)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
@@ -49,13 +53,8 @@ struct FloatingPanelView: View {
                 state: watcher.effectiveState
             )
         } else {
-            compactOverlay
+            CompactOverlayContent()
         }
-    }
-
-    @ViewBuilder
-    private var compactOverlay: some View {
-        CompactOverlayContent()
     }
 
     private func calculateAdaptiveScale(for size: CGSize) -> CGFloat {
@@ -68,20 +67,6 @@ struct FloatingPanelView: View {
             idealHeight = baseHeight
         }
         return (size.height / idealHeight).clamped(to: 0.5...3.0)
-    }
-}
-
-private struct CompactOverlayContent: View {
-    @Environment(WidgetStore.self) private var store
-    @Environment(StateWatcher.self) private var watcher
-    @Environment(\.panelAdaptiveScale) private var scale
-
-    var body: some View {
-        HStack(spacing: 6 * scale) {
-            ForEach(store.widgets) { config in
-                WidgetRenderer(config: config, state: watcher.effectiveState, showServiceLabel: true)
-            }
-        }
     }
 }
 
@@ -137,11 +122,5 @@ private final class ResizeGripView: NSView {
             path.line(to: CGPoint(x: bounds.maxX - 3, y: bounds.minY + offset))
         }
         path.stroke()
-    }
-}
-
-private extension Comparable {
-    func clamped(to range: ClosedRange<Self>) -> Self {
-        min(max(self, range.lowerBound), range.upperBound)
     }
 }

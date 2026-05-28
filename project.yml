@@ -17,7 +17,9 @@ targets:
     type: application
     platform: macOS
     sources:
-      - token_hud
+      - path: token_hud
+        excludes:
+          - ".superpowers"
       - Sources/token_hudCore
     info:
       path: token_hud/Resources/Info.plist

@@ -6,33 +6,6 @@ import UniformTypeIdentifiers
 private struct WidgetPreset: Identifiable, Equatable {
     let id = UUID()
     let config: WidgetConfig
-
-    var serviceDisplayName: String {
-        switch config.service {
-        case "claude":    return "Claude"
-        case "openai":    return "OpenAI"
-        case "codex":     return "Codex"
-        case "gemini":    return "Gemini"
-        case "deepseek":  return "DeepSeek"
-        case "anthropic": return "Anthropic"
-        case "minimax":   return "MiniMax"
-        case "mimo":      return "MiMo"
-        default:          return config.service
-        }
-    }
-
-    var styleIcon: String {
-        switch config.style {
-        case .ring:             return "◯"
-        case .bar:              return "▬"
-        case .text:             return "T"
-        case .aggregate:        return "Σ"
-        case .multi:            return "⊞"
-        case .countdown:        return "◎"
-        case .status:           return "●"
-        case .modelBreakdown:   return "⊞"
-        }
-    }
 }
 
 private struct WidgetCapability {
@@ -92,6 +65,20 @@ private let presets: [WidgetPreset] = widgetCapabilities.flatMap { capability in
     capability.presets.map { WidgetPreset(config: $0) }
 }
 
+private func serviceDisplayName(_ id: String) -> String {
+    switch id {
+    case "claude":    return "Claude"
+    case "openai":    return "OpenAI"
+    case "codex":     return "Codex"
+    case "gemini":    return "Gemini"
+    case "deepseek":  return "DeepSeek"
+    case "anthropic": return "Anthropic"
+    case "minimax":   return "MiniMax"
+    case "mimo":      return "MiMo"
+    default:          return id
+    }
+}
+
 private func metricTitle(_ widget: WidgetConfig) -> String {
     if widget.service == "codex", widget.metric == .remainingTime {
         return widget.quotaIndex == 1 ? "7 天剩余量" : "5 小时剩余量"
@@ -105,74 +92,44 @@ private func metricTitle(_ widget: WidgetConfig) -> String {
     return widget.metric.displayName
 }
 
-// MARK: - Platform Grouped Presets
-
-private struct PlatformPresetsView: View {
-    let onAdd: (WidgetConfig) -> Void
-
-    private let platformOrder = widgetCapabilities.map(\.service)
-    private var groupedPresets: [(String, [WidgetPreset])] {
-        platformOrder.compactMap { service in
-            let matching = presets.filter { $0.config.service == service }
-            return matching.isEmpty ? nil : (service, matching)
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("预设组件")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            ForEach(groupedPresets, id: \.0) { service, servicePresets in
-                PlatformGroup(service: service, presets: servicePresets)
-            }
-        }
+private func metricIcon(_ metric: WidgetMetric) -> String {
+    switch metric {
+    case .remainingTime:     return "clock"
+    case .resetCountdown:    return "arrow.clockwise"
+    case .tokensRemaining:   return "text.bubble"
+    case .balance:           return "dollarsign.circle"
+    case .sessionTokens:     return "arrow.up.circle"
+    case .usagePercent:      return "chart.bar"
+    case .inputTokens:       return "arrow.down.circle"
+    case .outputTokens:      return "arrow.up.circle"
+    case .dailyTokens:       return "calendar"
+    case .monthlyTokens:     return "calendar.circle"
+    case .costSpent:         return "dollarsign.circle.fill"
+    case .dailyRequests:     return "number.circle"
+    case .monthlyRequests:   return "number.circle.fill"
+    case .sessionDuration:   return "timer"
+    case .tokensPerMinute:   return "bolt"
+    case .inputOutputRatio:  return "arrow.left.arrow.right"
+    case .costPerRequest:    return "dollarsign.arrow.circlepath"
+    case .rateLimitStatus:   return "exclamationmark.triangle"
+    case .creditsRemaining:  return "creditcard"
+    case .creditsUsed:       return "chart.pie"
+    case .sessionCredits:    return "sum"
+    case .subscriptionStatus:return "checkmark.seal"
+    case .planName:          return "tag"
     }
 }
 
-private struct PlatformGroup: View {
-    let service: String
-    let presets: [WidgetPreset]
-    @State private var isExpanded: Bool
-
-    init(service: String, presets: [WidgetPreset]) {
-        self.service = service
-        self.presets = presets
-        _isExpanded = State(initialValue: service == "claude")
-    }
-
-    var body: some View {
-        DisclosureGroup(isExpanded: $isExpanded) {
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(presets) { preset in
-                        PresetCard(preset: preset)
-                            .onDrag {
-                                NSItemProvider(object: preset.config.id.uuidString as NSString)
-                            }
-                    }
-                }
-                .padding(.vertical, 4)
-            }
-        } label: {
-            Text(platformDisplayName(service))
-                .font(.system(size: 11, weight: .semibold))
-        }
-    }
-
-    private func platformDisplayName(_ id: String) -> String {
-        switch id {
-        case "claude": return "Claude"
-        case "openai": return "OpenAI"
-        case "codex": return "Codex"
-        case "gemini": return "Gemini"
-        case "deepseek": return "DeepSeek"
-        case "anthropic": return "Anthropic"
-        case "minimax":   return "MiniMax"
-        case "mimo":      return "MiMo"
-        default: return id
-        }
+private func styleIcon(_ style: WidgetStyle) -> String {
+    switch style {
+    case .ring:           return "circle"
+    case .bar:            return "chart.bar.xaxis"
+    case .text:           return "textformat"
+    case .aggregate:      return "sum"
+    case .multi:          return "square.grid.2x2"
+    case .countdown:      return "timer"
+    case .status:         return "smallcircle.filled.circle"
+    case .modelBreakdown: return "list.bullet.rectangle"
     }
 }
 
@@ -180,164 +137,311 @@ private struct PlatformGroup: View {
 
 struct WidgetListEditor: View {
     @Environment(WidgetStore.self) private var store
+    @Environment(StateWatcher.self) private var watcher
     @State private var showCustomSheet = false
     @State private var recentlyDroppedIDs = Set<UUID>()
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                Text("小组件").font(.headline)
-                Spacer()
-                Button("恢复默认") { store.resetToDefaults() }
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        VStack(alignment: .leading, spacing: 14) {
+            header
+
+            WidgetPreviewPanel(widgets: store.widgets, state: watcher.effectiveState)
+                .onDrop(of: [.text], delegate: WidgetListDropDelegate(
+                    widgets: Bindable(store).widgets,
+                    recentlyDroppedIDs: $recentlyDroppedIDs
+                ))
+
+            HStack(alignment: .top, spacing: 14) {
+                ActiveWidgetsPanel(
+                    widgets: Bindable(store).widgets,
+                    recentlyDroppedIDs: $recentlyDroppedIDs
+                )
+                AddWidgetsPanel(
+                    onAdd: addWidget,
+                    onCustom: { showCustomSheet = true }
+                )
             }
-
-            // Top: Grouped presets
-            PlatformPresetsView { config in
-                store.widgets.append(config)
-            }
-
-            Divider()
-
-            // Bottom: Active widgets
-            Text("已添加组件")
-                .font(.caption)
-                .foregroundColor(.secondary)
-
-            if store.widgets.isEmpty {
-                Text("拖拽组件到此处")
-                    .font(.caption)
-                    .foregroundColor(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 80)
-                    .background(Color.secondary.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.secondary.opacity(0.15), style: StrokeStyle(lineWidth: 1, dash: [4]))
-                    )
-                    .onDrop(of: [.text], delegate: WidgetListDropDelegate(widgets: Bindable(store).widgets, recentlyDroppedIDs: $recentlyDroppedIDs))
-            } else {
-                List {
-                    ForEach(store.widgets) { widget in
-                        WidgetRow(widget: widget) {
-                            store.widgets.removeAll { $0.id == widget.id }
-                        }
-                    }
-                    .onMove { from, to in
-                        store.widgets.move(fromOffsets: from, toOffset: to)
-                    }
-                }
-                .listStyle(.bordered)
-                .frame(minHeight: 120)
-                .onDrop(of: [.text], delegate: WidgetListDropDelegate(widgets: Bindable(store).widgets, recentlyDroppedIDs: $recentlyDroppedIDs))
-            }
-
-            Button { showCustomSheet = true } label: {
-                Label("自定义组件", systemImage: "plus")
-                    .font(.caption)
-            }
-            .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
         }
         .padding()
         .sheet(isPresented: $showCustomSheet) {
             CustomWidgetSheet(store: store)
         }
     }
-}
 
-// MARK: - Preset Card
-
-private struct PresetCard: View {
-    let preset: WidgetPreset
-
-    var body: some View {
-        VStack(spacing: 4) {
-            Text(preset.serviceDisplayName)
-                .font(.system(size: 10, weight: .semibold))
-                .foregroundColor(.primary)
-            Text(metricTitle(preset.config))
-                .font(.system(size: 9))
-                .foregroundColor(.secondary)
-                .lineLimit(1)
-            HStack(spacing: 2) {
-                Text(preset.styleIcon)
-                    .font(.system(size: 10))
-                Text(preset.config.style.displayName)
-                    .font(.system(size: 8))
-                    .foregroundColor(.secondary)
+    private var header: some View {
+        HStack(alignment: .firstTextBaseline) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("小组件")
+                    .font(.headline)
+                Text("配置会立即反映在上方预览和浮动面板中。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
+            Spacer()
+            Button {
+                store.resetToDefaults()
+            } label: {
+                Label("恢复默认", systemImage: "arrow.counterclockwise")
+            }
+            .font(.caption)
         }
-        .frame(width: 80, height: 60)
-        .background(Color.secondary.opacity(0.08))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.15), lineWidth: 0.5)
-        )
+    }
+
+    private func addWidget(_ config: WidgetConfig) {
+        store.widgets.append(WidgetConfig(
+            service: config.service,
+            metric: config.metric,
+            style: config.style,
+            quotaIndex: config.quotaIndex
+        ))
     }
 }
 
-// MARK: - Widget Row
+// MARK: - Preview
+
+private struct WidgetPreviewPanel: View {
+    let widgets: [WidgetConfig]
+    let state: StateFile
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("当前效果", systemImage: "rectangle.dashed")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text("\(widgets.count) 个组件")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            ZStack {
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(
+                        LinearGradient(
+                            colors: [
+                                Color(nsColor: .black).opacity(0.90),
+                                Color(red: 0.08, green: 0.09, blue: 0.12).opacity(0.96)
+                            ],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                    )
+
+                if widgets.isEmpty {
+                    VStack(spacing: 6) {
+                        Image(systemName: "rectangle.3.group")
+                            .font(.system(size: 22))
+                            .foregroundStyle(.white.opacity(0.45))
+                        Text("还没有小组件")
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundStyle(.white.opacity(0.75))
+                        Text("从下方预设添加，或拖拽预设到这里。")
+                            .font(.caption2)
+                            .foregroundStyle(.white.opacity(0.45))
+                    }
+                } else {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 10) {
+                            ForEach(widgets) { config in
+                                WidgetRenderer(config: config, state: state, showServiceLabel: true)
+                                    .padding(.vertical, 4)
+                            }
+                        }
+                        .padding(.horizontal, 16)
+                        .frame(maxWidth: .infinity, alignment: .center)
+                    }
+                }
+            }
+            .frame(height: 118)
+            .environment(\.panelAdaptiveScale, 1.15)
+        }
+    }
+}
+
+// MARK: - Active Widgets
+
+private struct ActiveWidgetsPanel: View {
+    @Binding var widgets: [WidgetConfig]
+    @Binding var recentlyDroppedIDs: Set<UUID>
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("已添加", systemImage: "line.3.horizontal.decrease.circle")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Text("拖动调整顺序")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+
+            if widgets.isEmpty {
+                Text("拖拽组件到此处")
+                    .font(.caption)
+                    .foregroundColor(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 150)
+                    .background(Color.secondary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [4]))
+                    )
+                    .onDrop(of: [.text], delegate: WidgetListDropDelegate(
+                        widgets: $widgets,
+                        recentlyDroppedIDs: $recentlyDroppedIDs
+                    ))
+            } else {
+                List {
+                    ForEach(widgets) { widget in
+                        WidgetRow(widget: widget) {
+                            widgets.removeAll { $0.id == widget.id }
+                        }
+                    }
+                    .onMove { from, to in
+                        widgets.move(fromOffsets: from, toOffset: to)
+                    }
+                }
+                .listStyle(.bordered)
+                .frame(minHeight: 220)
+                .onDrop(of: [.text], delegate: WidgetListDropDelegate(
+                    widgets: $widgets,
+                    recentlyDroppedIDs: $recentlyDroppedIDs
+                ))
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
+    }
+}
 
 private struct WidgetRow: View {
     let widget: WidgetConfig
     let onRemove: () -> Void
 
     var body: some View {
-        HStack(spacing: 6) {
+        HStack(spacing: 8) {
             Image(systemName: metricIcon(widget.metric))
+                .font(.system(size: 12))
+                .foregroundStyle(.secondary)
+                .frame(width: 18)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(metricTitle(widget))
+                    .font(.system(size: 12, weight: .medium))
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    Text(serviceDisplayName(widget.service))
+                    Text("·")
+                    Image(systemName: styleIcon(widget.style))
+                    Text(widget.style.displayName)
+                }
                 .font(.system(size: 10))
-                .frame(width: 16)
-            Text(widget.service)
-                .font(.system(size: 12, weight: .medium))
-            Text(metricTitle(widget))
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
-            Text("· \(widget.style.displayName)")
-                .font(.system(size: 11))
-                .foregroundColor(.secondary)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            }
+
             Spacer()
+
             Button(action: onRemove) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 9, weight: .medium))
+                    .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.secondary)
+                    .frame(width: 22, height: 22)
             }
             .buttonStyle(.plain)
+            .help("移除")
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 6)
+        .padding(.vertical, 5)
     }
+}
 
-    private func metricIcon(_ metric: WidgetMetric) -> String {
-        switch metric {
-        case .remainingTime:    return "clock"
-        case .resetCountdown:   return "arrow.clockwise"
-        case .tokensRemaining:  return "text.bubble"
-        case .balance:          return "dollarsign.circle"
-        case .sessionTokens:    return "arrow.up.circle"
-        case .usagePercent:     return "chart.bar"
-        case .inputTokens:      return "arrow.down.circle"
-        case .outputTokens:     return "arrow.up.circle"
-        case .dailyTokens:      return "calendar"
-        case .monthlyTokens:    return "calendar.circle"
-        case .costSpent:        return "dollarsign.circle.fill"
-        case .dailyRequests:    return "number.circle"
-        case .monthlyRequests:  return "number.circle.fill"
-        case .sessionDuration:  return "timer"
-        case .tokensPerMinute:  return "bolt"
-        case .inputOutputRatio: return "arrow.left.arrow.right"
-        case .costPerRequest:   return "dollarsign.arrow.circlepath"
-        case .rateLimitStatus:  return "exclamationmark.triangle"
-        case .creditsRemaining: return "creditcard"
-        case .creditsUsed:      return "chart.pie"
-        case .sessionCredits:   return "sum"
-        case .subscriptionStatus:return "checkmark.seal"
-        case .planName:         return "tag"
+// MARK: - Add Widgets
+
+private struct AddWidgetsPanel: View {
+    let onAdd: (WidgetConfig) -> Void
+    let onCustom: () -> Void
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 104, maximum: 132), spacing: 8)
+    ]
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("添加组件", systemImage: "plus.circle")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                Button(action: onCustom) {
+                    Label("自定义", systemImage: "slider.horizontal.3")
+                }
+                .font(.caption)
+            }
+
+            ScrollView {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                    ForEach(presets) { preset in
+                        PresetCard(preset: preset) {
+                            onAdd(preset.config)
+                        }
+                        .onDrag {
+                            NSItemProvider(object: preset.config.id.uuidString as NSString)
+                        }
+                    }
+                }
+                .padding(1)
+            }
+            .frame(minHeight: 220)
         }
+        .frame(maxWidth: .infinity, alignment: .topLeading)
     }
+}
 
+private struct PresetCard: View {
+    let preset: WidgetPreset
+    let onAdd: () -> Void
+
+    var body: some View {
+        Button(action: onAdd) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 6) {
+                    Image(systemName: metricIcon(preset.config.metric))
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundStyle(.tint)
+                    Text(serviceDisplayName(preset.config.service))
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.primary)
+                    Spacer(minLength: 0)
+                }
+
+                Text(metricTitle(preset.config))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+
+                HStack(spacing: 4) {
+                    Image(systemName: styleIcon(preset.config.style))
+                    Text(preset.config.style.displayName)
+                }
+                .font(.system(size: 10))
+                .foregroundColor(.secondary)
+            }
+            .padding(10)
+            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
+            .background(Color.secondary.opacity(0.08))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.14), lineWidth: 0.5)
+            )
+        }
+        .buttonStyle(.plain)
+        .help("点击添加，也可以拖到预览或已添加列表")
+    }
 }
 
 // MARK: - Drop Delegate
@@ -362,13 +466,12 @@ private struct WidgetListDropDelegate: DropDelegate {
                 }
 
                 if let preset = presets.first(where: { $0.config.id == uuid }) {
-                    let newWidget = WidgetConfig(
+                    widgets.append(WidgetConfig(
                         service: preset.config.service,
                         metric: preset.config.metric,
                         style: preset.config.style,
                         quotaIndex: preset.config.quotaIndex
-                    )
-                    widgets.append(newWidget)
+                    ))
                 }
             }
         }
@@ -404,7 +507,7 @@ private struct CustomWidgetSheet: View {
             Form {
                 Picker("服务", selection: $service) {
                     ForEach(serviceOptions, id: \.self) { service in
-                        Text(platformDisplayName(service)).tag(service)
+                        Text(serviceDisplayName(service)).tag(service)
                     }
                 }
                 .onChange(of: service) { _, _ in
@@ -430,24 +533,12 @@ private struct CustomWidgetSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("添加") {
-                        let cfg = WidgetConfig(service: service, metric: metric, style: style)
-                        store.widgets.append(cfg)
+                        store.widgets.append(WidgetConfig(service: service, metric: metric, style: style))
                         dismiss()
                     }
                 }
             }
         }
         .frame(width: 320, height: 240)
-    }
-
-    private func platformDisplayName(_ id: String) -> String {
-        switch id {
-        case "claude": return "Claude"
-        case "codex": return "Codex"
-        case "deepseek": return "DeepSeek"
-        case "minimax": return "MiniMax"
-        case "mimo": return "MiMo"
-        default: return id
-        }
     }
 }

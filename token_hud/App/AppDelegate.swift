@@ -9,7 +9,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var widgetStore: WidgetStore!
     private var appFilterStore: AppFilterStore!
     private var appWatcher: AppWatcher!
-    private var floatingPanelManager: FloatingPanelManager!
+    private var floatingPanelManager: NotchHostPanelManager!
+    private var menuBarBridgeProbe: MenuBarBridgeProbe!
     private var hotkeyManager: GlobalHotkeyManager!
     private var statusItem: NSStatusItem?
     private var settingsController: NSWindowController?
@@ -30,11 +31,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         codexFetcher = CodexFetcher()
         apiPlatformFetcher = APIPlatformFetcher()
 
-        floatingPanelManager = FloatingPanelManager(
+        floatingPanelManager = NotchHostPanelManager(
             stateWatcher: stateWatcher,
             widgetStore: widgetStore
         )
         floatingPanelManager.setup()
+        menuBarBridgeProbe = MenuBarBridgeProbe()
+        menuBarBridgeProbe.setupIfNeeded()
 
         hotkeyManager = GlobalHotkeyManager()
         hotkeyManager.onHotkey = { [weak self] in
@@ -65,6 +68,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         stateWatcher.stop()
         appWatcher.stop()
         floatingPanelManager.teardown()
+        menuBarBridgeProbe.teardown()
         hotkeyManager.teardown()
         codexFetcher.stop()
         apiPlatformFetcher.stop()
