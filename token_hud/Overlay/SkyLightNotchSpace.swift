@@ -20,6 +20,8 @@ final class SkyLightNotchSpace {
     private var addWindowsAndRemoveFromSpaces: AddWindowsAndRemoveFromSpacesFunction?
 
     private(set) var unavailableReason: String?
+    private(set) var setAbsoluteLevelReturnCode: Int32?
+    private(set) var showSpacesReturnCode: Int32?
     private(set) var lastDelegateReturnCode: Int32?
 
     private init() {
@@ -68,8 +70,21 @@ final class SkyLightNotchSpace {
             return
         }
 
-        _ = spaceSetAbsoluteLevel(connection, space, Self.notchSurfaceLevel)
-        _ = showSpaces(connection, [space] as CFArray)
+        let setAbsoluteLevelReturnCode = spaceSetAbsoluteLevel(connection, space, Self.notchSurfaceLevel)
+        let showSpacesReturnCode = showSpaces(connection, [space] as CFArray)
+        self.setAbsoluteLevelReturnCode = setAbsoluteLevelReturnCode
+        self.showSpacesReturnCode = showSpacesReturnCode
+        guard SkyLightReturnCodePolicy.isSpaceReady(
+            setAbsoluteLevel: setAbsoluteLevelReturnCode,
+            showSpaces: showSpacesReturnCode
+        ) else {
+            unavailableReason = """
+            space setup failed: \
+            setAbsoluteLevel=\(setAbsoluteLevelReturnCode), \
+            showSpaces=\(showSpacesReturnCode)
+            """
+            return
+        }
 
         self.connection = connection
         self.spaceID = space
@@ -89,6 +104,8 @@ final class SkyLightNotchSpace {
         reason=\(unavailableReason ?? "none"), \
         connection=\(String(describing: connection)), \
         spaceID=\(String(describing: spaceID)), \
+        setAbsoluteLevelReturnCode=\(String(describing: setAbsoluteLevelReturnCode)), \
+        showSpacesReturnCode=\(String(describing: showSpacesReturnCode)), \
         lastDelegateReturnCode=\(String(describing: lastDelegateReturnCode))
         """
     }
@@ -106,7 +123,7 @@ final class SkyLightNotchSpace {
         let windows = [window.windowNumber] as CFArray
         let result = addWindowsAndRemoveFromSpaces(connection, spaceID, windows, 7)
         lastDelegateReturnCode = result
-        return true
+        return SkyLightReturnCodePolicy.didDelegateWindow(returnCode: result)
     }
 
     private static func lastDynamicLoaderError() -> String {
@@ -114,4 +131,3 @@ final class SkyLightNotchSpace {
         return String(cString: error)
     }
 }
-

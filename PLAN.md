@@ -2,617 +2,685 @@
 
 这个文件跟踪当前项目正在进行的实现工作。保持内容小而可执行；可长期保留的决策沉淀到 `docs/`。
 
-## 当前重点：Notch Overlay 菜单栏融合修复（已实现，待真机验证）
+## 当前重点：修复 Xcode 运行 attach by pid 失败（已实现，待手动 Run 验证）
 
-### 当前问题
+### 问题
 
-用户最新真机截图显示：双窗口方案仍然没有达成目标。当前效果只是一个黑色矩形悬在菜单栏下方：
+用户在 Xcode 运行 app 时遇到：
 
-- 黑色区域没有进入顶部菜单栏。
-- 刘海左右两侧没有被填充。
-- 视觉上不是“刘海弹开”，而是普通 overlay 被放在菜单栏下面。
+```text
+error: attach by pid '40216' failed -- attach failed (attached to process, but could not pause execution; attach failed)
+```
 
-这说明问题不能继续当作简单 y 坐标偏移处理。
+本轮排查结果：
 
-### 本轮实现状态（2026-05-29）
+- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build` 能通过，说明不是编译错误。
+- 当前 `project.yml` / `project.pbxproj` 配置为：
+  - `CODE_SIGNING_ALLOWED = NO`
+  - `CODE_SIGNING_REQUIRED = NO`
+  - `CODE_SIGN_STYLE = Manual`
+- 默认构建出的 Debug app bundle 不是有效签名产物：
+  - `codesign --verify --verbose=4 .../token_hud.app` 报错：
+    - `code has no resources but signature indicates they must be present`
+  - 该状态下 Xcode/LLDB attach 到 app pid 可能失败。
+- 用命令行临时覆盖签名参数验证：
+  - `CODE_SIGNING_ALLOWED=YES CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY=-`
+  - 构建成功，并执行了 `CodeSign ... Sign to Run Locally`。
+  - 新产物 `codesign --verify --verbose=4` 通过。
+  - entitlements 包含 `com.apple.security.get-task-allow = true`。
 
-已按开源调研后的路线完成第一版实现：
-
-- `NotchGeometryCalculator.notchFrames` 改为让 hosted surface 顶边锚定 `screen.frame.maxY`，不再上推到 `screen.maxY + safeAreaTop`。
-- hosted overlay window 改为单个 `NotchSurfaceWindow`，style mask 包含 `.borderless`、`.nonactivatingPanel`、`.utilityWindow`、`.hudWindow`。
-- 新增 `NotchSurfaceStrategy`：
-  - `skyLightSpace`：优先策略，window level 为 `.mainMenu + 3`。
-  - `publicPanel`：SkyLight 不可用时 fallback，window level 为 `.screenSaver`。
-- 新增 `SkyLightNotchSpace`，通过 `dlopen` 动态加载 SkyLight 私有符号并创建 absolute level `2_147_483_647` 的 notch Space。
-- hosted overlay 显示前会尝试 delegate 到 SkyLight notch Space，并在日志输出 strategy、SkyLight availability、space id、delegate return code、requested/actual frame。
-- 屏幕选择新增 display id 记忆，优先使用带 notch 的屏幕。
-
-验证结果：
-
-- `swift test` 通过，98 个测试通过。
-- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build` 通过。
-
-待真机验证：
-
-- 吸附后 topBridge 是否进入菜单栏/刘海区域。
-- 诊断日志中的 `notchSurfaceStrategy` 是否为 `skyLightSpace`。
-- `overlayDelegatedToSkyLight` 是否为 `true`。
-- 如果仍不可见，下一步根据日志判断是 SkyLight delegate 失败、frame 被系统裁剪，还是 SwiftUI surface 绘制问题。
-
-### 开源项目调研结论
-
-长期调研记录见 `docs/notch-open-source-research.md`。
-
-本轮对比了 Boring Notch、Atoll、SuperIsland、DynamicNotch 的源码。结论是：我之前提出的“三个普通窗口：左右 bridge + body”方案依据不足，应该废弃。
-
-关键发现：
-
-1. **真正能强融合的项目没有只靠普通 `NSPanel`**
-   - Boring Notch 使用 `BoringNotchSkyLightWindow`，窗口 level 是 `.mainMenu + 3`，style mask 包含 `.borderless`、`.nonactivatingPanel`、`.utilityWindow`、`.hudWindow`，并设置 `.fullScreenAuxiliary`、`.stationary`、`.canJoinAllSpaces`、`.ignoresCycle`。
-   - 更关键的是，它实现了 `CGSSpace`，通过 `CGSSpaceCreate` / `CGSSpaceSetAbsoluteLevel` / `CGSAddWindowsToSpaces` 创建 absolute level 为 `2147483647` 的私有 Space，并把 notch window 加进去。
-   - Atoll 继承了同类 `CGSSpace` 方案，并把窗口加入 `NotchSpaceManager.shared.notchSpace.windows`。
-   - DynamicNotch 也走同类路线：`OverlayWindowLevel.interactiveNotch = .mainMenu + 3`，并通过 `SkyLightOperator` 创建 `.notchSurface = 2_147_483_647` 的私有 Space，把窗口 delegate 到这个 Space。
-
-2. **公开 API 项目更像“刘海下方/附近的近似 Dynamic Island”**
-   - SuperIsland 使用透明 `NSPanel`、`.nonactivatingPanel`、`.statusBar` level。
-   - 它的架构是“单个最大尺寸 panel + 固定 SwiftUI hosting view + 窗口作为裁剪 viewport”，而不是多个 bridge 窗口。
-   - 这个路线更安全，但不保证能覆盖系统菜单栏层；它和我们当前失败的公开 AppKit 路线更接近。
-
-3. **成功项目普遍是单窗口 notch surface，不是左右 bridge 多窗口**
-   - Boring Notch / Atoll / DynamicNotch 都是 top-centered single window / canvas。
-   - 视觉扩展靠窗口内 SwiftUI 状态和裁剪/动画处理，不靠多个窗口拼接菜单栏左右区域。
-   - 多窗口 bridge 容易产生 seam、同步问题，而且如果窗口层级仍然被系统菜单栏压住，拆成三个窗口也不会解决根因。
-
-4. **屏幕选择和几何检测是基础设施，不是视觉细节**
-   - 开源项目普遍用 `safeAreaInsets.top`、`auxiliaryTopLeftArea/rightArea`、稳定 display id、用户选择屏幕、鼠标所在屏幕、多屏同步等逻辑。
-   - 不能只默认 `NSScreen.main`。
-
-### 修订后的根因判断
-
-当前实现有两个关键限制：
-
-1. **单个 overlay window 被系统放回菜单栏下方**
-   - `NotchGeometryCalculator` 请求的 frame 已经包含 menu bar bridge。
-   - 但真机可见结果说明 WindowServer 可能仍把普通 app window 的可见区域压到 `visibleFrame` 下方，或当前 window 配置没有获得菜单栏区域显示条件。
-
-2. **`topBridge` 只画在 overlay window 内部**
-   - 如果 overlay window 本身进不了菜单栏区域，`topBridge` 就永远不可能覆盖刘海左右两侧。
-   - 但开源项目的做法不是拆多个普通窗口，而是把主 overlay window 加入更高层的 SkyLight/CGS Space。
-
-所以当前问题的根因大概率是：**公开 AppKit window level 不足以稳定覆盖菜单栏/刘海区域；要达到 Boring Notch / Atoll 级别的融合，需要引入 SkyLight/CGS 私有 Space，或明确接受公开 API fallback 的视觉上限。**
+因此当前根因判断是：为了跳过签名而禁用 code signing，导致 Debug app bundle 签名无效，Xcode 可以构建但 LLDB 无法稳定 attach。
 
 ### 本轮目标
 
-这轮不再修饰现有黑矩形，也不做三窗口 bridge。目标改为做一个可验证的 **Notch Surface Strategy**：
-
-1. 保留 detached floating window。
-2. hosted 状态回到 **单个 top-centered notch surface window**。
-3. 该 window 首先尝试 SkyLight/CGS 私有 Space：
-   - `.mainMenu + 3` window level；
-   - borderless/nonactivating/utility/hud；
-   - `.canJoinAllSpaces`、`.stationary`、`.fullScreenAuxiliary`、`.ignoresCycle`；
-   - 通过私有 Space absolute level `2_147_483_647` 获得菜单栏上方显示能力。
-4. 如果私有 API 不可用，自动 fallback 到公开 `.statusBar` / `.screenSaver` panel，并明确标记为近似模式，不再承诺完全菜单栏融合。
-5. 继续保留诊断日志，对比 `requestedFrame` / `actualFrame` / Space 可用性。
+- 让本地 Debug 构建默认使用 ad-hoc signing（`Sign to Run Locally`）。
+- 保持不依赖 Apple Developer Team，不引入正式证书要求。
+- 确保 Xcode 直接 Run 时产物带 `get-task-allow = true`，LLDB 可以 attach。
+- 保持命令行 `xcodebuild` 验证仍可通过。
 
 ### 实施步骤
 
-1. **新增 NotchSurfaceStrategy**
-   - 新增策略枚举：
-     - `skyLightSpace`：使用私有 CGS/SkyLight Space。
-     - `publicPanel`：只使用公开 AppKit window level。
-   - 默认先启用 `skyLightSpace`，如果私有符号加载失败则降级到 `publicPanel`。
-   - 在日志里打印当前策略。
+1. **修改 XcodeGen 配置**
+   - 在 `project.yml` 中把 target signing 配置改为：
+     - `CODE_SIGNING_ALLOWED: "YES"`
+     - `CODE_SIGNING_REQUIRED: "YES"`
+     - `CODE_SIGN_STYLE: Manual`
+     - `CODE_SIGN_IDENTITY: "-"`
+     - `DEVELOPMENT_TEAM: ""`
+   - 保留现有 `CODE_SIGN_ENTITLEMENTS: token_hud/token_hud.entitlements`。
 
-2. **新增 SkyLight/CGS Space wrapper**
-   - 以 DynamicNotch 的做法为参考，动态 `dlopen` `/System/Library/PrivateFrameworks/SkyLight.framework/Versions/A/SkyLight`。
-   - 尝试加载：
-     - `SLSMainConnectionID`
-     - `SLSSpaceCreate`
-     - `SLSSpaceSetAbsoluteLevel`
-     - `SLSShowSpaces`
-     - `SLSSpaceAddWindowsAndRemoveFromSpaces`
-   - 创建 absolute level `2_147_483_647` 的 notch surface。
-   - 提供 `delegateWindow(_:)`，把 hosted window 加入 notch surface。
-   - 如果任一步失败，不崩溃，只记录不可用并走 `publicPanel`。
+2. **同步 Xcode 工程**
+   - 优先运行 `xcodegen generate` 重新生成 `token_hud.xcodeproj`。
+   - 如果本地 `xcodegen generate` 因既有工程复制冲突失败，则对 `project.pbxproj` 做等价最小修改，保持和 `project.yml` 一致。
 
-3. **重构 hosted window**
-   - 删除三窗口 bridge 计划。
-   - 保留单个 `overlayWindow`，但改成 `NotchSurfaceWindow` 或同等语义：
-     - `NSPanel`
-     - `.borderless`
-     - `.nonactivatingPanel`
-     - `.utilityWindow`
-     - `.hudWindow`
-     - level `.mainMenu + 3`
-     - `isOpaque = false`
-     - `backgroundColor = .clear`
-     - `hasShadow = false`
-     - `isFloatingPanel = true`
-     - `canBecomeKey = false`
-     - `canBecomeMain = false`
-   - hosted 状态时把该 window 加入 SkyLight/CGS notch surface。
+3. **验证签名和构建**
+   - 运行：
+     - `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+     - `codesign --verify --verbose=4 <Debug token_hud.app>`
+     - `codesign -d --entitlements :- <Debug token_hud.app>`
+   - 确认：
+     - app bundle valid on disk。
+     - entitlements 包含 `com.apple.security.get-task-allow = true`。
 
-4. **重做 window frame 与 SwiftUI surface**
-   - 参考 Boring Notch / DynamicNotch：window 始终 top-centered：
-     - `x = screen.frame.midX - width / 2`
-     - `y = screen.frame.maxY - height`
-   - 不使用 `visibleFrame` 作为 hosted 位置依据。
-   - SwiftUI surface 内部绘制：
-     - 顶部菜单栏/刘海融合区域；
-     - 刘海下方 body；
-     - expanded 内容。
-   - 可参考 SuperIsland 的“最大 hosting view + window 作为裁剪 viewport”模式，避免窗口尺寸变化导致 SwiftUI layout 跳动。
+4. **给出运行建议**
+   - 如果 Xcode 仍旧 attach 失败，建议清理旧 DerivedData 或重新打开 project，因为旧无效签名产物可能仍被 Xcode 缓存。
 
-5. **屏幕选择与多屏基础**
-   - 使用稳定 display id 保存偏好屏幕。
-   - 优先选择带 notch 的内建屏。
-   - 没有 notch 时 fallback 到顶部居中 public panel。
-   - 监听 `NSApplication.didChangeScreenParametersNotification` 后重建/重定位 window。
+### 本轮实现结果（2026-06-04）
 
-6. **加强诊断**
-   - hosted 状态输出：
-     - `requestedFrame`
-     - `actualFrame`
-     - `screen.frame`
-     - `screen.visibleFrame`
-     - `safeAreaInsets`
-     - `auxiliaryTopLeftArea/rightArea`
-     - window `level.rawValue`
-     - SkyLight/CGS strategy availability
-     - window 是否已 delegate 到 notch surface
+- `project.yml` 已把 target signing 改成本地 ad-hoc signing：
+  - `CODE_SIGNING_ALLOWED: "YES"`
+  - `CODE_SIGNING_REQUIRED: "YES"`
+  - `CODE_SIGN_IDENTITY: "-"`
+  - `CODE_SIGN_STYLE: Manual`
+  - `DEVELOPMENT_TEAM: ""`
+- `token_hud.xcodeproj/project.pbxproj` 已做等价最小同步：
+  - Debug / Release target build settings 均改为 `CODE_SIGNING_ALLOWED = YES`、`CODE_SIGNING_REQUIRED = YES`、`CODE_SIGN_IDENTITY = "-"`。
+- 已尝试运行 `xcodegen generate`，但仍遇到既有工程复制冲突：
+  - `XcodeGen couldn’t be copied to token_hud because an item with the same name already exists`
+  - 因此本轮没有依赖 xcodegen 输出，而是手动保持 `project.yml` 与 `project.pbxproj` 一致。
+- 默认 `xcodebuild` 不再需要命令行 signing override，构建过程会执行：
+  - `Signing Identity: "Sign to Run Locally"`
+  - `CodeSign ... token_hud.app`
+- 产物 entitlements 已包含：
+  - `com.apple.security.get-task-allow = true`
+  - `com.apple.security.app-sandbox = false`
 
-7. **验证**
+### 验证
+
+- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，并执行 `Sign to Run Locally`。
+- `codesign --verify --verbose=4 /Users/lauzanhing/Library/Developer/Xcode/DerivedData/token_hud-hilycrftzevwvucmmyckksjjimrz/Build/Products/Debug/token_hud.app`：通过，`valid on disk`。
+- `codesign -d --entitlements :- /Users/lauzanhing/Library/Developer/Xcode/DerivedData/token_hud-hilycrftzevwvucmmyckksjjimrz/Build/Products/Debug/token_hud.app`：通过，包含 `get-task-allow = true`。
+- `swift test`：121 个测试通过。
+- 手动验证：
+  - Xcode 直接 Run 不再出现 `attach by pid ... failed`。
+
+### 风险
+
+- ad-hoc signing 只适合本地开发运行，不是发布签名。
+- 如果 Xcode 仍从旧 DerivedData 启动旧 app，需要清理 DerivedData 后再验证。
+- 如果用户机器的 Xcode scheme 覆盖了 signing 设置，仍可能需要检查 scheme 的 Run 配置。
+
+---
+
+## 当前重点：修复 hosted compact 悬停不展开（已实现，待真机验证）
+
+### 问题
+
+当前样式已回到“单一 hosted surface + compact top cap/status slot”的方向，但用户反馈鼠标悬停后无法展开。结合 `docs/notch-dynamic-island-implementation-reference.md` 与 `docs/notch-open-source-research.md` 复查，触发机制存在明显冲突：
+
+- 代码已有 `NotchTrackingContainerView.hitTest` 和 `hostedHitMask(in:)`，目标是只让 `topCap` / `body` 这些可见区域接收事件，透明区域穿透到菜单栏或桌面。
+- 但 hosted 收起态多处把 `overlayWindow?.ignoresMouseEvents` 设为 `true`：
+  - `animateToCollapsed`
+  - `snapToCollapsed`
+  - `screenParametersChanged`
+  - `restoreState`
+- 一旦 window 整体忽略鼠标，`hitTest`、tracking area、SwiftUI hover、本地 mouse monitor 都不会生效，只能依赖 `NSEvent.addGlobalMonitorForEvents(.mouseMoved)`。
+- global monitor 对系统菜单栏、当前 app 自身 window、Space/私有层级里的事件并不稳定；成熟实现通常会把“透明区域穿透”和“可见触发区接收事件”拆开，而不是让整个 window ignore mouse。
+
+因此本轮判断根因是：收起态事件策略错了，不是 hover region 的视觉尺寸或位置单独没调好。
+
+### 本轮目标
+
+- hosted compact 收起态仍保持菜单栏/透明区域不被大面积遮挡。
+- compact 可见 top cap/status slot 区域能够稳定触发 hover expand。
+- expanded 状态鼠标离开 top cap/body 后仍能按当前策略延迟收回。
+- 触发路径对菜单栏区域、SkyLight hosted surface、public fallback 都尽量一致。
+- 用纯逻辑测试锁住“hosted window 不应整体忽略鼠标”的策略，避免后续又改回旧路线。
+
+### 实施步骤
+
+1. **补失败测试**
+   - 在 `NotchSurfacePolicyTests` 增加 mouse event policy 测试：
+     - `.collapsed` hosted window 不应设置 `ignoresMouseEvents = true`。
+     - `.expanded` hosted window 不应设置 `ignoresMouseEvents = true`。
+     - `.detached` window 不应设置 `ignoresMouseEvents = true`。
+   - 这个测试锁定核心原则：由 `hitTest` / hit mask 控制穿透，不由整窗 ignore mouse 控制穿透。
+
+2. **新增 Notch mouse event policy**
+   - 在 `NotchSurfacePolicy.swift` 增加 `NotchMouseEventPolicy`。
+   - `NotchHostPanelManager` 所有 hosted/detached 状态切换统一调用该 policy，不再分散写 `hostState.isCollapsed` 或硬编码 `true/false`。
+
+3. **改 hover monitor 策略**
+   - 保留 global mouse monitor，用于鼠标在其他 app / 桌面区域移动时判断进入或离开刘海区域。
+   - 增加 local mouse moved monitor，用于鼠标进入本 app hosted window 可见 top cap/body 后稳定触发。
+   - `makeWindow` 对 hosted surface 设置 `acceptsMouseMovedEvents = true`。
+   - local/global 两条路径最终进入同一个 `handleMouseMove`，避免状态机分叉。
+
+4. **让 hit mask 真正接管穿透**
+   - 收起态 overlay window 保持 `ignoresMouseEvents = false`。
+   - `NotchTrackingContainerView.hitTest` 继续只允许 `hostedHitMask` 内部命中：
+     - collapsed：`topCap`
+     - expanded：`topCap.union(body)`
+   - 这样 compact 可见区域能接收 hover，透明区域仍可穿透。
+
+5. **补触发诊断**
+   - hover expand/collapse 决策点打印轻量日志：
+     - event source：global / local
+     - 当前 mode
+     - mouse 是否在 notch region
+   - 日志只在状态动作发生时输出，避免鼠标移动刷屏。
+
+### 本轮实现结果（2026-06-04）
+
+- 新增 `NotchMouseEventPolicy`：
+  - `.collapsed` / `.expanded` / `.detached` 都不再要求整窗 `ignoresMouseEvents = true`。
+  - 核心原则改为：window 保持接收鼠标，透明区域穿透交给 `hostedHitMask(in:)` 和 `NotchTrackingContainerView.hitTest`。
+- `NotchHostPanelManager` 已移除 hosted 收起态整窗忽略鼠标的写法：
+  - `animateToCollapsed`
+  - `snapToCollapsed`
+  - `screenParametersChanged`
+  - `restoreState`
+- hosted / detached 状态切换统一通过 `NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode:)` 设置 window 事件策略。
+- hosted surface window 设置 `acceptsMouseMovedEvents = true`。
+- hover 触发从单一路径改为双路监听：
+  - global mouse monitor：继续覆盖鼠标在其他 app / 桌面区域移动的情况。
+  - local mouse monitor：覆盖鼠标进入本 app hosted top cap/body 后的事件，避免只依赖 global monitor。
+- local/global mouse move 统一进入同一个 `handleMouseMove`：
+  - collapsed + inside：展开。
+  - expanded + outside：只在没有 pending timer 时安排收起，避免反复重建 timer。
+  - expanded + inside：只在存在 pending timer 时取消，避免鼠标移动刷日志。
+- hover 状态动作发生时输出轻量诊断：
+  - `source`
+  - `action`
+  - `mode`
+  - `mouseInsideNotchRegion`
+
+### 验证
+
+- `swift test --filter NotchSurfacePolicyTests`：13 个测试通过。
+- `swift test`：121 个测试通过。
+- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+- 真机验证：
+  - app 启动后 hosted compact 收起态只显示刘海两侧状态。
+  - 鼠标移动到 compact top cap/status slot 上能稳定展开。
+  - 鼠标离开展开 body 后能稳定收回。
+  - 透明区域不吞掉菜单栏点击。
+  - detached 后再次吸附回刘海，hover 仍可展开。
+
+### 风险
+
+- hosted window 由 `ignoresMouseEvents = true` 改为 `false` 后，如果 hit mask 计算错误，可能短暂吞掉比预期更大的菜单栏区域；需要用真机点击菜单栏验证。
+- local/global monitor 同时存在，可能重复触发同一状态动作；需要通过 `NotchTransitionPolicy` 和当前 mode guard 保持幂等。
+- SkyLight 私有 Space 下事件分发可能和 public fallback 不完全一致；如果 local monitor 仍不触发，需要进一步在 `NotchTrackingContainerView` 增加 tracking area / `mouseEntered` 兜底。
+
+---
+
+## 当前重点：按 Notch 参考文档纠偏 hosted 实现（已实现，待真机验证）
+
+### 问题
+
+根据 `docs/notch-dynamic-island-implementation-reference.md` 和 `docs/notch-open-source-research.md` 对当前实现复查后，主方向已经从“多个黑块/shoulder cap 拼接”回到“单一 hosted surface + compact 左右 slot”，但仍有几处实现路径不够稳：
+
+- `SkyLightNotchSpace` 对私有 API 调用结果判定不严：
+  - `SLSSpaceSetAbsoluteLevel` / `SLSShowSpaces` 的返回值被忽略。
+  - `SLSSpaceAddWindowsAndRemoveFromSpaces` 无论返回码是什么都返回成功。
+  - 这会导致日志显示 `skyLightSpace` 已启用，但实际 window 可能没有成功进入目标 Space，是“仍然无法进入菜单栏区域”的高风险点。
+- `publicPanel` fallback 使用 `.screenSaver` window level，和参考文档里的公开路线不一致：
+  - 成熟开源项目更常用 `.statusBar` 或 `.mainMenu + n`。
+  - `.screenSaver` 可能过度遮挡系统 UI，也可能影响拖拽、菜单栏事件和系统交互。
+- hosted 展开/收起状态机仍然过粗：
+  - 当前主要只有 `collapsed` / `expanded` / `detached`。
+  - `isAnimating` 基本没有真正约束 SwiftUI 动画。
+  - 快速 hover in/out 或拖拽中断时，仍可能出现动画抢占、状态抖动或 hit mask 与视觉不同步。
+- 旧 `NotchFusionLayout` / `NotchFusionView` 路线仍保留：
+  - 当前 root view 已使用 `NotchHostedSurfaceView`，旧 Fusion 路线看起来不再是主路径。
+  - 但旧 layout、旧 view、旧测试还在，会误导后续继续沿错误模型开发。
+
+### 本轮目标
+
+- 让 SkyLight / CGS 路线的成功或失败可被可靠判断，避免“日志显示成功但实际未进入菜单栏”的假阳性。
+- 把公开 fallback 调整成更接近成熟项目的 window level 策略，并明确它只提供近似效果。
+- 补上 hosted transition generation / phase 管理，让 hover、收起、展开、拖拽脱离之间不会互相抢状态。
+- 清理或明确标记旧 Fusion 路线，避免后续开发再次回到旧模型。
+
+### 实施步骤
+
+1. **修正 SkyLight 成功判定**
+   - `SkyLightNotchSpace` 记录并暴露：
+     - `spaceSetAbsoluteLevel` 返回码。
+     - `showSpaces` 返回码。
+     - `delegateWindow` 返回码。
+   - 只有关键调用返回成功时，`delegateWindow(_:)` 才返回 `true`。
+   - 如果任一步失败，诊断日志明确输出失败阶段和返回码。
+   - `NotchHostPanelManager.prepareOverlayForDisplay` 根据真实 delegate 结果决定是否继续标记 `overlayDelegatedToSkyLight`。
+
+2. **调整 public fallback window level**
+   - 将 `NotchSurfaceStrategy.publicPanel.windowLevel` 从 `.screenSaver` 调整到更保守的 `.statusBar` 或 `.mainMenu + 3`。
+   - 保留 `skyLightSpace` 使用 `.mainMenu + 3` + private Space 的策略。
+   - 在诊断日志中明确标注：
+     - 当前是 `skyLightSpace` 还是 `publicPanel`。
+     - public fallback 不承诺 100% 覆盖菜单栏左右两侧。
+
+3. **补 hosted transition phase / generation**
+   - 在 `NotchHostState` 或 `NotchHostPanelManager` 中增加 transition generation。
+   - 每次 hover expand、collapse timer、drag detach、snap back 都递增 generation。
+   - 延迟任务和动画 completion 只允许当前 generation 生效。
+   - 必要时引入轻量 phase：`collapsed`、`expanding`、`expanded`、`collapsing`、`detached`，或保持 public mode 不变、内部增加 transition phase。
+
+4. **清理旧 Fusion 路线**
+   - 搜索并确认 `NotchFusionView` 是否仍被 app target 使用。
+   - 如果未使用：
+     - 删除 `NotchFusionView`。
+     - 删除 `NotchFusionLayout` 和 `notchFusionLayout`。
+     - 删除旧 Fusion layout 测试。
+   - 如果仍需要保留兼容代码，则显式标记为 legacy，并确保不会被 hosted 新路线引用。
+
+5. **补充测试**
+   - SkyLight wrapper 的返回码逻辑拆成可测试的小结构或状态判断函数。
+   - 增加 `NotchSurfaceStrategy` level 测试或静态断言，避免 fallback 再回到 `.screenSaver`。
+   - 增加 transition generation 测试：
+     - 旧 collapse timer 不应覆盖新的 expanded 状态。
+     - 快速 hover out/in 后，最后一次事件决定最终状态。
+   - 删除旧 Fusion 测试后，确保 hosted surface 测试覆盖 compact slot、top cap、body、hover region。
+
+### 本轮实现结果（2026-06-04）
+
+- 新增 `NotchSurfacePolicy` 纯逻辑：
+  - `SkyLightReturnCodePolicy` 统一判断 SkyLight / CGS 返回码，当前仅把 `0` 视为成功。
+  - `NotchSurfaceLevelPolicy` 明确 `skyLightSpace` 使用 `.mainMenu + 3`，`publicPanel` 使用 `.statusBar`，不再使用 `.screenSaver` 作为 hosted fallback。
+  - `NotchTransitionPolicy` 和 `NotchTransitionGate` 为 hover/collapse 的 generation 防抖提供可测试基础。
+- `SkyLightNotchSpace` 已记录并输出：
+  - `setAbsoluteLevelReturnCode`
+  - `showSpacesReturnCode`
+  - `lastDelegateReturnCode`
+  - 如果 Space setup 或 delegate 返回码失败，不再误报成功。
+- `NotchHostPanelManager` 已接入真实 delegate 结果：
+  - SkyLight delegate 失败时，立即降级为 `publicPanel`。
+  - hover 在 expanded 状态重新进入 top cap/body 时，会取消 pending collapse，避免旧 timer 把当前展开态收回。
+  - collapse timer 使用 generation token，过期任务不会再生效。
+- 已删除旧 hosted 路线文件和工程引用：
+  - `NotchFusionView.swift`
+  - `NotchCollapsedView.swift`
+  - `NotchExpandedView.swift`
+  - `NotchEarView.swift`
+  - 对应旧 `NotchFusionLayout` / `notchFusionLayout` 和旧 Fusion tests 已删除。
+- `xcodegen generate` 本轮因现有 `token_hud.xcodeproj` 复制冲突失败；已手动对 `project.pbxproj` 做等价最小更新：
+  - 新增 `NotchSurfacePolicy.swift`。
+  - 移除已删除 legacy Swift 文件引用。
+
+### 验证
+
+- `swift test --filter NotchSurfacePolicyTests`：11 个测试通过。
+- `swift test --filter NotchGeometryCalculator`：45 个测试通过。
+- `swift test`：119 个测试通过。
+- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+- 真机验证：
+  - 日志能明确显示 SkyLight 每一步是否成功。
+  - 如果 SkyLight 失败，界面降级到 public fallback，并且日志不再误报成功。
+  - 快速 hover in/out 不出现展开/收起状态错乱。
+  - 拖拽脱离和再次吸附后，hosted top cap 仍回到 canonical geometry。
+  - app 内不再存在可被误用的旧 Fusion 主路径。
+
+### 风险
+
+- SkyLight / CGS 是私有 API，不同 macOS 版本返回码语义可能有差异；需要先记录真实返回值，再决定是否兼容多种“成功码”。
+- 降低 public fallback level 后，如果 SkyLight 不可用，菜单栏融合能力可能变弱；但这比 `.screenSaver` 误伤系统 UI 更可控。
+- transition phase 改动会影响 hover、drag、snap 多条路径，需要保持范围集中并用测试锁住。
+- 删除旧 Fusion 路线前要确认没有 storyboard/project target 或预览仍引用它。
+
+---
+
+## 当前重点：重做刘海融合 compact 形态（开源路线纠偏，已实现，待真机验证）
+
+### 问题
+
+用户在 2026-06-04 的截图中指出，当前 “左右小格 + shoulder cap” 适配完全不对：
+
+- 刘海两边出现两个孤立的黑色竖块，视觉上不像从刘海自然延展。
+- 左侧进度和右侧百分比被拆成两个独立面板，中间缺少连续轮廓。
+- 当前方案是在错误形态上继续补边，不能再沿用。
+
+本轮系统性排查后判断，根因不是参数没调好，而是形态建模错了：我们把刘海融合拆成了多个局部黑块，再用 `leftShoulder` / `rightShoulder` 去补缝。这会天然产生断裂、竖边和定位不稳定，和用户要的“刘海弹开”相反。
+
+### 开源调研结论
+
+已重新查看 Boring Notch、Atoll、SuperIsland 的公开仓库和源码，关键做法如下：
+
+- Boring Notch / Atoll：
+  - 使用单个居中的 notch surface，而不是多个左右窗口或多个孤立黑块。
+  - 通过 `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` 计算真实刘海宽度。
+  - 用一个 `NotchShape` 统一裁剪外壳，顶部和底部圆角是同一个 shape 的参数。
+  - 强融合/锁屏等场景使用 SkyLight / CGS Space 提升窗口层级。
+- SuperIsland：
+  - 使用透明 `NSPanel`，`statusBar` level，窗口根据 notch rect 居中贴顶。
+  - hosting view 保持最大尺寸，window 作为 clipping viewport，展开前先放大 viewport，收起动画结束后再缩回 compact，避免 SwiftUI relayout 跑偏。
+  - compact 状态在 notched Mac 上支持 `minimalLeading` / `minimalTrailing` 两侧内容，但它们在同一个 compact surface 内渲染，中间让硬件刘海自然隐藏，而不是画两个独立竖块。
+
+因此，本项目应废弃当前 “左右独立小格 + shoulder cap” 路线，改成“单一连续 top cap + 下拉 body”的路线。
+
+### 本轮目标
+
+- 删除/停用当前错误形态：
+  - 移除 `NotchHostedSurfaceLayout.leftShoulder` / `rightShoulder`。
+  - 移除 `NotchShoulderCapShape`。
+  - 不再绘制两个脱离主轮廓的黑色竖块。
+- 重建 compact 刘海形态：
+  - collapsed 时只保留一个连续的 top cap，宽度 = 真实刘海宽度 + 左右状态槽扩展。
+  - top cap 顶边贴住 `screen.frame.maxY`，以菜单栏真实区域为定位基准。
+  - 左侧进度条和右侧百分比作为 top cap 内部的 leading/trailing status slot，不作为独立面板。
+  - 中间刘海区域保持纯黑/空内容，由硬件刘海自然吞掉，避免在中间画条。
+  - 外侧底角使用同一个连续 shape 的圆角，不再用额外黑块补缝。
+- 重建展开动画：
+  - hover top cap 时，body 从刘海下方向下延展。
+  - compact top cap 始终是展开动画的锚点；body 高度和宽度向下/向外插值。
+  - 内容在 body 高度足够后淡入，避免一开始文字压在菜单栏区域。
+- 重建 hitbox：
+  - collapsed 命中区覆盖整个 top cap，不覆盖整条菜单栏。
+  - expanded 命中区覆盖 top cap + body。
+  - 不再只依赖很小的左右小格作为触发区。
+- 保持定位稳定：
+  - hosted 仍以目标 screen 的 notch rect / frame 顶部定位。
+  - 拖拽/吸附期间不根据鼠标所在屏幕反复切换目标 screen。
+  - 展开时 window 可临时使用最大尺寸作为 clipping viewport；收起动画结束后再缩回 compact，避免定位漂移。
+
+### 实施步骤
+
+1. **补充失败测试**
+   - 在 `NotchGeometryCalculatorTests` 中新增 compact top cap 测试：
+     - collapsed 布局只有一个连续 `topCap`，不再有 `leftShoulder/rightShoulder`。
+     - `leftStatusSlot` 和 `rightStatusSlot` 必须完全包含在 `topCap` 内。
+     - `topCap.width` 至少覆盖真实 notch gap，并根据安全边距限制左右扩展。
+     - collapsed 可见高度不应产生向下悬挂的大竖块。
+   - 新增 hover 测试：
+     - collapsed hover region 覆盖整个 `topCap`。
+     - hover region 不覆盖整条 screen 顶部。
+
+2. **重写 geometry 模型**
+   - 将 hosted surface layout 从 “left ear/right ear/body/shoulder” 改成：
+     - `topCap`
+     - `leftStatusSlot`
+     - `rightStatusSlot`
+     - `body`
+     - `contentOpacity`
+   - compact 宽度计算参考 SuperIsland：
+     - 基础宽度取真实 notch width。
+     - 左右扩展先用 44-56pt。
+     - 如果左右菜单栏安全空间不足，则自动缩小或关闭 side status。
+   - expanded 继续使用现有目标宽度，但从 `topCap` 中心连续插值。
+
+3. **重写 `NotchHostedSurfaceView`**
+   - 用同一个连续 top cap 和下拉 body 绘制黑色外壳。
+   - collapsed 时只显示 top cap 和内部 status slot。
+   - expanded 时同一个 shape 向下长出 body。
+   - 移除 `NotchShoulderCapShape` 和独立 shoulder 绘制。
+   - 左右状态只作为 overlay 内容渲染在 `leftStatusSlot/rightStatusSlot` 内。
+
+4. **调整 `NotchHostPanelManager`**
+   - hit mask 改为 `topCap.union(body)`。
+   - hover 判定改为 compact top cap / expanded surface。
+   - 保留“展开前窗口放大、收起后延迟缩回”的 clipping viewport 思路，避免再次出现拖拽后位置随机偏移。
+
+5. **文档沉淀**
+   - 实现完成后新增 `docs/work-log/2026-06-04-notch-fusion-rebuild.md`。
+   - 文档里记录：废弃 shoulder cap 的原因、参考开源项目的架构原则、最终 geometry 约定。
+
+### 本轮实现结果（2026-06-04）
+
+- `NotchHostedSurfaceLayout` 已从 “left/right ear + left/right shoulder + body” 改为：
+  - `topCap`
+  - `notchGap`
+  - `leftStatusSlot`
+  - `rightStatusSlot`
+  - `body`
+  - `contentOpacity`
+- collapsed 状态只保留一个连续 `topCap`：
+  - `topCap` 覆盖真实 notch gap 和左右状态槽。
+  - 左侧进度条、右侧百分比都在 `topCap` 内部渲染，不再作为独立黑块。
+  - `body.height == 0`，避免收起时向屏幕下方悬挂一大块。
+- expanded 动画从同一个 `topCap` 往下长出 `body`：
+  - 黑色 body 在高度增长时先出现。
+  - body 内容通过 `contentOpacity` 延迟淡入，避免文字挤在菜单栏区域。
+- hover / hitbox 已改为新模型：
+  - collapsed hover region 是一个围绕 `topCap` 的连续区域。
+  - collapsed 点击命中只接收 `topCap`。
+  - expanded 点击命中接收 `topCap.union(body)`。
+- 已删除 hosted surface 里的 shoulder cap 绘制路径，不再用左右补丁块遮缝。
+
+### 验证
+
+- `swift test --filter NotchGeometryCalculator`：已通过，48 个 geometry 相关测试通过。
+- `swift test`：已通过，111 个测试通过。
+- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：已通过。
+- 真机验证：
+  - collapsed 时不能再出现两个孤立竖块。
+  - 刘海两侧只在同一个 top cap 内显示进度/百分比。
+  - 鼠标移到 top cap 任意位置都能展开。
+  - 展开动画从刘海区域向下长出，收回时缩回 top cap。
+  - 拖拽后再次吸附，位置稳定，不随机偏移。
+
+### 风险
+
+- 公开 `NSPanel` 路线仍可能受菜单栏层级限制；如果需要 100% 覆盖菜单栏，仍要回到 SkyLight / CGS 策略。
+- 不同机型 notch 宽度和菜单栏图标密度不同，side status 需要根据安全空间动态缩小。
+- 不能复制 GPL 项目源码；只吸收架构原则，重新实现本项目自己的 geometry 和 shape。
+
+---
+
+## 历史记录：修复刘海圆角缝隙并明确触发标识（已实现，但已判定不可接受）
+
+### 问题
+
+用户在 2026-06-04 的截图中指出两个问题：
+
+1. 当前 collapsed 左右小格靠近刘海的一侧是直角，没有考虑真实刘海下方左右两个角的弧度，导致小格和刘海之间出现蓝色镂空缝隙，视觉很不自然。
+2. 触摸下拉的范围不明确，用户不知道应该摸哪里才能展开。
+
+用户提出两个方向：
+
+- 完全覆盖，让所有地方都可触发。
+- 给出明确视觉标识。
+
+### 当前判断
+
+不建议回到“整条菜单栏都可触发”，因为这会重新引入误触：鼠标扫过任意菜单栏位置都会展开。更合适的路线是：
+
+- 可见层：保留左右小格，但补上刘海底部圆角过渡，让小格与刘海视觉融合。
+- 交互层：给左右小格一个明确的触发标识，同时把隐形 hitbox 扩大到比可见标识更容易摸到。
+
+### 本轮目标
+
+- 解决刘海下方左右圆角导致的镂空缝隙：
+  - 左右小格靠近 notch gap 的一侧增加黑色圆角过渡/shoulder cap。
+  - 过渡层应向刘海下方轻微覆盖 8-12pt，遮住真实刘海圆角外侧的背景缝。
+  - collapsed 和 expanded 过程中都不应露出明显蓝色缝。
+- 触发范围明确：
+  - 左右小格内增加轻量视觉标识，例如底部短横/亮点。
+  - 标识不应喧宾夺主，保持弱对比。
+  - 实际 hover hitbox 大于可见小格，例如可见 44pt，命中宽度约 64-72pt。
+- 保持上一轮策略：
+  - hosted window 仍固定 expanded frame。
+  - 展开/收回仍由 `expansionProgress` 驱动。
+  - 不回退到 window resize 动画。
+
+### 本轮实现结果（2026-06-04）
+
+- `NotchHostedSurfaceLayout` 新增：
+  - `leftShoulder`
+  - `rightShoulder`
+- `NotchGeometryCalculator` 新增常量：
+  - `notchShoulderWidth = 12`
+  - `notchShoulderDrop = 10`
+  - `collapsedTriggerHitPadding = 14`
+  - `collapsedHoverPadding` 改为复用 `collapsedTriggerHitPadding`
+- `hostedSurfaceLayout` 计算左右 shoulder rect：
+  - 左 shoulder 贴住 `notchGap.minX`，向下覆盖 `10pt`。
+  - 右 shoulder 贴住 `notchGap.maxX`，向下覆盖 `10pt`。
+  - 用于遮住刘海底部圆角外侧的蓝色缝隙。
+- `notchHoverRegions` 的可触发 hitbox 从 44pt 可见小格扩大到 72pt 宽，但仍只围绕左右小格，不覆盖整条菜单栏。
+- `NotchHostedSurfaceView` 新增：
+  - `NotchShoulderCapShape`，绘制左右黑色圆角过渡块。
+  - 小格底部低透明短 handle，给用户明确触发位置。
+- `NotchHostPanelManager.hostedHitMask` 把 shoulder rect 也纳入 hosted 可交互区域，避免可见黑色过渡块穿透异常。
+- `NotchGeometryCalculatorTests` 新增 shoulder cap 与 widened hitbox 测试。
+
+验证结果：
+
+- `swift test --filter NotchGeometryCalculator` 通过，49 个测试通过。
+- `swift test` 通过，112 个测试通过。
+- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build` 通过。
+
+### 实施步骤
+
+1. **补充 geometry/layout 测试**
+   - 在 `NotchHostedSurfaceLayout` 增加左右 shoulder/corner fill rect。
+   - 测试 collapsed 下：
+     - left/right shoulder 与 notch gap 左右边相邻或轻微覆盖。
+     - shoulder 高度覆盖菜单栏底部到 body 顶部附近的过渡区。
+   - 测试 hover region：
+     - hover region 宽度大于可见 pill 宽度。
+     - hover region 仍不覆盖整条菜单栏。
+
+2. **调整 `NotchGeometryCalculator`**
+   - 新增常量：
+     - `notchShoulderWidth`，建议 12pt。
+     - `notchShoulderDrop`，建议 10pt。
+     - `collapsedTriggerHitPadding`，建议 14pt。
+   - `hostedSurfaceLayout` 返回左右 shoulder rect。
+   - `notchHoverRegions` 使用更大的 hit padding，但仍只围绕左右小格。
+
+3. **调整 `NotchHostedSurfaceView`**
+   - 在 ears/body 之前或之后绘制 shoulder cap：
+     - 黑色填充。
+     - 用圆角/Path 形成内侧圆角过渡，避免直角贴刘海。
+   - 左右小格增加触发标识：
+     - 左侧可在进度条下方或底部中央加很短的浅色 handle。
+     - 右侧百分比旁或底部加对应 handle。
+   - body 顶部保持与 shoulder cap 同色，避免 expanded 时断层。
+
+4. **验证**
+   - 运行 `swift test --filter NotchGeometryCalculator`。
    - 运行 `swift test`。
    - 运行 `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`。
-   - 真机验证截图：
-     - 若 SkyLight strategy 可用且窗口进入菜单栏，继续调视觉。
-     - 若 SkyLight strategy 不可用，确认 fallback 效果并记录限制。
-     - 若 SkyLight strategy 可用但仍不能显示，读取诊断日志定位是 frame、Space delegation 还是渲染层问题。
-
-### 验收标准
-
-- 吸附后不能再是菜单栏下方的一整块悬浮黑矩形。
-- hosted surface 顶部必须贴到 `screen.frame.maxY`，并在刘海/菜单栏区域产生可见融合层。
-- body 必须从刘海下方展开，而不是从屏幕中间悬浮。
-- hosted 状态不可 resize。
-- detached 状态仍可拖动、resize，并能再次吸附。
-- 如果私有 API 不可用，app 必须稳定 fallback，不崩溃。
+   - 真机验证：
+     - collapsed 时刘海下方左右圆角不再出现蓝色缝。
+     - 左右小格触发位置有明确视觉提示。
+     - 小格附近容易 hover 展开，但扫过远离刘海的菜单栏位置不会误触。
+     - 展开/收回过程圆角过渡不闪烁、不露缝。
 
 ### 风险
 
-- SkyLight/CGS 是私有 API，可能影响 App Store 分发、系统兼容性和未来 macOS 版本稳定性。
-- GPL 项目的源码只能作为架构参考，不能直接复制代码进本仓库，必须自行实现最小 wrapper。
-- 私有 Space level 过高可能遮挡系统 UI；hosted collapsed 必须尽量收敛命中区域和视觉宽度。
-- 如果项目目标是公开分发且要求 App Store 合规，则只能使用 SuperIsland 类公开 API fallback，不能承诺 100% 菜单栏融合。
+- 真实刘海圆角尺寸不同设备可能不同；第一版用 12pt/10pt 经验值，后续可根据 safe area 或截图微调。
+- shoulder cap 如果画得太多，会像重新变成长条；需要控制宽度和 opacity。
+- 视觉标识如果太亮，会影响“融入刘海”的感觉；第一版用低透明白色短 handle。
 
 ---
 
-## 历史记录：双窗口 Notch Overlay 重构
+## 历史记录：重做 collapsed 刘海左右小格与下拉展开（已实现，待真机验证）
 
-### 最新结论
+### 问题
 
-用户指出 iPromise、Boring Notch、Atoll/SuperIsland 等 app 能做出类似 notch / Dynamic Island 效果。这个判断是对的：问题不是 macOS 上绝对做不到，而是当前 `token_hud` 的路线不对。
+当前 hosted collapsed 状态仍然显得太长、不连贯。用户在 2026-06-04 的截图中指出：刘海两侧的黑色状态区横向过长，视觉上像一整条黑条，而不是刘海左右各一个小状态块。
 
-当前失败原因：
+期望效果：
 
-- 我们把同一个 `NSPanel` 同时当作 detached 浮窗、docked collapsed、expanded notch overlay 来用。
-- 为了避免进入菜单栏失败，又把 hosted frame 收回到工作区内，结果只剩悬空黑条。
-- `NSStatusItem` 不能作为主方案，因为菜单栏 item 位置不可控。
+- 收起时只在刘海左右两边各保留一小格。
+- 左右小格仍能表达极简用量状态，例如左侧短进度、右侧百分比。
+- 鼠标摸到任意一个小格时，完整小窗从刘海区域向下延展。
+- 动画看起来像从刘海两侧状态块自然拉开，而不是长条突然变大。
 
-新路线改为 **双窗口架构**：
+### 当前判断
 
-1. **Detached Floating Window**
-   - 普通可拖拽、可 resize 的浮窗。
-   - 用户拖下来后使用它。
+当前 `NotchHostedSurfaceView` 已经把 collapsed/expanded 合并为一个 surface，并通过 `expansionProgress` 做连续动画，这是正确基础。
 
-2. **Dedicated Notch Overlay Window**
-   - 独立 borderless/nonactivating panel。
-   - 永远锚定在主屏幕 notch 顶部区域。
-   - frame 使用 `NSScreen.frame` / `auxiliaryTopLeftArea` / `auxiliaryTopRightArea` 计算，不再依赖 `visibleFrame`。
-   - 负责 collapsed / expanded dynamic island 的视觉和 hover。
+问题主要在 geometry 与 hover 命中区：
 
-拖拽吸附时，不再把同一个窗口硬塞到刘海区域，而是：
-
-1. detached window 拖到 snap zone。
-2. 保存 detached frame。
-3. 隐藏 detached window。
-4. 显示 notch overlay window，并播放 expanded 反馈。
-5. 用户从 notch overlay 往下拖时，隐藏 overlay，恢复 detached window。
-
-### 本轮实现结果
-
-已完成最小双窗口 Notch Overlay 重构：
-
-- `NotchHostPanelManager` 现在同时维护 detached floating window 和 dedicated notch overlay window。
-- detached 状态继续使用 `FloatingPanelView`，保留拖拽和 resize。
-- hosted collapsed / expanded 状态由独立 overlay `NSPanel` 承载，吸附时隐藏 detached window，脱离时隐藏 overlay 并恢复 detached frame。
-- overlay frame 重新按 `NSScreen.frame`、notch auxiliary areas 和 menu bar 高度计算，允许视觉区域延伸到菜单栏/刘海高度，而不是被压回 `visibleFrame` 下方。
-- `NotchFusionView` 新增 top bridge 绘制区域，body 位于菜单栏高度下方，展开内容延迟淡入。
-- `MenuBarBridgeProbe` 保持默认关闭，不再把 `NSStatusItem` 作为主路线。
-
-验证结果：
-
-- `swift test` 通过，98 个测试通过。
-- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build` 通过。
-
-待真机验证：
-
-- 吸附后 overlay 是否真正顶到刘海/菜单栏视觉高度。
-- 刘海左右两侧是否出现 top bridge 效果。
-- 从 hosted 状态往下拖是否能稳定恢复 detached floating window。
-- 如果仍被系统菜单栏遮挡，下一步应对照 Boring Notch / Atoll 的窗口 level、screen 选择和 fullscreen handling，而不是回到单窗口方案。
-
-### 参考依据
-
-- Boring Notch README 明确描述了 launch 后 notch 成为交互区域，并通过 hover 展开内容。
-- Atoll README 明确描述了 hover near the notch to expand，并提供独立 notch command surface。
-- 这些项目的产品形态都更接近“独立 notch overlay surface”，而不是把普通浮窗拖上去后继续复用。
+1. `hostedSurfaceLayout` 的 ears 在 collapsed 时使用 expanded surface 剩余空间计算，导致左右耳朵过长。
+2. `notchRegion` 对刘海屏返回整屏顶部宽度，鼠标扫过顶部菜单栏任何位置都可能触发展开，不符合“摸左右小格才展开”。
+3. collapsed body 起始宽度仍偏大，展开时缺少“从两个小格往下长出”的视觉集中感。
 
 ### 本轮目标
 
-先完成最小双窗口切换，不追求最终视觉：
+- collapsed 状态只显示左右两个短状态格：
+  - 建议每侧宽度先用 44pt。
+  - 中间 notch gap 保持透明。
+  - 不画横跨刘海两侧的大面积黑条。
+- hover 命中区从“整屏顶部”收缩到左右状态格附近：
+  - 命中区覆盖左右小格。
+  - 保留少量 padding，避免太难触发。
+- expanded 状态保持当前完整小窗能力。
+- collapsed -> expanded 动画改为：
+  - 左右小格横向扩展。
+  - 下方 body 从刘海下方长出。
+  - 内容在 body 高度足够后淡入。
+- expanded -> collapsed 动画反向收回，只留下左右小格。
 
-- 保留现有 detached `FloatingPanelView` 作为普通浮窗。
-- 新增独立 `NotchOverlayPanelManager` 或拆分现有 `NotchHostPanelManager`。
-- notch overlay window 启动时隐藏，只在 hosted 状态显示。
-- overlay window 的 collapsed frame 顶到 `screen.frame.maxY` 附近，允许覆盖菜单栏视觉高度。
-- detached -> hosted 时切换窗口，而不是移动同一窗口。
-- hosted -> detached 时恢复原 detached frame。
+### 本轮实现结果（2026-06-04）
+
+- `NotchGeometryCalculator` 新增 `collapsedStatusPillWidth = 44` 和 `collapsedHoverPadding = 10`。
+- `hostedSurfaceLayout` 改为：
+  - collapsed 时 left/right ear 各 44pt，并贴在 notch gap 左右两侧。
+  - expanded 时 ears 和 body 从 notch center 向外插值扩展到完整面板宽度。
+  - body collapsed 起始宽度改为 `notchGapWidth + 2 * collapsedStatusPillWidth`，不再一开始就铺成宽条。
+- 新增 `notchHoverRegions(screenFrame:geometry:)`：
+  - 刘海屏返回左右两个 compact hover region。
+  - 不再让整条顶部菜单栏都触发展开。
+- `NotchHostPanelManager.isMouseInNotchRegion()` 改为：
+  - collapsed 时只看左右小格 hover region。
+  - expanded 时额外把 body 作为停留区域，避免鼠标在面板内时立刻收回。
+- `NotchHostedSurfaceView` 微调 44pt 小格内部视觉：
+  - 左侧进度条缩短并减少 padding。
+  - 右侧百分比改小字号和更强缩放，适配 44pt 宽度。
+  - 小格底部外侧圆角收紧到 7pt。
+- `NotchGeometryCalculatorTests` 新增 compact pill 和 hover region 覆盖。
+
+验证结果：
+
+- `swift test --filter NotchGeometryCalculator` 通过，47 个测试通过。
+- `swift test` 通过，110 个测试通过。
+- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build` 通过。
+- 本轮未新增 Swift 文件，不需要重新运行 `xcodegen generate`。
 
 ### 实施步骤
 
-1. **抽出 notch overlay frame 计算**
-   - 在 `NotchGeometryCalculator` 中新增专门的 overlay frames：
-     - collapsed overlay frame
-     - expanded overlay frame
-     - snap zone
-   - overlay frame 的 `maxY` 应基于 `geometry.topEdgeY` 或 `screen.frame.maxY`，不再强制压到工作区下方。
-   - 保留 detached frame 逻辑不变。
+1. **补充 geometry 测试**
+   - 在 `NotchGeometryCalculatorTests` 中新增 hosted surface collapsed 小格测试：
+     - `expansionProgress == 0` 时 left/right ear 宽度等于短小格宽度。
+     - collapsed 两个小格的总宽度明显小于 expanded body 宽度。
+     - `expansionProgress == 1` 时 body 宽度仍能达到 expanded body 宽度。
+   - 新增 hover region 测试：
+     - hover region 不再覆盖整屏宽度。
+     - hover region 覆盖 collapsed 左右小格所在 x 范围。
 
-2. **新增/拆分 overlay window manager**
-   - 创建 dedicated overlay `NSPanel`。
-   - style 使用 borderless/nonactivating。
-   - level 先使用 `.screenSaver` 或当前已有 level。
-   - collectionBehavior 保持 `.canJoinAllSpaces` / `.fullScreenAuxiliary` / `.stationary`。
-   - overlay content 使用现有 `NotchFusionView` 或新 `NotchOverlayView`。
+2. **调整 `NotchGeometryCalculator` 常量与 layout**
+   - 新增 `collapsedStatusPillWidth`，初始值 44pt。
+   - 保留 `collapsedStatusEarWidth` 作为旧 fallback 或删除未用路径，避免概念混乱。
+   - `hostedSurfaceLayout`：
+     - collapsed ear width 从 44pt 起步。
+     - expanded ear/body width 继续插值到完整面板宽度。
+     - body collapsed width 从 `notchGapWidth + 2 * pillWidth` 起步，避免刚展开就太宽。
 
-3. **保留 detached floating window**
-   - detached window 使用 `FloatingPanelView`。
-   - 仅 detached 时可 resize。
-   - 不再让 detached window 进入 hosted frame。
+3. **收缩 hover 命中区**
+   - 新增或调整纯函数，让 hover region 基于 collapsed 小格布局计算。
+   - `isMouseInNotchRegion()` 使用新的 compact hover region。
+   - 命中区增加 8-12pt padding，确保可用但不误触整条菜单栏。
 
-4. **实现窗口切换状态机**
-   - snap 成功：
-     - 保存 detached frame。
-     - detached window `orderOut`。
-     - overlay window `orderFrontRegardless`。
-     - overlay 进入 expanded feedback。
-   - detach：
-     - overlay window `orderOut`。
-     - detached window 恢复保存 frame 并 `orderFrontRegardless`。
+4. **调整 `NotchHostedSurfaceView` 视觉**
+   - collapsed 小格圆角更像独立小 pill：
+     - 左格靠刘海一侧可保持直角或微圆。
+     - 外侧用 6-8pt 圆角。
+   - 左侧进度条缩短到适合 44pt 的长度。
+   - 右侧百分比使用可缩放小字号，避免 100% 溢出。
 
-5. **真机验证**
-   - overlay 是否能贴到刘海/菜单栏视觉高度。
-   - 左右两侧是否能出现效果。
-   - 是否仍被系统菜单栏遮挡或裁剪。
-   - 如果仍无法覆盖，继续对照 Boring Notch/Atoll 源码检查 window level、screen selection 和 positioning。
-
-### 验收标准
-
-- 拖到刘海附近后，不再出现工作区里的悬空黑条。
-- hosted 状态由独立 overlay window 承载。
-- detached 状态仍可拖拽和 resize。
-- 吸附/脱离是窗口切换，不是同一个 window 的 frame 魔改。
-- 如果 overlay 仍无法进入菜单栏视觉高度，能通过诊断日志明确看到实际 frame 与系统裁剪结果。
+5. **验证**
+   - 运行 `swift test --filter NotchGeometryCalculator`。
+   - 运行 `swift test`。
+   - 如果新增/删除 Swift 文件，运行 `xcodegen generate`。
+   - 运行 `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`。
+   - 真机验证：
+     - collapsed 只露左右小格，不再是一长条。
+     - 鼠标摸左右小格能顺滑下拉展开。
+     - 鼠标扫过其它菜单栏位置不会误展开。
+     - 收回后只剩左右小格，视觉连贯。
 
 ### 风险
 
-- 即使双窗口，系统仍可能限制普通 app window 在菜单栏区域的显示。
-- 需要真机调试 `NSScreen.frame` / `safeAreaInsets` / auxiliary areas 的坐标差异。
-- Boring Notch/Atoll 可能有额外处理，例如更复杂的屏幕选择、fullscreen detection、lock screen 行为，这些不在第一轮范围内。
-
----
-
-## 历史记录：Hybrid Dynamic Notch 第一版
-
-### 方案结论
-
-当前截图已经证明：继续用普通 `NSPanel` / floating window 向上顶，无法达到“进入顶部菜单栏并与刘海完全融为一体”的效果。这个方向应停止。
-
-可行方案改为 **Hybrid Dynamic Notch**：
-
-1. **不再试图让普通窗口进入系统菜单栏。**
-2. **吸附态只做极简 docked 状态**：小浮窗收缩到刘海正下方，尽量贴近刘海，形成“从刘海挂下来”的感觉。
-3. **hover / click 时展开**：从刘海下方展开为完整 HUD 内容。
-4. **拖下来时脱离**：恢复普通 floating panel。
-5. **菜单栏层只作为增强，不作为主依赖**：`NSStatusItem` 如果能放到合理位置，就用它做菜单栏内黑色/图标融合；如果不能，就立刻放弃菜单栏层覆盖，不再把它作为必须条件。
-
-这不是“100% 系统刘海融合”，但它是基于公开 macOS API 最稳的可落地方案。
-
-### 本轮实现结果
-
-已完成 Hybrid Dynamic Notch 第一版：
-
-- docked collapsed 从 8pt 黑线调整为 22pt 刘海下方胶囊。
-- hosted panel 仍然只位于屏幕工作区内，不再尝试进入菜单栏。
-- 内容 opacity 延迟到展开中后段才出现，避免从极小胶囊里硬挤出文字。
-- 胶囊底部圆角随高度自适应，collapsed 时更像贴在刘海下方的挂载状态。
-- 吸附成功后先播放 expanded 反馈，再在鼠标不在刘海区域时延迟约 1 秒收回 collapsed。
-- `MenuBarBridgeProbe` 默认关闭，不再启动时显示黑色菜单栏测试条。
-- 新增/更新几何测试覆盖 collapsed 高度、无 panel bridge、延迟内容淡入。
-
-验证结果：
-
-- `swift test` 通过，98 个测试通过。
-- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build` 通过。
-
-待真机确认：
-
-- 拖上去吸附后应先展开显示内容，而不是只剩黑线。
-- 收回后应是短胶囊，不是悬空长条。
-- 顶部菜单栏内不应再出现 probe 黑条。
-
-### 为什么这是可行路线
-
-- `NSPanel` 可以稳定实现刘海下方 body、拖拽、吸附、展开、脱离。
-- `NSStatusItem` 可以稳定出现在菜单栏中，但无法保证精确覆盖刘海左右两侧，也无法任意占用菜单栏大面积区域。
-- 所以最终产品体验应围绕“刘海下方 Dynamic Island-like HUD”设计，而不是继续追求普通 app window 覆盖系统菜单栏。
-
-### 目标视觉
-
-1. **Detached**
-   - 普通可拖拽浮窗。
-   - 显示完整业务内容。
-   - 可调整大小。
-
-2. **Docking Preview**
-   - 用户拖近刘海时，浮窗变窄、变矮、圆角收敛。
-   - 出现吸附预览，例如顶部对齐刘海、轻微 scale / opacity / shadow 变化。
-   - 不进入菜单栏，不画左右假 bridge。
-
-3. **Docked Collapsed**
-   - 只保留刘海下方一小条胶囊或细窄状态条。
-   - 不显示完整业务内容。
-   - 不允许 resize。
-   - 看起来像“藏在刘海下面”，而不是一条悬空黑线。
-
-4. **Docked Expanded**
-   - 鼠标靠近刘海或点击 collapsed 条时展开。
-   - body 从刘海下方自然向下长出来。
-   - 显示完整业务内容。
-   - 鼠标移开后收回 collapsed。
-
-5. **Menu Bar Enhancement（可选）**
-   - 如果 `NSStatusItem` 能在菜单栏中形成合理视觉位置，只作为点缀层。
-   - 不承载主要内容。
-   - 不阻塞主体验。
-
-### 下一轮实施计划
-
-1. **重命名和收敛状态模型**
-   - 保留 `detached` / `collapsed` / `expanded`。
-   - 明确 `collapsed` 是 docked collapsed，不是“内容不可见的错误态”。
-   - 新增 `isDockingPreview` 或等价状态，用于拖近刘海但尚未释放时的视觉反馈。
-
-2. **重做 hosted collapsed 视觉**
-   - 当前黑色细条太像 bug。
-   - 改成一个贴近刘海下方的小胶囊，宽度接近刘海宽度加少量 padding。
-   - 高度建议 18-24pt，而不是 8pt。
-   - 顶部圆角应较小或为 0，底部圆角更明显，形成“挂在刘海下方”的形态。
-
-3. **重做 snap 后反馈**
-   - 拖拽释放吸附成功后，先播放 expanded 动画。
-   - 保持 expanded 约 0.8-1.2 秒，或直到鼠标离开。
-   - 然后收回 docked collapsed。
-
-4. **重做展开动画**
-   - collapsed -> expanded：
-     - 宽度从刘海胶囊宽度扩展到 HUD 宽度。
-     - 高度从 20pt 扩展到内容高度。
-     - 内容 opacity 在高度足够后再出现，避免挤压。
-   - expanded -> collapsed：
-     - 内容先淡出。
-     - body 再向上收缩。
-
-5. **保留 MenuBarBridgeProbe 为诊断开关**
-   - 默认关闭或只在 debug 下打开。
-   - 不再默认显示黑色状态项，避免干扰用户判断。
-   - 后续单独验证 `NSStatusItem` 是否能作为增强层。
-
-6. **清理误导逻辑**
-   - 移除或废弃 `hostTopY(for:)` 上推菜单栏的使用路径。
-   - 移除“panel bridge in menu bar”的命名和测试。
-   - 文档明确：主 panel 不进入菜单栏。
-
-### 验收标准
-
-- 拖上去吸附后，不再出现悬空黑线。
-- collapsed 状态像一个贴在刘海下方的短胶囊。
-- hover / click 后能展开并显示内容。
-- 拖下来后恢复完整浮窗和 resize 能力。
-- 菜单栏内不出现突兀黑块。
-- 即使 `NSStatusItem` 完全不可用，主体验仍然成立。
-
-### 不做的事情
-
-- 不再尝试把 `NSPanel` 顶进菜单栏。
-- 不再用 full-width 黑色 bridge 假装覆盖刘海两侧。
-- 不把业务内容塞进 `NSStatusItem`。
-- 不使用 private API 作为默认路线。
-
----
-
-## 历史记录：Notch Fusion 失败复盘与上一轮修正
-
-### 结论
-
-原来的主 `NSPanel` 路线已确认不可行：它可以负责刘海下方 body，但不能可靠进入 macOS 顶部导航栏/菜单栏层。继续调整 `y`、`maxY`、window level 或 SwiftUI padding 都是在错误层级里修表象。
-
-新的实现方向是把吸附态拆成两个真正独立的层：
-
-1. **Menu Bar Layer**：负责刘海左右两侧导航栏融合。
-2. **Body Layer**：继续使用现有 hosted/floating panel，负责刘海下方展开内容和拖拽脱离。
-
-### 技术依据
-
-- Apple 的 `NSStatusBar` / `NSStatusItem` 是公开的菜单栏承载 API，可显示文本、图标、菜单、action，或自定义 view。
-- Apple 的 `NSScreen.auxiliaryTopLeftArea` / `auxiliaryTopRightArea` 仍然用于确定刘海左右可用区域，但不再直接驱动主 panel 进入菜单栏。
-- `NSWindow.Level.screenSaver` 只能改变窗口层级，不能保证普通 app window 可以占用系统菜单栏内部区域。
-
-### 当前截图结论
-
-用户真机截图显示：拖拽到刘海附近后，只能看到左右两块黑色 bridge 和一条很薄的黑色底边，业务内容完全不可见。
-
-结合当前代码，根因不是单纯坐标偏移：
-
-- 截图中的黑色 bridge 来自 `NotchFusionView` 的 `leftBridge` / `rightBridge` / `bodyPanel`，也就是主 `NSPanel` 层；它仍然没有真正进入系统菜单栏层。
-- 吸附完成会走 `snapToCollapsed()` -> `animateToCollapsed()`，并把 `hostState.expansionProgress` 设为 `0`。
-- `NotchFusionView.bodyPanel` 中业务内容 `.opacity(hostState.expansionProgress)`，因此 collapsed 后内容必然完全不可见。
-- `MenuBarBridgeProbe` 只是独立 `NSStatusItem` spike，不会跟拖拽吸附状态联动，也不会把当前 floating panel 的内容带到菜单栏里。
-
-因此，当前效果是架构混合态：视觉上还在使用旧 `NSPanel` bridge，逻辑上又把内容折叠为 0，新的 menu bar layer 没有真正承接吸附态。
-
-### 本轮修正结果
-
-已完成第一阶段修正：
-
-- `NotchGeometryCalculator.notchFrames` 不再让 hosted panel 跨进菜单栏区域。
-- hosted collapsed frame 现在只覆盖刘海下方的极薄 body。
-- hosted expanded frame 现在只覆盖刘海下方的内容区域。
-- `NotchFusionView` 不再绘制主 `NSPanel` 的左右 menu bar bridge，避免截图中的突兀黑块。
-- 拖拽释放并吸附成功后，不再直接停在空 collapsed 状态，而是进入 expanded，让用户先看到内容反馈。
-- `NotchGeometryCalculatorTests` 已更新，覆盖“不跨菜单栏、不全屏 bridge、body 从刘海下方展开”的新规则。
-
-验证结果：
-
-- `swift test` 通过，97 个测试通过。
-- `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build` 通过。
-
-待真机确认：
-
-- 拖到刘海附近后，应显示刘海下方 expanded 内容，而不是只剩黑条。
-- 左右两侧不应再出现由主 panel 画出的突兀黑块。
-- 这还不是最终“完全融入菜单栏”的效果；真正菜单栏融合仍依赖后续 menu bar layer 能力验证。
-
-### 修正目标状态
-
-下一轮不再让主 `NSPanel` 画菜单栏 bridge。吸附态必须拆清楚：
-
-1. **Collapsed / docked 状态**
-   - 菜单栏层只负责极简黑色融合外观。
-   - 下方 body 可以完全隐藏，或只保留极薄连接区。
-   - 业务内容不应该在 collapsed 中显示，这是“收进刘海”的状态。
-
-2. **Hover / expanded 状态**
-   - 鼠标靠近刘海时，先从菜单栏层向下展开。
-   - 业务内容只在 expanded body 中显示。
-   - 展开 body 必须从刘海下方自然长出来，而不是拖拽上去后只剩黑条。
-
-3. **Detached 状态**
-   - 用户把窗口拉下来后，恢复普通可拖拽、可显示业务内容的浮窗。
-   - detached 浮窗不再尝试和菜单栏融合。
-
-### 下一轮执行计划
-
-1. **先停用旧 NSPanel 菜单栏 bridge**
-   - 在 hosted/collapsed 状态下，不再绘制 full-width `leftBridge` / `rightBridge`。
-   - 主 panel 只负责刘海下方 body，不再假装覆盖菜单栏左右区域。
-   - 这样可以避免当前截图里左右两块突兀黑块和空内容条。
-
-2. **让 snap 后立即进入可见 expanded 反馈**
-   - 拖拽释放并吸附成功时，不直接停在 `collapsed`。
-   - 先进入 `expanded` 或短暂 `expanded feedback` 状态，让用户看到内容确实回到刘海区域。
-   - 延迟后再根据鼠标是否离开刘海区域收回 collapsed。
-
-3. **把 MenuBarBridgeProbe 升级为真实状态层**
-   - 让 menu bar layer 接收 `NotchHostState.mode` / `expansionProgress`。
-   - collapsed 时显示菜单栏内的极简融合块。
-   - expanded 时配合下方 body 做伸缩动画。
-   - 如果 `NSStatusItem` 无法靠近刘海，只保留为技术限制记录，不再把它当作完整融合方案。
-
-4. **重新定义视觉验收标准**
-   - 拖上去吸附后：不能出现“只有黑条、没有内容反馈”的状态。
-   - hover 刘海时：内容必须可见，并从刘海区域向下展开。
-   - 离开后：可收回为极简黑色融合态。
-   - 拖下来后：必须回到完整 detached 浮窗。
-
-### 本轮已完成结果
-
-已完成最小可验证 spike：
-
-- 新增 `Overlay/MenuBarBridgeProbe.swift`。
-- 在 `AppDelegate` 启动时创建 probe，退出时释放 probe。
-- 通过 `NSStatusBar.system.statusItem(withLength:)` 创建 120pt 黑色测试条。
-- 仅在主屏幕存在 `auxiliaryTopLeftArea` 和 `auxiliaryTopRightArea` 时启用，避免非刘海设备误显示。
-- 已把新文件接入 Xcode 工程。
-
-### Menu Bar Spike 待验证目标
-
-先真机验证这个最小 spike，不直接迁移完整刘海效果：
-
-- 黑色测试条是否真的出现在顶部导航栏内部，而不是屏幕工作区里。
-- 它是否能被放在刘海附近，而不是只能被系统挤到右侧状态项区域。
-- 它是否遮挡、挤压或扰乱已有系统菜单栏图标。
-
-### 已完成步骤
-
-1. **新增 Menu Bar Layer Probe**
-   - 新建 `Overlay/MenuBarBridgeProbe.swift`。
-   - 使用 `NSStatusBar.system.statusItem(withLength:)` 创建 status item。
-   - 给 `statusItem.button` 或自定义 view 设置黑色背景/测试形状。
-   - 提供 `setup()` / `teardown()`，由 `NotchHostPanelManager` 或 `AppDelegate` 控制。
-
-2. **接入但保持低风险**
-   - 默认只在有刘海时启用。
-   - 初始只显示一个测试条，不接入业务 widget。
-   - 当前接入点在 `AppDelegate`，可快速移除或替换成正式 menu bar layer manager。
-
-### 待验证分支
-
-1. **如果测试条能出现在菜单栏内**
-   - 下一轮把左右 bridge 拆成两个/多个 status item，逐步模拟刘海两侧黑色融合。
-   - Body Layer 保持现有 `NotchFusionView` 的下方 body。
-
-2. **如果测试条不能满足视觉要求**
-   - 记录公开 API 限制。
-   - 停止追求“整段导航栏完全覆盖”，改做近似方案：菜单栏内 status item + 刘海下方 dynamic island body。
-
-3. **后续清理旧错误方向**
-   - 保留诊断日志到验证完成。
-   - 后续确认 menu bar layer 可行后，移除 `hostTopY` 强行上推逻辑，避免主 panel 继续尝试进入菜单栏。
-
-### 后续实施步骤
-
-1. **真机运行并截图**
-   - 启动 app。
-   - 观察顶部菜单栏是否出现 120pt 黑色测试条。
-   - 截图记录测试条真实位置。
-
-2. **根据截图选择路线**
-   - 如果测试条能出现在菜单栏内：
-     - 下一轮把左右 bridge 拆成两个/多个 status item，逐步模拟刘海两侧黑色融合。
-     - Body Layer 保持现有 `NotchFusionView` 的下方 body。
-   - 如果测试条不能满足视觉要求：
-     - 记录公开 API 限制。
-     - 停止追求“整段导航栏完全覆盖”，改做近似方案：菜单栏内 status item + 刘海下方 dynamic island body。
-
-3. **清理旧错误方向**
-   - 保留诊断日志到验证完成。
-   - 后续确认 menu bar layer 可行后，移除 `hostTopY` 强行上推逻辑，避免主 panel 继续尝试进入菜单栏。
-
-### 验证方式
-
-1. `swift test`：已通过，97 个测试通过。
-2. `xcodebuild -project ../token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：已通过。
-3. 真机手动验证：待执行。
-   - 顶部菜单栏是否出现黑色测试条。
-   - 测试条是否在菜单栏内部，而不是菜单栏下方。
-   - 是否遮挡或挤压已有系统菜单栏图标。
-   - App 启动/关闭后 status item 是否正确创建和释放。
-
-### 风险
-
-- `NSStatusItem` 只能占用菜单栏 item 区域，不能任意覆盖整段菜单栏。
-- 菜单栏空间由系统和用户已有状态项共同管理，测试条可能被挤到右侧，而不是精确贴近刘海。
-- 若要精确覆盖刘海两侧大面积区域，公开 API 可能不支持；届时需要降低视觉目标，或明确研究 private API/非 App Store 方案。
+- 44pt 小格可能对右侧百分比文本偏窄，尤其 `100%`；第一版使用 `minimumScaleFactor`，必要时把右侧设为 52pt。
+- hover 区域缩小后可能变得难触发；需要真机调 padding。
+- 如果系统菜单栏图标靠近刘海，右侧小格仍可能视觉冲突；后续可根据 `auxiliaryTopLeftArea/rightArea` 做更精细避让。
+- 当前 hosted window 仍保持 expanded frame 以获得平滑动画和透明穿透；本轮只改变绘制和命中区，不回到 window resize 动画。
+
+### 最近沉淀
+
+- `docs/work-log/2026-06-01-notch-fusion-smooth.md`（hosted 面板重影、漂浮拖拽、动画流畅性修复）
+- `docs/work-log/2026-05-31-notch-drag-settle.md`
+- `docs/work-log/2026-05-31-notch-collapsed-status.md`

@@ -29,6 +29,7 @@ targets:
         INFOPLIST_FILE: token_hud/Resources/Info.plist
         CODE_SIGN_ENTITLEMENTS: token_hud/token_hud.entitlements
         CODE_SIGN_STYLE: Manual
-        CODE_SIGNING_ALLOWED: "NO"
-        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: "-"
+        CODE_SIGNING_ALLOWED: "YES"
+        CODE_SIGNING_REQUIRED: "YES"
         DEVELOPMENT_TEAM: ""

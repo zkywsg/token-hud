@@ -9,6 +9,8 @@ struct NotchGeometryCalculatorTests {
     private let safeAreaTop: CGFloat = 32
     private let leftAux = CGRect(x: 0, y: 868, width: 645, height: 32)
     private let rightAux = CGRect(x: 795, y: 868, width: 645, height: 32)
+    private let compactStatusSlotWidth: CGFloat = 56
+    private let collapsedTriggerHitPadding: CGFloat = 14
 
     // MARK: - Geometry extraction
 
@@ -73,14 +75,14 @@ struct NotchGeometryCalculatorTests {
 
     // MARK: - Collapsed frame
 
-    @Test func collapsedOverlayFrameIncludesMenuBarBridgeAndBody() {
+    @Test func collapsedOverlayFrameOnlyCoversMenuBarStatusArea() {
         let geo = NotchGeometryCalculator.notchGeometry(
             screenFrame: screen, safeAreaInsetTop: safeAreaTop,
             auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
         )
         let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
-        #expect(NotchGeometryCalculator.collapsedBodyHeight == 22)
-        #expect(frames.collapsed.height == safeAreaTop + NotchGeometryCalculator.collapsedBodyHeight)
+        #expect(frames.collapsed.height == safeAreaTop)
+        #expect(frames.collapsed.minY == screen.maxY - safeAreaTop)
         #expect(frames.collapsed.maxY == screen.maxY)
     }
 
@@ -104,15 +106,25 @@ struct NotchGeometryCalculatorTests {
         #expect(frames.collapsed.maxY == screen.maxY)
     }
 
-    @Test func collapsedHostFrameCentersBelowNotchWithoutFullWidthBridge() {
+    @Test func collapsedHostFrameCentersOnNotchWithCompactStatusEars() {
         let geo = NotchGeometryCalculator.notchGeometry(
             screenFrame: screen, safeAreaInsetTop: safeAreaTop,
             auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
         )
         let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
-        let expectedWidth = geo.notchGapWidth + NotchGeometryCalculator.collapsedBodyHorizontalPadding
+        let expectedWidth = geo.notchGapWidth + compactStatusSlotWidth * 2
         #expect(frames.collapsed.width == expectedWidth)
         #expect(abs(frames.collapsed.midX - screen.midX) < 1)
+    }
+
+    @Test func collapsedHostFrameIsMuchNarrowerThanExpandedFrame() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
+        #expect(frames.collapsed.width < frames.expanded.width)
+        #expect(frames.collapsed.width < screen.width * 0.3)
     }
 
     @Test func collapsedClampedWithinScreenBounds() {
@@ -201,84 +213,6 @@ struct NotchGeometryCalculatorTests {
         let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
         #expect(frames.expanded.height == geo.menuBarHeight + NotchGeometryCalculator.expandedHeight)
         #expect(frames.expanded.maxY == screen.maxY)
-    }
-
-    // MARK: - Fusion layout
-
-    @Test func fusionLayoutDrawsTopBridgeAndBodyBelowMenuBar() {
-        let geo = NotchGeometryCalculator.notchGeometry(
-            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
-            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
-        )
-        let layout = NotchGeometryCalculator.notchFusionLayout(
-            screenFrame: screen,
-            geometry: geo,
-            expansionProgress: 1
-        )
-        #expect(!layout.topBridge.isEmpty)
-        #expect(layout.topBridge.minY == 0)
-        #expect(layout.topBridge.height == safeAreaTop)
-        #expect(layout.rightBridge.isEmpty)
-        #expect(layout.body.minY == safeAreaTop)
-    }
-
-    @Test func fusionLayoutExpandsBodyWithoutPanelBridge() {
-        let geo = NotchGeometryCalculator.notchGeometry(
-            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
-            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
-        )
-        let collapsed = NotchGeometryCalculator.notchFusionLayout(
-            screenFrame: screen,
-            geometry: geo,
-            expansionProgress: 0
-        )
-        let bridgeOnly = NotchGeometryCalculator.notchFusionLayout(
-            screenFrame: screen,
-            geometry: geo,
-            expansionProgress: 0.35
-        )
-        let expanded = NotchGeometryCalculator.notchFusionLayout(
-            screenFrame: screen,
-            geometry: geo,
-            expansionProgress: 1
-        )
-        #expect(!collapsed.topBridge.isEmpty)
-        #expect(!bridgeOnly.topBridge.isEmpty)
-        #expect(!expanded.topBridge.isEmpty)
-        #expect(bridgeOnly.body.height > collapsed.body.height)
-        #expect(expanded.body.height > bridgeOnly.body.height)
-        #expect(expanded.contentOpacity > bridgeOnly.contentOpacity)
-    }
-
-    @Test func fusionLayoutDelaysContentUntilBodyHasRoom() {
-        let geo = NotchGeometryCalculator.notchGeometry(
-            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
-            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
-        )
-        let collapsed = NotchGeometryCalculator.notchFusionLayout(
-            screenFrame: screen,
-            geometry: geo,
-            expansionProgress: 0
-        )
-        let early = NotchGeometryCalculator.notchFusionLayout(
-            screenFrame: screen,
-            geometry: geo,
-            expansionProgress: 0.35
-        )
-        let middle = NotchGeometryCalculator.notchFusionLayout(
-            screenFrame: screen,
-            geometry: geo,
-            expansionProgress: 0.7
-        )
-        let expanded = NotchGeometryCalculator.notchFusionLayout(
-            screenFrame: screen,
-            geometry: geo,
-            expansionProgress: 1
-        )
-        #expect(collapsed.contentOpacity == 0)
-        #expect(early.contentOpacity == 0)
-        #expect(middle.contentOpacity > 0)
-        #expect(expanded.contentOpacity == 1)
     }
 
     // MARK: - Snap zone
@@ -370,6 +304,33 @@ struct NotchGeometryCalculatorTests {
         ))
     }
 
+    @Test func hostedSmallDragSettlesBackToCanonicalFrame() {
+        let collapsed = CGRect(x: 570, y: 860, width: 300, height: 40)
+        let dragged = CGRect(x: 586, y: 842, width: 300, height: 40)
+        #expect(NotchGeometryCalculator.hostedDragResolution(
+            panelFrame: dragged,
+            collapsedFrame: collapsed
+        ) == .snapBack)
+    }
+
+    @Test func hostedDownwardDragBeyondThresholdDetaches() {
+        let collapsed = CGRect(x: 570, y: 860, width: 300, height: 40)
+        let dragged = CGRect(x: 570, y: 730, width: 300, height: 40)
+        #expect(NotchGeometryCalculator.hostedDragResolution(
+            panelFrame: dragged,
+            collapsedFrame: collapsed
+        ) == .detach)
+    }
+
+    @Test func hostedHorizontalDragBeyondThresholdDetaches() {
+        let collapsed = CGRect(x: 570, y: 860, width: 300, height: 40)
+        let dragged = CGRect(x: 840, y: 850, width: 300, height: 40)
+        #expect(NotchGeometryCalculator.hostedDragResolution(
+            panelFrame: dragged,
+            collapsedFrame: collapsed
+        ) == .detach)
+    }
+
     // MARK: - No-notch fallback
 
     @Test func noNotchFallbackSetsHasNotchFalse() {
@@ -398,6 +359,154 @@ struct NotchGeometryCalculatorTests {
         let panel = CGRect(x: frames.collapsed.minX, y: 800,
                            width: frames.collapsed.width, height: 60)
         #expect(NotchGeometryCalculator.shouldSnapToNotch(panelFrame: panel, snapZone: frames.snapZone))
+    }
+
+    // MARK: - Hosted surface layout
+
+    @Test func hostedSurfaceLayoutUsesSingleCollapsedTopCap() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let zero = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo, expansionProgress: 0
+        )
+        let full = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo, expansionProgress: 1
+        )
+        #expect(zero.topCap.width == geo.notchGapWidth + compactStatusSlotWidth * 2)
+        #expect(zero.topCap.height == safeAreaTop)
+        #expect(zero.topCap.maxY == zero.surfaceSize.height)
+        #expect(zero.topCap.width < full.topCap.width)
+        #expect(zero.body.height == 0)
+    }
+
+    @Test func hostedSurfaceLayoutStatusSlotsStayInsideTopCap() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let layout = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo, expansionProgress: 0
+        )
+        #expect(layout.topCap.contains(layout.leftStatusSlot))
+        #expect(layout.topCap.contains(layout.rightStatusSlot))
+        #expect(layout.leftStatusSlot.width == compactStatusSlotWidth)
+        #expect(layout.rightStatusSlot.width == compactStatusSlotWidth)
+        #expect(layout.leftStatusSlot.maxX == layout.notchGap.minX)
+        #expect(layout.rightStatusSlot.minX == layout.notchGap.maxX)
+    }
+
+    @Test func hostedSurfaceLayoutBodyHeightGrowsMonotonically() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let p0 = NotchGeometryCalculator.hostedSurfaceLayout(screenFrame: screen, geometry: geo, expansionProgress: 0)
+        let p35 = NotchGeometryCalculator.hostedSurfaceLayout(screenFrame: screen, geometry: geo, expansionProgress: 0.35)
+        let p70 = NotchGeometryCalculator.hostedSurfaceLayout(screenFrame: screen, geometry: geo, expansionProgress: 0.7)
+        let p100 = NotchGeometryCalculator.hostedSurfaceLayout(screenFrame: screen, geometry: geo, expansionProgress: 1)
+        #expect(p0.body.height == 0)
+        #expect(p35.body.height > p0.body.height)
+        #expect(p70.body.height > p35.body.height)
+        #expect(p100.body.height > p70.body.height)
+        #expect(p100.body.height == NotchGeometryCalculator.expandedHeight)
+    }
+
+    @Test func hostedSurfaceLayoutBodyOpacityRespectsFadeStart() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let early = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo,
+            expansionProgress: NotchGeometryCalculator.contentFadeStartProgress - 0.01
+        )
+        let later = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo, expansionProgress: 0.85
+        )
+        let full = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo, expansionProgress: 1
+        )
+        #expect(early.contentOpacity == 0)
+        #expect(later.contentOpacity > 0)
+        #expect(full.contentOpacity == 1)
+    }
+
+    @Test func hostedSurfaceLayoutSurfaceSizeMatchesExpandedFrame() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
+        let layout = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo, expansionProgress: 0
+        )
+        #expect(layout.surfaceSize == frames.expanded.size)
+    }
+
+    @Test func hostedSurfaceLayoutTopCapAndGapCoverMenuBarRow() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let layout = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo, expansionProgress: 0
+        )
+        #expect(layout.topCap.height == safeAreaTop)
+        #expect(layout.notchGap.height == safeAreaTop)
+        #expect(layout.topCap.contains(layout.notchGap))
+        #expect(layout.topCap.maxY == layout.surfaceSize.height)
+        #expect(layout.notchGap.maxY == layout.surfaceSize.height)
+    }
+
+    @Test func compactNotchHoverRegionsDoNotCoverFullMenuBarWidth() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let regions = NotchGeometryCalculator.notchHoverRegions(screenFrame: screen, geometry: geo)
+        #expect(regions.count == 1)
+        #expect(regions.allSatisfy { $0.width < screen.width * 0.25 })
+        #expect(!regions.contains { $0.contains(CGPoint(x: screen.minX + 50, y: screen.maxY - 8)) })
+        #expect(!regions.contains { $0.contains(CGPoint(x: screen.maxX - 50, y: screen.maxY - 8)) })
+    }
+
+    @Test func compactNotchHoverRegionCoversCollapsedTopCap() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
+        let layout = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo, expansionProgress: 0
+        )
+        let regions = NotchGeometryCalculator.notchHoverRegions(screenFrame: screen, geometry: geo)
+        let topCapMin = CGPoint(
+            x: frames.expanded.minX + layout.topCap.minX + 1,
+            y: frames.expanded.minY + layout.topCap.midY
+        )
+        let topCapMax = CGPoint(
+            x: frames.expanded.minX + layout.topCap.maxX - 1,
+            y: frames.expanded.minY + layout.topCap.midY
+        )
+        #expect(regions.contains { $0.contains(topCapMin) })
+        #expect(regions.contains { $0.contains(topCapMax) })
+    }
+
+    @Test func compactNotchHoverRegionIsWiderThanVisibleTopCap() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let layout = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo, expansionProgress: 0
+        )
+        let regions = NotchGeometryCalculator.notchHoverRegions(screenFrame: screen, geometry: geo)
+        let expectedWidth = layout.topCap.width + collapsedTriggerHitPadding * 2
+        #expect(regions.count == 1)
+        #expect(regions[0].width == expectedWidth)
+        #expect(regions[0].width < screen.width * 0.25)
     }
 
     @Test func snapWithTopCenterOutsideZoneDoesNotSnap() {

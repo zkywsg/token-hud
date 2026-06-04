@@ -7,6 +7,11 @@ enum NotchHostMode: Equatable {
     case detached
 }
 
+enum NotchHostedDragResolution: Equatable {
+    case snapBack
+    case detach
+}
+
 /// Extracted notch geometry from screen information.
 struct NotchGeometry: Equatable {
     let notchGapMinX: CGFloat
@@ -28,25 +33,30 @@ struct NotchFrames: Equatable {
     let snapZone: CGRect
 }
 
-/// Local drawing rects inside the transparent hosted panel.
-struct NotchFusionLayout: Equatable {
-    let topBridge: CGRect
-    let leftBridge: CGRect
-    let rightBridge: CGRect
+/// Local drawing rects inside the unified hosted surface window
+/// (collapsed compact slots + optional body that grows with `expansionProgress`).
+///
+/// Coordinates are in the hosted surface's local space, where (0, 0) is
+/// the bottom-left of the overlay window. `surfaceHeight` matches the
+/// overlay window's full height (menu bar + expanded body slot).
+struct NotchHostedSurfaceLayout: Equatable {
+    let topCap: CGRect
+    let notchGap: CGRect
+    let leftStatusSlot: CGRect
+    let rightStatusSlot: CGRect
     let body: CGRect
     let contentOpacity: CGFloat
+    let surfaceSize: CGSize
 }
 
 /// Pure-logic calculator for notch host panel geometry.
 enum NotchGeometryCalculator {
-    static let collapsedBodyHeight: CGFloat = 22
+    static let compactStatusSlotWidth: CGFloat = 56
+    static let compactStatusSafeSideMargin: CGFloat = 24
+    static let collapsedTriggerHitPadding: CGFloat = 14
+    static let collapsedHoverPadding: CGFloat = collapsedTriggerHitPadding
     static let expandedHeight: CGFloat = 110
-    static let expandedBottomCornerRadius: CGFloat = 12
-    static let collapsedBridgeWidth: CGFloat = 28
-    static let expandedBridgeMaxWidth: CGFloat = 260
-    static let collapsedBodyHorizontalPadding: CGFloat = 40
     static let expandedBodyMaxWidth: CGFloat = 560
-    static let bridgePhaseEnd: CGFloat = 0.35
     static let contentFadeStartProgress: CGFloat = 0.55
     static let snapZoneExpandX: CGFloat = 80
     static let snapZoneExpandY: CGFloat = 50
@@ -105,10 +115,7 @@ enum NotchGeometryCalculator {
             ? (geometry.notchGapMinX + geometry.notchGapMaxX) / 2
             : screenFrame.midX
         let maxBodyWidth = max(120, screenFrame.width - 80)
-        let collapsedWidth = min(
-            maxBodyWidth,
-            max(120, geometry.notchGapWidth + collapsedBodyHorizontalPadding)
-        )
+        let collapsedWidth = min(maxBodyWidth, geometry.notchGapWidth + compactStatusSlotWidth * 2)
         let expandedWidth = min(
             maxBodyWidth,
             max(collapsedWidth, expandedBodyMaxWidth)
@@ -119,9 +126,9 @@ enum NotchGeometryCalculator {
             x: (notchCenterX - collapsedWidth / 2).clamped(
                 to: screenFrame.minX...(screenFrame.maxX - collapsedWidth)
             ),
-            y: hostTopY - geometry.menuBarHeight - collapsedBodyHeight,
+            y: hostTopY - geometry.menuBarHeight,
             width: collapsedWidth,
-            height: geometry.menuBarHeight + collapsedBodyHeight
+            height: geometry.menuBarHeight
         )
 
         let expanded = CGRect(
@@ -147,67 +154,50 @@ enum NotchGeometryCalculator {
         )
     }
 
-    static func notchFusionLayout(
-        screenFrame: CGRect,
-        geometry: NotchGeometry,
-        expansionProgress: CGFloat
-    ) -> NotchFusionLayout {
-        let progress = expansionProgress.clamped(to: 0...1)
-        let collapsedBodyWidth = min(
-            screenFrame.width,
-            max(120, geometry.notchGapWidth + collapsedBodyHorizontalPadding)
-        )
-        let expandedBodyWidth = min(
-            screenFrame.width,
-            max(collapsedBodyWidth, expandedBodyMaxWidth)
-        )
-        let bodyWidth = interpolate(from: collapsedBodyWidth, to: expandedBodyWidth, progress: progress)
-        let bodyHeight = interpolate(
-            from: collapsedBodyHeight,
-            to: expandedHeight,
-            progress: progress
-        )
-        let body = CGRect(
-            x: max(0, (screenFrame.width - bodyWidth) / 2),
-            y: geometry.menuBarHeight,
-            width: min(bodyWidth, screenFrame.width),
-            height: bodyHeight
-        )
-        let topBridge = CGRect(
-            x: body.minX,
-            y: 0,
-            width: body.width,
-            height: geometry.menuBarHeight
-        )
-
-        return NotchFusionLayout(
-            topBridge: topBridge,
-            leftBridge: .null,
-            rightBridge: .null,
-            body: body,
-            contentOpacity: contentOpacity(for: progress)
-        )
-    }
-
     /// The notch region for mouse hover detection (gap + ears area).
     static func notchRegion(
         screenFrame: CGRect,
         geometry: NotchGeometry
     ) -> CGRect {
-        if geometry.hasNotch {
-            return CGRect(
-                x: screenFrame.minX,
-                y: screenFrame.maxY - geometry.menuBarHeight - 20,
-                width: screenFrame.width,
-                height: geometry.menuBarHeight + 20
-            )
+        let regions = notchHoverRegions(screenFrame: screenFrame, geometry: geometry)
+        guard var union = regions.first else {
+            return .null
         }
-        return CGRect(
+        for region in regions.dropFirst() {
+            union = union.union(region)
+        }
+        return union
+    }
+
+    static func notchHoverRegions(
+        screenFrame: CGRect,
+        geometry: NotchGeometry
+    ) -> [CGRect] {
+        if geometry.hasNotch {
+            let frames = notchFrames(screenFrame: screenFrame, geometry: geometry)
+            let layout = hostedSurfaceLayout(
+                screenFrame: screenFrame,
+                geometry: geometry,
+                expansionProgress: 0
+            )
+            let topCap = CGRect(
+                x: frames.expanded.minX + layout.topCap.minX,
+                y: frames.expanded.minY + layout.topCap.minY,
+                width: layout.topCap.width,
+                height: layout.topCap.height
+            )
+            return [
+                clampedRegion(topCap.insetBy(dx: -collapsedHoverPadding, dy: -collapsedHoverPadding), to: screenFrame)
+            ]
+        }
+        return [
+            CGRect(
             x: screenFrame.midX - 100,
             y: screenFrame.maxY - 44,
             width: 200,
             height: 44
-        )
+            )
+        ]
     }
 
     // MARK: - Snap / Detach
@@ -228,6 +218,114 @@ enum NotchGeometryCalculator {
         let dx = abs(panelFrame.midX - collapsedFrame.midX)
         return dy > detachThreshold || dx > 150
     }
+
+    static func hostedDragResolution(
+        panelFrame: CGRect,
+        collapsedFrame: CGRect
+    ) -> NotchHostedDragResolution {
+        let downwardDrop = collapsedFrame.maxY - panelFrame.maxY
+        let horizontalOffset = abs(panelFrame.midX - collapsedFrame.midX)
+        if downwardDrop > detachThreshold || horizontalOffset > 150 {
+            return .detach
+        }
+        return .snapBack
+    }
+
+    // MARK: - Hosted surface layout
+
+    /// Layout inside the unified hosted surface window. The surface window
+    /// always uses the expanded frame's size; visual collapse/expand is
+    /// driven entirely by `expansionProgress` so the window itself never
+    /// resizes — eliminating SwiftUI/window animation cross-talk.
+    static func hostedSurfaceLayout(
+        screenFrame: CGRect,
+        geometry: NotchGeometry,
+        expansionProgress: CGFloat
+    ) -> NotchHostedSurfaceLayout {
+        let progress = expansionProgress.clamped(to: 0...1)
+        let frames = notchFrames(screenFrame: screenFrame, geometry: geometry)
+        let surfaceSize = frames.expanded.size
+        let menuBarHeight = geometry.menuBarHeight
+
+        let gapWidth = max(0, min(geometry.notchGapWidth, surfaceSize.width))
+        let gapMinX = (geometry.notchGapMinX - frames.expanded.minX).clamped(to: 0...surfaceSize.width)
+        let gapMaxX = (geometry.notchGapMaxX - frames.expanded.minX).clamped(to: gapMinX...surfaceSize.width)
+        let gapCenterX = (gapMinX + gapMaxX) / 2
+        let maxSideExpansion = max(0, min(gapMinX, surfaceSize.width - gapMaxX))
+        let screenLeftRoom = max(0, geometry.notchGapMinX - screenFrame.minX - compactStatusSafeSideMargin)
+        let screenRightRoom = max(0, screenFrame.maxX - geometry.notchGapMaxX - compactStatusSafeSideMargin)
+        let collapsedStatusWidth = min(
+            compactStatusSlotWidth,
+            maxSideExpansion,
+            screenLeftRoom,
+            screenRightRoom
+        )
+        let collapsedTopCapWidth = min(surfaceSize.width, gapWidth + collapsedStatusWidth * 2)
+
+        let bodyHeight = expandedHeight * progress
+        let bodyMaxWidth = min(surfaceSize.width, expandedBodyMaxWidth)
+        let bodyMinWidth = min(bodyMaxWidth, max(collapsedTopCapWidth, 120))
+        let bodyWidth = interpolate(from: bodyMinWidth, to: bodyMaxWidth, progress: progress)
+        let topCapWidth = bodyWidth
+        let topCapX = (gapCenterX - topCapWidth / 2).clamped(to: 0...(surfaceSize.width - topCapWidth))
+
+        // Surface uses bottom-left origin; the top cap lives in the menu bar row.
+        let capY = surfaceSize.height - menuBarHeight
+        let topCap = CGRect(
+            x: topCapX,
+            y: capY,
+            width: topCapWidth,
+            height: menuBarHeight
+        )
+        let notchGap = CGRect(
+            x: gapMinX,
+            y: capY,
+            width: gapWidth,
+            height: menuBarHeight
+        )
+        let statusWidth = min(collapsedStatusWidth, max(0, (topCap.width - gapWidth) / 2))
+        let leftStatusSlot = CGRect(
+            x: topCap.minX,
+            y: capY,
+            width: statusWidth,
+            height: menuBarHeight
+        )
+        let rightStatusSlot = CGRect(
+            x: topCap.maxX - statusWidth,
+            y: capY,
+            width: statusWidth,
+            height: menuBarHeight
+        )
+        let body = CGRect(
+            x: max(0, min(surfaceSize.width - bodyWidth, gapCenterX - bodyWidth / 2)),
+            y: capY - bodyHeight,
+            width: bodyWidth,
+            height: bodyHeight
+        )
+
+        return NotchHostedSurfaceLayout(
+            topCap: topCap,
+            notchGap: notchGap,
+            leftStatusSlot: leftStatusSlot,
+            rightStatusSlot: rightStatusSlot,
+            body: body,
+            contentOpacity: contentOpacity(for: progress),
+            surfaceSize: surfaceSize
+        )
+    }
+}
+
+private func clampedRegion(_ rect: CGRect, to bounds: CGRect) -> CGRect {
+    let minX = max(bounds.minX, rect.minX)
+    let minY = max(bounds.minY, rect.minY)
+    let maxX = min(bounds.maxX, rect.maxX)
+    let maxY = min(bounds.maxY, rect.maxY)
+    return CGRect(
+        x: minX,
+        y: minY,
+        width: max(0, maxX - minX),
+        height: max(0, maxY - minY)
+    )
 }
 
 private func contentOpacity(for progress: CGFloat) -> CGFloat {

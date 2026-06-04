@@ -4,6 +4,11 @@
 
 `token-hud` 是一个 macOS SwiftUI app，用于在尽量不占屏幕空间的前提下持续显示 AI 额度和用量信息。README 将它定位为 Claude、OpenAI 及相关 AI 工具的 MacBook 刘海 HUD。
 
+## 相关文档
+
+- `docs/notch-open-source-research.md`：刘海窗口进入菜单栏区域的技术路线与风险结论。
+- `docs/notch-dynamic-island-implementation-reference.md`：开源/成熟 Dynamic Island 类 App 的实现参考、源码入口、compact slot、hover、动画和窗口层级实践。
+
 ## 当前架构
 
 项目分为一个小型可测试核心包和一个 macOS app target：

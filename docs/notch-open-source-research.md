@@ -8,12 +8,17 @@
 
 这份文档记录本轮对开源 notch / Dynamic Island 类项目的调研结论，用于支撑后续 `PLAN.md` 中的实现路线。
 
+> 2026-06-04 补充：更完整的开源项目清单、源码入口、动画/hover/compact slot 技术细节已沉淀到 `docs/notch-dynamic-island-implementation-reference.md`。后续继续改刘海融合效果时，优先阅读那份参考档案，再决定是否需要重新联网搜索。
+
 ## 调研项目
 
 - Boring Notch: `https://github.com/TheBoredTeam/boring.notch`
 - Atoll: `https://github.com/Ebullioscopic/Atoll`
 - SuperIsland: `https://github.com/shobhit99/SuperIsland`
 - DynamicNotch: `https://github.com/jackson-storm/DynamicNotch`
+- OpenNook: `https://github.com/glendonC/opennook`
+- DynamicNotchKit: `https://github.com/MrKai77/DynamicNotchKit`
+- VibeHub: `https://github.com/mtunique/VibeHub`
 
 ## 关键结论
 
@@ -94,4 +99,3 @@ SuperIsland 更接近公开 API 路线：
 - 使用单个 top-centered `NotchSurfaceWindow`。
 - 增加 public fallback。
 - 加强诊断日志，明确记录当前 strategy、requested frame、actual frame 和 Space delegation 状态。
-
