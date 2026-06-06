@@ -28,6 +28,7 @@
 		5000ECFD9D7A35013383AEE0 /* StatusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB6B53D2E04F6EFECAF0333 /* StatusWidget.swift */; };
 		57BE3D6F0FEBEC5312BC7107 /* AppFilterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6747C85B6651829B41BD60A2 /* AppFilterStore.swift */; };
 		5C812796CB6407A115126290 /* SkyLightNotchSpace.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F89856CB689CB22035420D /* SkyLightNotchSpace.swift */; };
+		5D4A68F6C6A649F79D846A21 /* MiMoConsoleConnectionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4E8F4C4B639C451E9BD6457F /* MiMoConsoleConnectionSheet.swift */; };
 		5EC4C18A0B0DBEBDEB8F072A /* SessionKeyExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */; };
 		5FFB74ADB3F9391E75342BD5 /* CodexFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCF8747F22AA729E109D21D1 /* CodexFetcher.swift */; };
 		600B13DFCCC5F789A0C2B73A /* StateWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = A9FF1CC4D818E916F535E406 /* StateWatcher.swift */; };
@@ -64,6 +65,7 @@
 		3C206289F4EAAB00762518B7 /* MultiWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWidget.swift; sourceTree = "<group>"; };
 		3CB6B53D2E04F6EFECAF0333 /* StatusWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusWidget.swift; sourceTree = "<group>"; };
 		44291AC0037CB79BA78578A6 /* NotchHostState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchHostState.swift; sourceTree = "<group>"; };
+		4E8F4C4B639C451E9BD6457F /* MiMoConsoleConnectionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiMoConsoleConnectionSheet.swift; sourceTree = "<group>"; };
 		5D0791EBB1B5070024A40B1A /* WidgetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetStore.swift; sourceTree = "<group>"; };
 		5F0CA083103E2DD60D1D80EC /* CodexJWT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexJWT.swift; sourceTree = "<group>"; };
 		5FB21BF5542FE6CA4AED10F7 /* RingWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RingWidget.swift; sourceTree = "<group>"; };
@@ -166,6 +168,7 @@
 			isa = PBXGroup;
 			children = (
 				992E1C386A87EE8633B24043 /* AppFilterSettingsView.swift */,
+				4E8F4C4B639C451E9BD6457F /* MiMoConsoleConnectionSheet.swift */,
 				C0FDBB570597901AA9C7CA64 /* PlatformListView.swift */,
 				2E313F2A535B42D3D166FBE5 /* PlatformRowView.swift */,
 				8E74DD2F7701BA7EF38E4535 /* ServiceConfig.swift */,
@@ -314,6 +317,7 @@
 				820766B6CDE48C132FAB2AC6 /* GroupedOverlayView.swift in Sources */,
 				7FC68D4F2A998421648D471A /* KeychainHelper.swift in Sources */,
 				FFCF9C4BD34061DBCC15DB02 /* MenuBarBridgeProbe.swift in Sources */,
+				5D4A68F6C6A649F79D846A21 /* MiMoConsoleConnectionSheet.swift in Sources */,
 				DD26E1DB0A41D26BD3A26788 /* ModelBreakdownWidget.swift in Sources */,
 				96D7EF137D976D0F179E73D0 /* MultiWidget.swift in Sources */,
 				F2E71681CDA08A979ACF1C4B /* NotchGeometryCalculator.swift in Sources */,

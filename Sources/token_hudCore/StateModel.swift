@@ -82,6 +82,16 @@ public struct StateFile: Codable, Sendable {
     public let updatedAt: String
     public let services: [String: Service]
 
+    public func removingService(_ serviceID: String, updatedAt: String) -> StateFile {
+        var nextServices = services
+        nextServices.removeValue(forKey: serviceID)
+        return StateFile(
+            version: version,
+            updatedAt: updatedAt,
+            services: nextServices
+        )
+    }
+
     public static let preview = StateFile(
         version: 1,
         updatedAt: ISO8601DateFormatter().string(from: Date()),
@@ -201,6 +211,265 @@ public struct StateFile: Codable, Sendable {
             )
         ]
     )
+}
+
+public enum ProviderCredentialKind: String, Sendable {
+    case sessionKey
+    case apiKey
+    case codexLocalAuth
+    case apiKeyAndConsoleCookie
+}
+
+public enum ProviderUsageCapability: String, Sendable {
+    case localSessionLogs
+    case balanceEndpoint
+    case tokenPlanEndpoint
+    case consoleCookieTokenPlan
+    case apiKeyValidationOnly
+}
+
+public enum ProviderResetAction: String, Sendable, Equatable {
+    case credential
+    case apiKey
+    case consoleCookie
+    case localAuth
+    case adminAPIKey
+    case serviceData
+}
+
+public struct ProviderCapability: Sendable, Identifiable {
+    public let id: String
+    public let displayName: String
+    public let credentialKind: ProviderCredentialKind
+    public let usageCapability: ProviderUsageCapability
+    public let resetActions: [ProviderResetAction]
+
+    public init(
+        id: String,
+        displayName: String,
+        credentialKind: ProviderCredentialKind,
+        usageCapability: ProviderUsageCapability,
+        resetActions: [ProviderResetAction]
+    ) {
+        self.id = id
+        self.displayName = displayName
+        self.credentialKind = credentialKind
+        self.usageCapability = usageCapability
+        self.resetActions = resetActions
+    }
+
+    public static let all: [ProviderCapability] = [
+        ProviderCapability(
+            id: "claude",
+            displayName: "Claude",
+            credentialKind: .sessionKey,
+            usageCapability: .localSessionLogs,
+            resetActions: [.credential, .serviceData]
+        ),
+        ProviderCapability(
+            id: "openai",
+            displayName: "OpenAI",
+            credentialKind: .apiKey,
+            usageCapability: .apiKeyValidationOnly,
+            resetActions: [.credential, .serviceData]
+        ),
+        ProviderCapability(
+            id: "codex",
+            displayName: "Codex",
+            credentialKind: .codexLocalAuth,
+            usageCapability: .localSessionLogs,
+            resetActions: [.localAuth, .adminAPIKey, .serviceData]
+        ),
+        ProviderCapability(
+            id: "gemini",
+            displayName: "Gemini",
+            credentialKind: .apiKey,
+            usageCapability: .apiKeyValidationOnly,
+            resetActions: [.credential, .serviceData]
+        ),
+        ProviderCapability(
+            id: "deepseek",
+            displayName: "DeepSeek",
+            credentialKind: .apiKey,
+            usageCapability: .balanceEndpoint,
+            resetActions: [.credential, .serviceData]
+        ),
+        ProviderCapability(
+            id: "anthropic",
+            displayName: "Anthropic API",
+            credentialKind: .apiKey,
+            usageCapability: .apiKeyValidationOnly,
+            resetActions: [.credential, .serviceData]
+        ),
+        ProviderCapability(
+            id: "minimax",
+            displayName: "MiniMax",
+            credentialKind: .apiKey,
+            usageCapability: .tokenPlanEndpoint,
+            resetActions: [.credential, .serviceData]
+        ),
+        ProviderCapability(
+            id: "mimo",
+            displayName: "MiMo",
+            credentialKind: .apiKeyAndConsoleCookie,
+            usageCapability: .consoleCookieTokenPlan,
+            resetActions: [.apiKey, .consoleCookie, .serviceData]
+        ),
+    ]
+
+    public static let catalog: [String: ProviderCapability] = {
+        Dictionary(uniqueKeysWithValues: all.map { ($0.id, $0) })
+    }()
+}
+
+public enum ProviderQueryError: String, Sendable {
+    case notConfigured
+    case tokenExpired
+    case permissionDenied
+    case networkError
+    case usageUnsupported
+    case noLocalSessions
+    case parseError
+}
+
+public enum ProviderDataStatus: String, Sendable {
+    case notQueried
+    case noUsageData
+    case usageUnsupported
+    case tokenExpired
+    case permissionDenied
+    case networkError
+    case error
+    case ready
+
+    public static func status(for service: Service?) -> ProviderDataStatus {
+        guard let service else { return .notQueried }
+        if let error = service.error {
+            let normalized = error.lowercased()
+            if normalized.contains("network error") || normalized.contains("networkerror") {
+                return .networkError
+            }
+            if normalized.contains("invalid api key") ||
+                normalized.contains("api access denied") ||
+                normalized.contains("forbidden") ||
+                normalized.contains("403") {
+                return .permissionDenied
+            }
+            if normalized.contains("expired") {
+                return .tokenExpired
+            }
+            if normalized.contains("no sessions") {
+                return .noUsageData
+            }
+            if normalized.contains("token plan subscription") ||
+                normalized.contains("no active token plan") {
+                return .usageUnsupported
+            }
+            switch ProviderQueryError(rawValue: error) {
+            case .usageUnsupported: return .usageUnsupported
+            case .tokenExpired:     return .tokenExpired
+            case .permissionDenied: return .permissionDenied
+            case .networkError:     return .networkError
+            case .notConfigured:    return .notQueried
+            case .noLocalSessions:  return .noUsageData
+            case .parseError:       return .error
+            case nil:               return .error
+            }
+        }
+        if service.quotas.isEmpty, service.currentSession == nil {
+            return .noUsageData
+        }
+        return .ready
+    }
+}
+
+public enum ProviderCredentialSnapshotStatus: String, Sendable, Equatable {
+    case configured
+    case notConfigured
+}
+
+public enum MiMoAPIKeyRole: String, Sendable, Equatable {
+    case tokenPlanKey
+    case payAsYouGoAPIKey
+    case unknownAPIKey
+}
+
+public struct ProviderCredentialSnapshot: Sendable, Equatable {
+    public let claudeSessionKey: String?
+    public let apiKeys: [String: String]
+    public let mimoConsoleCookie: String?
+    public let codexAdminKey: String?
+
+    public init(
+        claudeSessionKey: String?,
+        apiKeys: [String: String],
+        mimoConsoleCookie: String?,
+        codexAdminKey: String? = nil
+    ) {
+        self.claudeSessionKey = claudeSessionKey
+        self.apiKeys = apiKeys
+        self.mimoConsoleCookie = mimoConsoleCookie
+        self.codexAdminKey = codexAdminKey
+    }
+
+    public static let empty = ProviderCredentialSnapshot(
+        claudeSessionKey: nil,
+        apiKeys: [:],
+        mimoConsoleCookie: nil,
+        codexAdminKey: nil
+    )
+
+    public var maskedClaudeSessionKey: String? {
+        claudeSessionKey.map(Self.masked)
+    }
+
+    public var maskedMiMoConsoleCookie: String? {
+        mimoConsoleCookie.map(Self.masked)
+    }
+
+    public var maskedCodexAdminKey: String? {
+        codexAdminKey.map(Self.masked)
+    }
+
+    public var hasCodexAdminKey: Bool {
+        codexAdminKey != nil
+    }
+
+    public func maskedAPIKey(for platformID: String) -> String? {
+        apiKeys[platformID].map(Self.masked)
+    }
+
+    public var miMoAPIKeyRole: MiMoAPIKeyRole? {
+        guard let key = apiKeys["mimo"]?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased(),
+              !key.isEmpty
+        else { return nil }
+
+        if key.hasPrefix("tp-") { return .tokenPlanKey }
+        if key.hasPrefix("sk-") { return .payAsYouGoAPIKey }
+        return .unknownAPIKey
+    }
+
+    public var hasMiMoTokenPlanCredential: Bool {
+        mimoConsoleCookie != nil || miMoAPIKeyRole == .tokenPlanKey
+    }
+
+    public func status(for provider: ProviderCapability) -> ProviderCredentialSnapshotStatus {
+        switch provider.credentialKind {
+        case .sessionKey:
+            return claudeSessionKey == nil ? .notConfigured : .configured
+        case .apiKey:
+            return apiKeys[provider.id] == nil ? .notConfigured : .configured
+        case .apiKeyAndConsoleCookie:
+            return (apiKeys[provider.id] != nil || mimoConsoleCookie != nil) ? .configured : .notConfigured
+        case .codexLocalAuth:
+            return .notConfigured
+        }
+    }
+
+    private static func masked(_ value: String) -> String {
+        guard value.count > 10 else { return "••••••••" }
+        return String(value.prefix(6)) + "••••" + String(value.suffix(4))
+    }
 }
 
 public enum MiniMaxTokenPlanParser {

@@ -150,6 +150,20 @@ struct StateModelTests {
         #expect(state.services["codex"]?.error == "tokenExpired")
     }
 
+    @Test func removingServiceKeepsOtherPlatformsAndUpdatesTimestamp() throws {
+        let state = try JSONDecoder().decode(StateFile.self, from: Data(fullStateJSON.utf8))
+
+        let updated = state.removingService(
+            "claude",
+            updatedAt: "2026-06-06T12:00:00Z"
+        )
+
+        #expect(updated.version == 1)
+        #expect(updated.updatedAt == "2026-06-06T12:00:00Z")
+        #expect(updated.services["claude"] == nil)
+        #expect(updated.services["openai"]?.label == "OpenAI")
+    }
+
     @Test func modelBreakdownNilWhenAbsent() throws {
         let json = """
         {"id":"x","startedAt":"2026-04-01T00:00:00Z"}

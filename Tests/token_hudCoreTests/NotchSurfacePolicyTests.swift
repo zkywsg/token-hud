@@ -50,6 +50,36 @@ struct NotchSurfacePolicyTests {
         #expect(NotchTransitionPolicy.hoverAction(isMouseInside: true, mode: .collapsed) == .expand)
     }
 
+    @Test func expandedTopCapCountsAsInsideNotchRegion() {
+        let isInside = NotchHoverRegionPolicy.isMouseInsideNotchRegion(
+            mode: .expanded,
+            isInsideCollapsedHoverRegion: false,
+            isInsideExpandedSurface: true
+        )
+        #expect(isInside)
+        #expect(NotchTransitionPolicy.hoverAction(isMouseInside: isInside, mode: .expanded) == .cancelCollapse)
+    }
+
+    @Test func expandedOutsideSurfaceSchedulesCollapse() {
+        let isInside = NotchHoverRegionPolicy.isMouseInsideNotchRegion(
+            mode: .expanded,
+            isInsideCollapsedHoverRegion: false,
+            isInsideExpandedSurface: false
+        )
+        #expect(!isInside)
+        #expect(NotchTransitionPolicy.hoverAction(isMouseInside: isInside, mode: .expanded) == .scheduleCollapse)
+    }
+
+    @Test func collapsedIgnoresExpandedSurfaceForInitialTrigger() {
+        let isInside = NotchHoverRegionPolicy.isMouseInsideNotchRegion(
+            mode: .collapsed,
+            isInsideCollapsedHoverRegion: false,
+            isInsideExpandedSurface: true
+        )
+        #expect(!isInside)
+        #expect(NotchTransitionPolicy.hoverAction(isMouseInside: isInside, mode: .collapsed) == .none)
+    }
+
     @Test func hostedModesKeepWindowMouseEventsEnabledForHitMask() {
         #expect(!NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .collapsed))
         #expect(!NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .expanded))

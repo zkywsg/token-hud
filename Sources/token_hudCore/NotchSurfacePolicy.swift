@@ -66,6 +66,23 @@ enum NotchTransitionPolicy {
     }
 }
 
+enum NotchHoverRegionPolicy {
+    static func isMouseInsideNotchRegion(
+        mode: NotchHostMode,
+        isInsideCollapsedHoverRegion: Bool,
+        isInsideExpandedSurface: Bool
+    ) -> Bool {
+        switch mode {
+        case .collapsed:
+            isInsideCollapsedHoverRegion
+        case .expanded:
+            isInsideCollapsedHoverRegion || isInsideExpandedSurface
+        case .detached:
+            false
+        }
+    }
+}
+
 enum NotchMouseEventPolicy {
     static func shouldIgnoreWindowMouseEvents(mode: NotchHostMode) -> Bool {
         switch mode {

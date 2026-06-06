@@ -109,3 +109,51 @@ final class StateWatcher {
         start()
     }
 }
+
+enum StateServiceResetError: LocalizedError {
+    case missingStateFile(String)
+    case unreadableStateFile(String)
+    case unwritableStateFile(String)
+
+    var errorDescription: String? {
+        switch self {
+        case .missingStateFile(let path):
+            return "state.json 不存在：\(path)"
+        case .unreadableStateFile(let path):
+            return "无法读取 state.json：\(path)"
+        case .unwritableStateFile(let path):
+            return "无法写入 state.json：\(path)"
+        }
+    }
+}
+
+enum StateServiceResetter {
+    static func clearService(_ serviceID: String) throws {
+        let path = stateFilePath()
+        let url = URL(fileURLWithPath: path)
+        guard FileManager.default.fileExists(atPath: path) else {
+            throw StateServiceResetError.missingStateFile(path)
+        }
+        guard
+            let data = try? Data(contentsOf: url),
+            let state = try? JSONDecoder().decode(StateFile.self, from: data)
+        else {
+            throw StateServiceResetError.unreadableStateFile(path)
+        }
+
+        let updated = state.removingService(
+            serviceID,
+            updatedAt: ISO8601DateFormatter().string(from: Date())
+        )
+        guard let encoded = try? JSONEncoder().encode(updated),
+              ((try? encoded.write(to: url, options: .atomic)) != nil) else {
+            throw StateServiceResetError.unwritableStateFile(path)
+        }
+    }
+
+    private static func stateFilePath() -> String {
+        let rawPath = UserDefaults.standard.string(forKey: "stateFilePath")
+            ?? "~/.token-hud/state.json"
+        return (rawPath as NSString).expandingTildeInPath
+    }
+}

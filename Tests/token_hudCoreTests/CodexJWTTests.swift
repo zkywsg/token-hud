@@ -59,6 +59,77 @@ struct CodexJWTTests {
         #expect(isCodexTokenExpired(token: token) == true)
     }
 
+    @Test func codexAuthClaimReadsCurrentOpenAIAuthNamespace() {
+        let payload: [String: Any] = [
+            "email": "user@example.com",
+            "https://api.openai.com/auth": [
+                "chatgpt_plan_type": "plus"
+            ],
+        ]
+
+        let claim = codexAuthClaim(from: payload)
+
+        #expect(claim.email == "user@example.com")
+        #expect(claim.plan == "plus")
+    }
+
+    @Test func codexAuthClaimFallsBackToLegacyAuthNamespace() {
+        let payload: [String: Any] = [
+            "email": "user@example.com",
+            "auth": [
+                "chatgpt_plan_type": "team"
+            ],
+        ]
+
+        #expect(codexAuthClaim(from: payload).plan == "team")
+    }
+
+    @Test func codexWhamUsageParserBuildsPlanAndRateLimitQuotas() throws {
+        let json = """
+        {
+          "email": "user@example.com",
+          "plan_type": "plus",
+          "rate_limit": {
+            "allowed": true,
+            "limit_reached": false,
+            "primary_window": {
+              "used_percent": 25,
+              "limit_window_seconds": 18000,
+              "reset_after_seconds": 15084,
+              "reset_at": 1780785631
+            },
+            "secondary_window": {
+              "used_percent": 40,
+              "limit_window_seconds": 604800,
+              "reset_after_seconds": 369726,
+              "reset_at": 1781140273
+            }
+          },
+          "credits": {
+            "has_credits": true,
+            "balance": "12.5"
+          }
+        }
+        """
+
+        let service = try #require(CodexWhamUsageParser.service(from: Data(json.utf8)))
+
+        #expect(service.label == "Codex Plus")
+        #expect(service.error == nil)
+        #expect(service.quotas.count == 3)
+
+        let primary = try #require(service.quotas.first { $0.type == .time && $0.total == 18_000 })
+        #expect(primary.used == 4_500)
+        #expect(primary.unit == "seconds")
+        #expect(primary.resetsAt != nil)
+
+        let secondary = try #require(service.quotas.first { $0.type == .time && $0.total == 604_800 })
+        #expect(secondary.used == 241_920)
+
+        let credits = try #require(service.quotas.first { $0.unit == "credits" })
+        #expect(credits.used == 12.5)
+    }
+
     // MARK: buildCodexService
 
     @Test func buildServiceHasMoneyQuota() {

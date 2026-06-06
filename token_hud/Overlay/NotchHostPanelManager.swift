@@ -480,28 +480,35 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         guard let geo = hostState.geometry else { return false }
         let mouseLocation = NSEvent.mouseLocation
         let hoverRegions = NotchGeometryCalculator.notchHoverRegions(screenFrame: screen.frame, geometry: geo)
-        if hoverRegions.contains(where: { $0.contains(mouseLocation) }) {
-            return true
-        }
+        let isInsideCollapsedHoverRegion = hoverRegions.contains { $0.contains(mouseLocation) }
+        let isInsideExpandedSurface = isMouse(mouseLocation, inExpandedSurfaceFor: geo)
 
+        return NotchHoverRegionPolicy.isMouseInsideNotchRegion(
+            mode: hostState.mode,
+            isInsideCollapsedHoverRegion: isInsideCollapsedHoverRegion,
+            isInsideExpandedSurface: isInsideExpandedSurface
+        )
+    }
+
+    private func isMouse(_ mouseLocation: CGPoint, inExpandedSurfaceFor geo: NotchGeometry) -> Bool {
         guard hostState.isExpanded,
               let overlay = overlayWindow
         else { return false }
-
         let layout = NotchGeometryCalculator.hostedSurfaceLayout(
             screenFrame: hostState.screenFrame,
             geometry: geo,
             expansionProgress: hostState.expansionProgress
         )
-        guard layout.body.height > 1 else { return false }
-        let bodyRegion = CGRect(
-            x: overlay.frame.minX + layout.body.minX,
-            y: overlay.frame.minY + layout.body.minY,
-            width: layout.body.width,
-            height: layout.body.height
+        let surfaceRegion = layout.topCap.union(layout.body)
+        guard !surfaceRegion.isEmpty else { return false }
+        let screenRegion = CGRect(
+            x: overlay.frame.minX + surfaceRegion.minX,
+            y: overlay.frame.minY + surfaceRegion.minY,
+            width: surfaceRegion.width,
+            height: surfaceRegion.height
         ).insetBy(dx: -NotchGeometryCalculator.collapsedHoverPadding, dy: -NotchGeometryCalculator.collapsedHoverPadding)
 
-        return bodyRegion.contains(mouseLocation)
+        return screenRegion.contains(mouseLocation)
     }
 
     // MARK: - State Machine

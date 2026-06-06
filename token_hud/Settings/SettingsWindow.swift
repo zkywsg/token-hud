@@ -5,19 +5,53 @@ import ServiceManagement
 struct SettingsWindow: View {
     @Environment(WidgetStore.self) private var widgetStore
     @Environment(AppFilterStore.self) private var appFilterStore
+    @State private var selectedSection: SettingsSection? = .widgets
 
     var body: some View {
-        TabView {
-            WidgetListEditor()
-                .tabItem { Label("小组件", systemImage: "rectangle.3.group") }
-            PlatformListView()
-                .tabItem { Label("平台", systemImage: "cpu") }
-            GeneralSettingsView()
-                .environment(appFilterStore)
-                .tabItem { Label("通用", systemImage: "gear") }
+        NavigationSplitView {
+            List(SettingsSection.allCases, selection: $selectedSection) { section in
+                Label(section.title, systemImage: section.systemImage)
+                    .tag(section)
+            }
+            .navigationTitle("Settings")
+            .frame(minWidth: 170)
+        } detail: {
+            switch selectedSection ?? .widgets {
+            case .widgets:
+                WidgetListEditor()
+            case .platforms:
+                PlatformListView()
+            case .general:
+                GeneralSettingsView()
+                    .environment(appFilterStore)
+                    .padding()
+            }
         }
-        .frame(width: 560, height: 520)
-        .padding()
+        .frame(width: 900, height: 620)
+    }
+}
+
+private enum SettingsSection: String, CaseIterable, Identifiable {
+    case widgets
+    case platforms
+    case general
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .widgets:   return "小组件"
+        case .platforms: return "平台"
+        case .general:   return "通用"
+        }
+    }
+
+    var systemImage: String {
+        switch self {
+        case .widgets:   return "rectangle.3.group"
+        case .platforms: return "cpu"
+        case .general:   return "gear"
+        }
     }
 }
 

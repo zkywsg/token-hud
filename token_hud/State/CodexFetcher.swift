@@ -2,11 +2,9 @@
 import Foundation
 import Observation
 
-/// Reads Codex usage data from JSONL session log files at
-/// ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl and writes it into
-/// ~/.token-hud/state.json under the "codex" key.
-///
-/// No network requests are made — all data comes from Codex's own session logs.
+/// Reads Codex usage data from ChatGPT/Codex usage endpoints, then falls back
+/// to JSONL session log files at ~/.codex/sessions/YYYY/MM/DD/rollout-*.jsonl.
+/// Results are written into ~/.token-hud/state.json under the "codex" key.
 /// Lifecycle: init → starts timer + fires immediately. Call stop() before discarding.
 @Observable
 @MainActor
@@ -28,7 +26,7 @@ final class CodexFetcher {
             Task { @MainActor [weak self] in self?.rescheduleIfNeeded() }
         }
         rescheduleIfNeeded()
-        initialFetchTask = Task { await fetch() }
+        initialFetchTask = Task { await fetch(allowUserInteraction: false) }
     }
 
     func stop() {
@@ -58,36 +56,57 @@ final class CodexFetcher {
             withTimeInterval: TimeInterval(newInterval),
             repeats: true
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in await self?.fetch() }
+            Task { @MainActor [weak self] in await self?.fetch(allowUserInteraction: false) }
         }
     }
 
     // MARK: - Fetch
 
-    func fetch() async {
+    func fetch(allowUserInteraction: Bool = true) async {
         isFetching = true
         defer { isFetching = false }
 
         let identity = readCodexIdentity()
+        let whamResult = await fetchCodexWhamUsage(fallbackEmail: identity.email)
 
         let result = await Task.detached(priority: .utility) {
             CodexFetcher.queryMonthlyUsage()
         }.value
 
+        let localService: Service?
+        let localError: ProviderQueryError?
         switch result {
         case .failure(.noSessionsDirectory), .failure(.noSessionFiles):
-            write(buildCodexErrorService(error: "No sessions yet"))
+            localService = nil
+            localError = .noLocalSessions
         case .failure(.parseError):
-            write(buildCodexErrorService(error: "parseError"))
+            localService = nil
+            localError = .parseError
         case .success(let usage):
-            write(buildCodexLocalService(
+            localService = buildCodexLocalService(
                 tokensUsed: usage.monthlyTokens,
                 primary: usage.primary,
                 secondary: usage.secondary,
                 email: identity.email,
                 plan: identity.plan
-            ))
+            )
+            localError = nil
         }
+
+        let baseService: Service
+        if let whamResult {
+            baseService = localService.map { whamResult.mergingCodexLocalUsage($0) } ?? whamResult
+        } else if let localService {
+            baseService = localService
+        } else {
+            baseService = buildCodexErrorService(error: (localError ?? .parseError).rawValue)
+        }
+
+        let enriched = await fetchCodexAdminExtras(
+            into: baseService,
+            allowUserInteraction: allowUserInteraction
+        )
+        write(enriched)
     }
 
     // MARK: - Local data sources
@@ -95,6 +114,11 @@ final class CodexFetcher {
     private struct CodexIdentity {
         let email: String?
         let plan: String?
+    }
+
+    private struct CodexAuthTokens {
+        let accessToken: String
+        let accountID: String?
     }
 
     /// Read the authenticated user's identity from ~/.codex/auth.json (synchronous, tiny file).
@@ -117,11 +141,61 @@ final class CodexFetcher {
             let data2   = Data(base64Encoded: b64),
             let payload = try? JSONSerialization.jsonObject(with: data2) as? [String: Any]
         else { return CodexIdentity(email: nil, plan: nil) }
-        let auth = payload["auth"] as? [String: Any]
+        let claim = codexAuthClaim(from: payload)
         return CodexIdentity(
-            email: payload["email"] as? String,
-            plan: auth?["chatgpt_plan_type"] as? String
+            email: claim.email,
+            plan: claim.plan
         )
+    }
+
+    private func readCodexAuthTokens() -> CodexAuthTokens? {
+        let path = (NSHomeDirectory() as NSString).appendingPathComponent(".codex/auth.json")
+        guard
+            let data = FileManager.default.contents(atPath: path),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let tokens = json["tokens"] as? [String: Any],
+            let accessToken = tokens["access_token"] as? String,
+            !accessToken.isEmpty
+        else { return nil }
+        return CodexAuthTokens(
+            accessToken: accessToken,
+            accountID: tokens["account_id"] as? String
+        )
+    }
+
+    private func fetchCodexWhamUsage(fallbackEmail: String?) async -> Service? {
+        guard let tokens = readCodexAuthTokens(),
+              let url = URL(string: "https://chatgpt.com/backend-api/wham/usage")
+        else { return nil }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(tokens.accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue("codex-cli", forHTTPHeaderField: "User-Agent")
+        if let accountID = tokens.accountID, !accountID.isEmpty {
+            request.setValue(accountID, forHTTPHeaderField: "ChatGPT-Account-Id")
+        }
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else { return nil }
+            if httpResponse.statusCode == 401 {
+                return buildCodexErrorService(error: ProviderQueryError.tokenExpired.rawValue)
+            }
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                print("[Codex] wham usage request failed (\(httpResponse.statusCode)); falling back to local sessions")
+                return nil
+            }
+            guard let service = CodexWhamUsageParser.service(from: data, fallbackEmail: fallbackEmail) else {
+                print("[Codex] wham usage response could not be parsed; falling back to local sessions")
+                return nil
+            }
+            return service
+        } catch {
+            print("[Codex] wham usage network error: \(error.localizedDescription); falling back to local sessions")
+            return nil
+        }
     }
 
     // MARK: - JSONL types
@@ -330,6 +404,86 @@ final class CodexFetcher {
         )
     }
 
+    // MARK: - OpenAI Admin extras
+
+    nonisolated private func fetchCodexAdminExtras(
+        into service: Service,
+        allowUserInteraction: Bool
+    ) async -> Service {
+        guard allowUserInteraction,
+              KeychainHelper.hasCodexAdminKey(),
+              let apiKey = KeychainHelper.loadCodexAdminKey(allowUserInteraction: allowUserInteraction)
+        else { return service }
+
+        let calendar = Calendar(identifier: .gregorian)
+        let now = Date()
+        let start = calendar.date(byAdding: .day, value: -30, to: now) ?? now
+        let startTime = Int(start.timeIntervalSince1970)
+
+        guard let url = URL(string: "https://api.openai.com/v1/organization/costs?start_time=\(startTime)&bucket_width=1d") else {
+            return service
+        }
+
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 15
+        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+
+        do {
+            let (data, response) = try await URLSession.shared.data(for: request)
+            guard let httpResponse = response as? HTTPURLResponse else { return service }
+
+            if httpResponse.statusCode == 401 || httpResponse.statusCode == 403 {
+                print("[Codex Admin Extras] Usage/Costs permission denied (\(httpResponse.statusCode))")
+                return service
+            }
+            guard (200..<300).contains(httpResponse.statusCode) else {
+                print("[Codex Admin Extras] Costs request failed (\(httpResponse.statusCode))")
+                return service
+            }
+
+            guard let cost = Self.parseOpenAICostAmount(from: data), cost > 0 else {
+                print("[Codex Admin Extras] Costs response contained no positive amount")
+                return service
+            }
+            return service.appendingCodexCost(cost)
+        } catch {
+            print("[Codex Admin Extras] Network error: \(error.localizedDescription)")
+            return service
+        }
+    }
+
+    nonisolated private static func parseOpenAICostAmount(from data: Data) -> Double? {
+        guard let root = try? JSONSerialization.jsonObject(with: data) else { return nil }
+        let amounts = collectAmountValues(in: root)
+        guard !amounts.isEmpty else { return nil }
+        return amounts.reduce(0, +)
+    }
+
+    nonisolated private static func collectAmountValues(in value: Any) -> [Double] {
+        if let dict = value as? [String: Any] {
+            var values: [Double] = []
+            if let amount = dict["amount"] as? [String: Any] {
+                if let numeric = amount["value"] as? Double {
+                    values.append(numeric)
+                } else if let intValue = amount["value"] as? Int {
+                    values.append(Double(intValue))
+                } else if let stringValue = amount["value"] as? String,
+                          let numeric = Double(stringValue) {
+                    values.append(numeric)
+                }
+            }
+            for child in dict.values {
+                values.append(contentsOf: collectAmountValues(in: child))
+            }
+            return values
+        }
+        if let array = value as? [Any] {
+            return array.flatMap { collectAmountValues(in: $0) }
+        }
+        return []
+    }
+
     // MARK: - Write helpers
 
     private func write(_ service: Service) {
@@ -377,7 +531,7 @@ final class APIPlatformFetcher {
             Task { @MainActor [weak self] in self?.rescheduleIfNeeded() }
         }
         rescheduleIfNeeded()
-        initialFetchTask = Task { await fetchAll() }
+        initialFetchTask = Task { await fetchAll(allowUserInteraction: false) }
     }
 
     func stop() {
@@ -407,20 +561,20 @@ final class APIPlatformFetcher {
             withTimeInterval: TimeInterval(newInterval),
             repeats: true
         ) { [weak self] _ in
-            Task { @MainActor [weak self] in await self?.fetchAll() }
+            Task { @MainActor [weak self] in await self?.fetchAll(allowUserInteraction: false) }
         }
     }
 
     // MARK: - Fetch
 
-    func fetchAll() async {
+    func fetchAll(allowUserInteraction: Bool = true) async {
         isFetching = true
         defer { isFetching = false }
 
         var services: [String: Service] = [:]
         for platform in ["deepseek", "openai", "anthropic", "gemini", "minimax", "mimo"] {
             guard hasCredential(for: platform) else { continue }
-            if let service = await fetch(platform: platform) {
+            if let service = await fetch(platform: platform, allowUserInteraction: allowUserInteraction) {
                 services[platform] = service
             }
         }
@@ -448,7 +602,7 @@ final class APIPlatformFetcher {
             return
         }
         print("[APIPlatformFetcher] fetchSingle(\(platform)): credential found, fetching...")
-        guard let service = await fetch(platform: platform) else {
+        guard let service = await fetch(platform: platform, allowUserInteraction: true) else {
             print("[APIPlatformFetcher] fetchSingle(\(platform)): fetch returned nil, skipping")
             return
         }
@@ -466,27 +620,30 @@ final class APIPlatformFetcher {
     }
 
     private nonisolated func hasCredential(for platform: String) -> Bool {
-        if KeychainHelper.loadAPIKey(for: platform) != nil { return true }
-        if platform == "mimo", KeychainHelper.loadMiMoConsoleCookie() != nil { return true }
+        if KeychainHelper.hasAPIKey(for: platform) { return true }
+        if platform == "mimo", KeychainHelper.hasMiMoConsoleCookie() { return true }
         return false
     }
 
-    nonisolated func fetch(platform: String) async -> Service? {
+    nonisolated func fetch(platform: String, allowUserInteraction: Bool = true) async -> Service? {
         switch platform {
-        case "deepseek": return await fetchDeepSeek()
+        case "deepseek": return await fetchDeepSeek(allowUserInteraction: allowUserInteraction)
         case "openai":   return await fetchOpenAI()
         case "anthropic":return await fetchAnthropic()
         case "gemini":   return await fetchGemini()
-        case "minimax":  return await fetchMiniMax()
-        case "mimo":     return await fetchMiMo()
+        case "minimax":  return await fetchMiniMax(allowUserInteraction: allowUserInteraction)
+        case "mimo":     return await fetchMiMo(allowUserInteraction: allowUserInteraction)
         default:         return nil
         }
     }
 
     // MARK: - DeepSeek
 
-    private nonisolated func fetchDeepSeek() async -> Service? {
-        guard let apiKey = KeychainHelper.loadAPIKey(for: "deepseek") else { return nil }
+    private nonisolated func fetchDeepSeek(allowUserInteraction: Bool) async -> Service? {
+        guard let apiKey = KeychainHelper.loadAPIKey(
+            for: "deepseek",
+            allowUserInteraction: allowUserInteraction
+        ) else { return nil }
         var request = URLRequest(url: URL(string: "https://api.deepseek.com/user/balance")!)
         request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         request.timeoutInterval = 15
@@ -545,26 +702,37 @@ final class APIPlatformFetcher {
     // MARK: - OpenAI
 
     private nonisolated func fetchOpenAI() async -> Service? {
-        guard KeychainHelper.loadAPIKey(for: "openai") != nil else { return nil }
-        // OpenAI does not expose a public balance endpoint that works
-        // consistently with standard API keys. Skip for now.
-        return nil
+        guard KeychainHelper.hasAPIKey(for: "openai") else { return nil }
+        return Service(
+            label: "OpenAI",
+            quotas: [],
+            currentSession: nil,
+            error: ProviderQueryError.usageUnsupported.rawValue
+        )
     }
 
     // MARK: - Anthropic
 
     private nonisolated func fetchAnthropic() async -> Service? {
-        guard KeychainHelper.loadAPIKey(for: "anthropic") != nil else { return nil }
-        // Anthropic does not expose a public balance API.
-        return nil
+        guard KeychainHelper.hasAPIKey(for: "anthropic") else { return nil }
+        return Service(
+            label: "Anthropic API",
+            quotas: [],
+            currentSession: nil,
+            error: ProviderQueryError.usageUnsupported.rawValue
+        )
     }
 
     // MARK: - Gemini
 
     private nonisolated func fetchGemini() async -> Service? {
-        guard KeychainHelper.loadAPIKey(for: "gemini") != nil else { return nil }
-        // Gemini billing is managed through Google Cloud; no simple balance endpoint.
-        return nil
+        guard KeychainHelper.hasAPIKey(for: "gemini") else { return nil }
+        return Service(
+            label: "Gemini",
+            quotas: [],
+            currentSession: nil,
+            error: ProviderQueryError.usageUnsupported.rawValue
+        )
     }
 
     // MARK: - MiniMax
@@ -574,8 +742,11 @@ final class APIPlatformFetcher {
     /// https://www.minimax.io/v1/token_plan/remains
     /// Standard pay-as-you-go Open Platform keys can still validate via /v1/models,
     /// but MiniMax does not document a public balance endpoint for those keys.
-    private nonisolated func fetchMiniMax() async -> Service? {
-        guard let apiKey = KeychainHelper.loadAPIKey(for: "minimax") else {
+    private nonisolated func fetchMiniMax(allowUserInteraction: Bool) async -> Service? {
+        guard let apiKey = KeychainHelper.loadAPIKey(
+            for: "minimax",
+            allowUserInteraction: allowUserInteraction
+        ) else {
             print("[MiniMax] no API key in Keychain")
             return nil
         }
@@ -618,6 +789,9 @@ final class APIPlatformFetcher {
                 if code == 1013 {
                     // 1013 usually means "not a token plan key" (Open Platform key)
                     return await fetchMiniMaxViaModels(apiKey: apiKey)
+                }
+                if isMiniMaxNoTokenPlanMessage(msg) {
+                    return miniMaxUsageUnsupportedService()
                 }
                 if code != 0 {
                     return Service(label: "MiniMax", quotas: [], currentSession: nil, error: msg)
@@ -668,6 +842,9 @@ final class APIPlatformFetcher {
                 if code == 1004 {
                     return Service(label: "MiniMax", quotas: [], currentSession: nil, error: "Invalid API key")
                 }
+                if isMiniMaxNoTokenPlanMessage(msg) {
+                    return miniMaxUsageUnsupportedService()
+                }
                 if code != 0 {
                     return Service(label: "MiniMax", quotas: [], currentSession: nil, error: msg)
                 }
@@ -678,7 +855,7 @@ final class APIPlatformFetcher {
             }
 
             print("[MiniMax] key is valid, but no parseable Token Plan usage was returned")
-            return Service(label: "MiniMax", quotas: [], currentSession: nil, error: nil)
+            return miniMaxUsageUnsupportedService()
         } catch {
             print("[MiniMax] network error: \(error.localizedDescription)")
             return Service(
@@ -690,23 +867,42 @@ final class APIPlatformFetcher {
         }
     }
 
+    private nonisolated func isMiniMaxNoTokenPlanMessage(_ message: String) -> Bool {
+        let normalized = message.lowercased()
+        return normalized.contains("token plan subscription") ||
+            normalized.contains("no active token plan")
+    }
+
+    private nonisolated func miniMaxUsageUnsupportedService() -> Service {
+        Service(
+            label: "MiniMax",
+            quotas: [],
+            currentSession: nil,
+            error: ProviderQueryError.usageUnsupported.rawValue
+        )
+    }
+
     // MARK: - MiMo
 
     /// Xiaomi MiMo API (api.xiaomimimo.com, OpenAI-compatible).
     /// Calls GET /v1/models to verify the key; no public balance endpoint is known.
-    private nonisolated func fetchMiMo() async -> Service? {
-        if let cookie = KeychainHelper.loadMiMoConsoleCookie() {
+    private nonisolated func fetchMiMo(allowUserInteraction: Bool) async -> Service? {
+        if let cookie = KeychainHelper.loadMiMoConsoleCookie(allowUserInteraction: allowUserInteraction) {
             if let service = await fetchMiMoTokenPlan(cookie: cookie) {
                 return service
             }
         }
 
-        guard let apiKey = KeychainHelper.loadAPIKey(for: "mimo") else {
+        guard let apiKey = KeychainHelper.loadAPIKey(
+            for: "mimo",
+            allowUserInteraction: allowUserInteraction
+        ) else {
             print("[MiMo] no API key or console cookie in Keychain")
             return nil
         }
+        let apiKeyRole = miMoAPIKeyRole(for: apiKey)
         var request = URLRequest(url: URL(string: "https://api.xiaomimimo.com/v1/models")!)
-        request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        request.setValue(apiKey, forHTTPHeaderField: "api-key")
         request.timeoutInterval = 15
         request.httpMethod = "GET"
 
@@ -729,8 +925,22 @@ final class APIPlatformFetcher {
                 return Service(label: "MiMo", quotas: [], currentSession: nil, error: "Request failed (\(httpResponse.statusCode))")
             }
 
-            print("[MiMo] key is valid, no balance endpoint available")
-            return Service(label: "MiMo", quotas: [], currentSession: nil, error: nil)
+            switch apiKeyRole {
+            case .payAsYouGoAPIKey:
+                print("[MiMo] pay-as-you-go key is valid, but Token Plan usage requires tp key or console cookie")
+                return Service(
+                    label: "MiMo",
+                    quotas: [],
+                    currentSession: nil,
+                    error: ProviderQueryError.usageUnsupported.rawValue
+                )
+            case .tokenPlanKey:
+                print("[MiMo] Token Plan key is valid, but no public usage endpoint has been verified yet")
+                return Service(label: "MiMo", quotas: [], currentSession: nil, error: nil)
+            case .unknownAPIKey:
+                print("[MiMo] key is valid, key type is unknown")
+                return Service(label: "MiMo", quotas: [], currentSession: nil, error: nil)
+            }
         } catch {
             print("[MiMo] network error: \(error.localizedDescription)")
             return Service(
@@ -740,6 +950,13 @@ final class APIPlatformFetcher {
                 error: "Network error: \(error.localizedDescription)"
             )
         }
+    }
+
+    private nonisolated func miMoAPIKeyRole(for key: String) -> MiMoAPIKeyRole {
+        let normalized = key.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if normalized.hasPrefix("tp-") { return .tokenPlanKey }
+        if normalized.hasPrefix("sk-") { return .payAsYouGoAPIKey }
+        return .unknownAPIKey
     }
 
     private nonisolated func fetchMiMoTokenPlan(cookie: String) async -> Service? {
@@ -808,5 +1025,37 @@ final class APIPlatformFetcher {
         if let data = try? JSONEncoder().encode(state) {
             try? data.write(to: URL(fileURLWithPath: path), options: .atomic)
         }
+    }
+}
+
+private extension Service {
+    func mergingCodexLocalUsage(_ local: Service) -> Service {
+        guard error == nil else { return self }
+        let localTokenQuotas = local.quotas.filter {
+            $0.type == .tokens && $0.unit.lowercased() == "tokens"
+        }
+        return Service(
+            label: label,
+            quotas: quotas + localTokenQuotas,
+            currentSession: local.currentSession ?? currentSession,
+            error: nil
+        )
+    }
+
+    func appendingCodexCost(_ cost: Double) -> Service {
+        var updatedQuotas = quotas
+        updatedQuotas.append(Quota(
+            type: .costSpent,
+            total: nil,
+            used: cost,
+            unit: "USD",
+            resetsAt: nil
+        ))
+        return Service(
+            label: label,
+            quotas: updatedQuotas,
+            currentSession: currentSession,
+            error: nil
+        )
     }
 }
