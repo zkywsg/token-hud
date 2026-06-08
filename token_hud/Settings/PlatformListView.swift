@@ -9,6 +9,7 @@ struct PlatformListView: View {
     @State private var revision = 0
     @State private var resetMessage: String?
     @State private var credentialSnapshot = ProviderCredentialSnapshot.empty
+    @State private var authorizationNeededPlatformIDs = Set<String>()
 
     private var selectedProvider: ProviderCapability {
         ProviderCapability.catalog[selectedPlatformID] ?? ProviderCapability.all[0]
@@ -24,15 +25,20 @@ struct PlatformListView: View {
                 service: stateWatcher.currentState?.services[selectedProvider.id],
                 revision: revision,
                 credentialSnapshot: credentialSnapshot,
+                needsAuthorization: authorizationNeededPlatformIDs.contains(selectedProvider.id),
                 onCredentialChanged: {
                     reloadCredentialSnapshot()
-                    refresh(provider: selectedProvider)
+                    authorizationNeededPlatformIDs.remove(selectedProvider.id)
+                    resetMessage = "已保存认证；刷新会先静默查询。"
                 },
                 onClearData: {
                     clearData(for: selectedProvider.id)
                 },
                 onRefresh: {
-                    refresh(provider: selectedProvider)
+                    refresh(provider: selectedProvider, allowUserInteraction: false)
+                },
+                onAuthorizeRefresh: {
+                    refresh(provider: selectedProvider, allowUserInteraction: true)
                 }
             )
             .environment(stateWatcher)
@@ -101,6 +107,7 @@ struct PlatformListView: View {
                                 for: provider,
                                 snapshot: credentialSnapshot
                             ),
+                            needsAuthorization: authorizationNeededPlatformIDs.contains(provider.id),
                             isSelected: provider.id == selectedPlatformID
                         ) {
                             selectedPlatformID = provider.id
@@ -114,17 +121,44 @@ struct PlatformListView: View {
         .background(Color(nsColor: .controlBackgroundColor))
     }
 
-    private func refresh(provider: ProviderCapability) {
+    private func refresh(provider: ProviderCapability, allowUserInteraction: Bool) {
         Task {
             switch provider.credentialKind {
             case .codexLocalAuth:
-                await codexFetcher.fetch()
+                await codexFetcher.fetch(allowUserInteraction: allowUserInteraction)
+                authorizationNeededPlatformIDs.remove(provider.id)
             case .apiKey, .apiKeyAndConsoleCookie:
-                await apiPlatformFetcher.fetchSingle(platform: provider.id)
+                let result = await apiPlatformFetcher.fetchSingle(
+                    platform: provider.id,
+                    allowUserInteraction: allowUserInteraction
+                )
+                handleRefreshResult(result, provider: provider)
             case .sessionKey:
                 break
             }
             stateWatcher.readNow()
+        }
+    }
+
+    private func handleRefreshResult(
+        _ result: APIPlatformFetcher.SingleFetchResult,
+        provider: ProviderCapability
+    ) {
+        switch result {
+        case .updated:
+            authorizationNeededPlatformIDs.remove(provider.id)
+            resetMessage = "已刷新 \(provider.displayName)"
+        case .needsAuthorization:
+            authorizationNeededPlatformIDs.insert(provider.id)
+            resetMessage = "\(provider.displayName) 需要授权刷新"
+        case .noCredential:
+            authorizationNeededPlatformIDs.remove(provider.id)
+            resetMessage = "\(provider.displayName) 未配置认证"
+        case .noData:
+            resetMessage = "\(provider.displayName) 暂无可更新数据"
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            resetMessage = nil
         }
     }
 
@@ -200,6 +234,7 @@ private struct PlatformSidebarRow: View {
     let provider: ProviderCapability
     let service: Service?
     let credentialStatus: ProviderCredentialStatus
+    let needsAuthorization: Bool
     let isSelected: Bool
     let onSelect: () -> Void
 
@@ -209,7 +244,7 @@ private struct PlatformSidebarRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 8) {
+            VStack(alignment: .leading, spacing: 6) {
                 HStack(spacing: 8) {
                     Image(systemName: iconName)
                         .font(.system(size: 13, weight: .semibold))
@@ -221,12 +256,13 @@ private struct PlatformSidebarRow: View {
                     Spacer()
                     StatusDot(color: credentialStatus.color)
                 }
-                HStack(spacing: 6) {
-                    StatusPill(title: credentialStatus.title, color: credentialStatus.color)
-                    StatusPill(title: dataStatus.title(for: provider.id), color: dataStatus.color)
-                }
+                StatusPill(
+                    title: needsAuthorization ? "需授权" : dataStatus.title(for: provider.id),
+                    color: needsAuthorization ? .orange : dataStatus.color
+                )
             }
-            .padding(10)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
             .clipShape(RoundedRectangle(cornerRadius: 8))
@@ -253,9 +289,11 @@ private struct PlatformDetailView: View {
     let service: Service?
     let revision: Int
     let credentialSnapshot: ProviderCredentialSnapshot
+    let needsAuthorization: Bool
     let onCredentialChanged: () -> Void
     let onClearData: () -> Void
     let onRefresh: () -> Void
+    let onAuthorizeRefresh: () -> Void
 
     @Environment(CodexFetcher.self) private var codexFetcher
     @Environment(APIPlatformFetcher.self) private var apiPlatformFetcher
@@ -272,18 +310,17 @@ private struct PlatformDetailView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 16) {
                 header
-                HStack(alignment: .top, spacing: 14) {
-                    PlatformCredentialPanel(
-                        provider: provider,
-                        revision: revision,
-                        credentialSnapshot: credentialSnapshot,
-                        onChanged: onCredentialChanged
-                    )
+                PlatformCredentialPanel(
+                    provider: provider,
+                    revision: revision,
+                    credentialSnapshot: credentialSnapshot,
+                    onChanged: onCredentialChanged
+                )
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+
+                PlatformCapabilityPanel(provider: provider)
                     .frame(maxWidth: .infinity, alignment: .topLeading)
 
-                    PlatformCapabilityPanel(provider: provider)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                }
                 PlatformMetricsPanel(provider: provider, service: service, dataStatus: dataStatus)
                 PlatformResetPanel(
                     provider: provider,
@@ -304,9 +341,21 @@ private struct PlatformDetailView: View {
                 HStack(spacing: 8) {
                     StatusPill(title: credentialStatus.title, color: credentialStatus.color)
                     StatusPill(title: dataStatus.title(for: provider.id), color: dataStatus.color)
+                    if needsAuthorization {
+                        StatusPill(title: "需要授权刷新", color: .orange)
+                    }
                 }
             }
             Spacer()
+            if needsAuthorization {
+                Button {
+                    onAuthorizeRefresh()
+                } label: {
+                    Label("授权刷新", systemImage: "key")
+                }
+                .disabled(isRefreshing || !provider.canRefresh)
+                .help("允许 macOS 弹出 Keychain 授权窗口，并只刷新当前平台")
+            }
             Button {
                 onRefresh()
             } label: {
@@ -698,17 +747,30 @@ private struct PlatformCredentialPanel: View {
 
 private struct PlatformCapabilityPanel: View {
     let provider: ProviderCapability
+    @State private var isExpanded = false
 
     var body: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                sectionHeader("查询能力", systemImage: "chart.bar.doc.horizontal")
-                InfoRow(label: "凭据类型", value: provider.credentialKind.displayTitle)
-                InfoRow(label: "用量路径", value: provider.usageCapability.displayTitle)
-                Text(provider.usageCapability.detail)
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 12) {
+                    sectionHeader("查询能力", systemImage: "chart.bar.doc.horizontal")
+                    Spacer()
+                    Text(provider.usageCapability.displayTitle)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+
+                InfoRow(label: "凭据", value: provider.credentialKind.displayTitle)
+
+                DisclosureGroup("查看说明", isExpanded: $isExpanded) {
+                    Text(provider.usageCapability.detail)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.top, 4)
+                }
+                .font(.caption)
             }
             .padding(4)
         }
@@ -754,68 +816,14 @@ private struct PlatformResetPanel: View {
 
     var body: some View {
         GroupBox {
-            VStack(alignment: .leading, spacing: 12) {
-                sectionHeader("重置", systemImage: "arrow.counterclockwise")
-                HStack(spacing: 10) {
-                    if provider.resetActions.contains(.credential) {
-                        Button(role: .destructive) {
-                            resetCredential()
-                        } label: {
-                            Label("重置认证", systemImage: "key.slash")
-                        }
-                        .disabled(credentialStatus == .notConfigured)
-                    }
-                    if provider.resetActions.contains(.apiKey) {
-                        Button(role: .destructive) {
-                            try? KeychainHelper.deleteAPIKey(for: provider.id)
-                            if provider.id == "mimo" {
-                                MiMoAPIKeyRoleStore.clear()
-                            }
-                            onCredentialChanged()
-                        } label: {
-                            Label("重置 API Key", systemImage: "key.slash")
-                        }
-                    }
-                    if provider.resetActions.contains(.consoleCookie) {
-                        Button(role: .destructive) {
-                            try? KeychainHelper.deleteMiMoConsoleCookie()
-                            onCredentialChanged()
-                        } label: {
-                            Label("重置 Cookie", systemImage: "text.badge.xmark")
-                        }
-                    }
-                    if provider.resetActions.contains(.localAuth) {
-                        Button(role: .destructive) {
-                            isConfirmingLocalAuthRemoval = true
-                        } label: {
-                            Label("移除本地认证", systemImage: "person.crop.circle.badge.xmark")
-                        }
-                    }
-                    if provider.resetActions.contains(.adminAPIKey) {
-                        Button(role: .destructive) {
-                            try? KeychainHelper.deleteCodexAdminKey()
-                            onCredentialChanged()
-                        } label: {
-                            Label("重置 Admin Key", systemImage: "key.slash")
-                        }
-                    }
-                    if provider.resetActions.contains(.serviceData) {
-                        Button(role: .destructive) {
-                            onClearData()
-                        } label: {
-                            Label("清空数据", systemImage: "trash")
-                        }
-                    }
+            DisclosureGroup {
+                VStack(alignment: .leading, spacing: 12) {
+                    resetButtons
+                    resetHelpText
                 }
-                if provider.credentialKind == .codexLocalAuth {
-                    Text("Codex 认证由 Codex 自身管理；这里不会删除 `~/.codex/auth.json`。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                } else {
-                    Text("重置认证会删除 Keychain 凭据；清空数据只删除 state.json 中当前平台的数据。")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
+                .padding(.top, 8)
+            } label: {
+                sectionHeader("重置与清理", systemImage: "arrow.counterclockwise")
             }
             .padding(4)
         }
@@ -831,6 +839,82 @@ private struct PlatformResetPanel: View {
         } message: {
             Text("这会让 Codex CLI 退出登录；sessions 不会被删除。之后需要重新运行 `codex login`。")
         }
+    }
+
+    private var resetButtons: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 10) {
+                resetButtonContent
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                resetButtonContent
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var resetButtonContent: some View {
+        if provider.resetActions.contains(.credential) {
+            Button(role: .destructive) {
+                resetCredential()
+            } label: {
+                Label("重置认证", systemImage: "key.slash")
+            }
+            .disabled(credentialStatus == .notConfigured)
+        }
+        if provider.resetActions.contains(.apiKey) {
+            Button(role: .destructive) {
+                try? KeychainHelper.deleteAPIKey(for: provider.id)
+                if provider.id == "mimo" {
+                    MiMoAPIKeyRoleStore.clear()
+                }
+                onCredentialChanged()
+            } label: {
+                Label("重置 API Key", systemImage: "key.slash")
+            }
+        }
+        if provider.resetActions.contains(.consoleCookie) {
+            Button(role: .destructive) {
+                try? KeychainHelper.deleteMiMoConsoleCookie()
+                onCredentialChanged()
+            } label: {
+                Label("重置 Cookie", systemImage: "text.badge.xmark")
+            }
+        }
+        if provider.resetActions.contains(.localAuth) {
+            Button(role: .destructive) {
+                isConfirmingLocalAuthRemoval = true
+            } label: {
+                Label("移除本地认证", systemImage: "person.crop.circle.badge.xmark")
+            }
+        }
+        if provider.resetActions.contains(.adminAPIKey) {
+            Button(role: .destructive) {
+                try? KeychainHelper.deleteCodexAdminKey()
+                onCredentialChanged()
+            } label: {
+                Label("重置 Admin Key", systemImage: "key.slash")
+            }
+        }
+        if provider.resetActions.contains(.serviceData) {
+            Button(role: .destructive) {
+                onClearData()
+            } label: {
+                Label("清空数据", systemImage: "trash")
+            }
+        }
+    }
+
+    private var resetHelpText: some View {
+        Group {
+            if provider.credentialKind == .codexLocalAuth {
+                Text("Codex 认证由 Codex 自身管理；这里不会删除 `~/.codex/auth.json`。")
+            } else {
+                Text("重置认证会删除 Keychain 凭据；清空数据只删除 state.json 中当前平台的数据。")
+            }
+        }
+        .font(.caption)
+        .foregroundStyle(.secondary)
     }
 
     private func resetCredential() {
@@ -993,6 +1077,8 @@ private struct InfoRow: View {
                 .foregroundStyle(.primary)
                 .lineLimit(1)
                 .truncationMode(.middle)
+                .frame(maxWidth: 260, alignment: .trailing)
+                .minimumScaleFactor(0.82)
         }
     }
 }

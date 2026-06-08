@@ -181,16 +181,12 @@ struct WidgetListEditor: View {
                 state: watcher.effectiveState
             )
 
-            HStack(alignment: .top, spacing: 14) {
-                ActiveWidgetsPanel(
-                    widgets: Bindable(store).widgets,
-                    recentlyDroppedIDs: $recentlyDroppedIDs
-                )
-                AddWidgetsPanel(
-                    onAdd: addWidget,
-                    onCustom: { showCustomSheet = true }
-                )
-            }
+            WidgetManagementPanel(
+                widgets: Bindable(store).widgets,
+                recentlyDroppedIDs: $recentlyDroppedIDs,
+                onAdd: addWidget,
+                onCustom: { showCustomSheet = true }
+            )
         }
         .padding()
         .sheet(isPresented: $showCustomSheet) {
@@ -315,10 +311,6 @@ private struct ConfiguredWidgetRecommendationPanel: View {
     let onAdd: (WidgetConfig) -> Void
     let onPrependMissing: () -> Void
 
-    private let columns = [
-        GridItem(.adaptive(minimum: 210, maximum: 280), spacing: 8)
-    ]
-
     private var existingKeys: Set<String> {
         Set(currentWidgets.map { $0.descriptor.semanticKey })
     }
@@ -328,22 +320,15 @@ private struct ConfiguredWidgetRecommendationPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .center) {
-                VStack(alignment: .leading, spacing: 3) {
-                    Label("可添加的小组件推荐", systemImage: "plus.square.on.square")
-                        .font(.caption.weight(.semibold))
-                    Text(configuredCount > 0
-                         ? "来自 \(configuredCount) 个已配置平台，可加入当前小组件。"
-                         : "配置平台后，这里会显示可直接加入的小组件。")
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                }
+                Label(configuredCount > 0 ? "推荐组件" : "可添加组件", systemImage: "plus.square.on.square")
+                    .font(.caption.weight(.semibold))
                 Spacer()
                 Button {
                     onPrependMissing()
                 } label: {
-                    Label("补齐缺失", systemImage: "text.insert")
+                    Label(missingCount > 0 ? "补齐 \(missingCount)" : "已补齐", systemImage: "text.insert")
                 }
                 .font(.caption)
                 .disabled(missingCount == 0)
@@ -361,7 +346,8 @@ private struct ConfiguredWidgetRecommendationPanel: View {
                             .stroke(Color.secondary.opacity(0.12), lineWidth: 0.5)
                     )
             } else {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 8) {
                     ForEach(recommendations, id: \.descriptor.semanticKey) { widget in
                         RecommendationChip(
                             widget: widget,
@@ -369,15 +355,17 @@ private struct ConfiguredWidgetRecommendationPanel: View {
                             onAdd: { onAdd(widget) }
                         )
                     }
+                    }
+                    .padding(1)
                 }
             }
         }
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+        .padding(10)
+        .background(Color.secondary.opacity(0.055))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.12), lineWidth: 0.8)
+                .stroke(Color.secondary.opacity(0.10), lineWidth: 0.8)
         )
     }
 }
@@ -402,26 +390,29 @@ private struct RecommendationChip: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
             }
+            .frame(width: 116, alignment: .leading)
             Spacer(minLength: 0)
 
             if isAdded {
-                Label("已添加", systemImage: "checkmark")
+                Image(systemName: "checkmark")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundStyle(.secondary)
-                    .labelStyle(.titleAndIcon)
+                    .frame(width: 22, height: 22)
             } else {
                 Button {
                     onAdd()
                 } label: {
-                    Label("添加", systemImage: "plus")
+                    Image(systemName: "plus")
                 }
                 .font(.system(size: 10, weight: .semibold))
                 .buttonStyle(.bordered)
                 .controlSize(.small)
+                .help("添加")
             }
         }
         .padding(.horizontal, 10)
-        .padding(.vertical, 8)
+        .padding(.vertical, 7)
+        .frame(width: 205, alignment: .leading)
         .background(isAdded ? Color.secondary.opacity(0.06) : Color.accentColor.opacity(0.07))
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .overlay(
@@ -453,25 +444,35 @@ private struct NotchCollapsedSettingsPanel: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 14) {
                 Label("刘海收起态", systemImage: "rectangle.compress.vertical")
                     .font(.caption.weight(.semibold))
-                Spacer()
+                    .frame(width: 92, alignment: .leading)
                 compactPreview
-            }
-
-            HStack(spacing: 12) {
                 sourcePicker(title: "左侧", selection: $leadingSource)
                 sourcePicker(title: "右侧", selection: $trailingSource)
             }
+
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Label("刘海收起态", systemImage: "rectangle.compress.vertical")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    compactPreview
+                }
+                HStack(spacing: 12) {
+                    sourcePicker(title: "左侧", selection: $leadingSource)
+                    sourcePicker(title: "右侧", selection: $trailingSource)
+                }
+            }
         }
-        .padding(12)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+        .padding(10)
+        .background(Color.secondary.opacity(0.055))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.12), lineWidth: 0.8)
+                .stroke(Color.secondary.opacity(0.10), lineWidth: 0.8)
         )
     }
 
@@ -499,7 +500,7 @@ private struct NotchCollapsedSettingsPanel: View {
     }
 
     private func sourcePicker(title: String, selection: Binding<String>) -> some View {
-        VStack(alignment: .leading, spacing: 5) {
+        HStack(spacing: 6) {
             Text(title)
                 .font(.caption2.weight(.semibold))
                 .foregroundStyle(.secondary)
@@ -599,19 +600,91 @@ private struct WidgetPreviewPanel: View {
 
 // MARK: - Active Widgets
 
+private struct WidgetManagementPanel: View {
+    @Binding var widgets: [WidgetConfig]
+    @Binding var recentlyDroppedIDs: Set<UUID>
+    let onAdd: (WidgetConfig) -> Void
+    let onCustom: () -> Void
+    @State private var selectedMode: Mode = .active
+
+    private enum Mode: String, CaseIterable {
+        case active
+        case add
+
+        var title: String {
+            switch self {
+            case .active: return "已添加"
+            case .add: return "添加"
+            }
+        }
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 12) {
+                Picker("", selection: $selectedMode) {
+                    ForEach(Mode.allCases, id: \.self) { mode in
+                        Text(mode.title).tag(mode)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 180)
+
+                Text(selectedMode == .active ? "拖动调整顺序" : "点击添加，或使用自定义")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+
+                Spacer()
+
+                if selectedMode == .add {
+                    Button(action: onCustom) {
+                        Label("自定义", systemImage: "slider.horizontal.3")
+                    }
+                    .font(.caption)
+                }
+            }
+
+            if selectedMode == .active {
+                ActiveWidgetsPanel(
+                    widgets: $widgets,
+                    recentlyDroppedIDs: $recentlyDroppedIDs,
+                    showsHeader: false
+                )
+            } else {
+                AddWidgetsPanel(
+                    onAdd: onAdd,
+                    onCustom: onCustom,
+                    showsHeader: false
+                )
+            }
+        }
+        .padding(10)
+        .background(Color.secondary.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.10), lineWidth: 0.8)
+        )
+    }
+}
+
 private struct ActiveWidgetsPanel: View {
     @Binding var widgets: [WidgetConfig]
     @Binding var recentlyDroppedIDs: Set<UUID>
+    var showsHeader = true
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("已添加", systemImage: "line.3.horizontal.decrease.circle")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                Text("拖动调整顺序")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
+            if showsHeader {
+                HStack {
+                    Label("已添加", systemImage: "line.3.horizontal.decrease.circle")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Text("拖动调整顺序")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
             }
 
             if widgets.isEmpty {
@@ -641,7 +714,7 @@ private struct ActiveWidgetsPanel: View {
                     }
                 }
                 .listStyle(.bordered)
-                .frame(minHeight: 220)
+                .frame(minHeight: 180)
                 .onDrop(of: [.text], delegate: WidgetListDropDelegate(
                     widgets: $widgets,
                     recentlyDroppedIDs: $recentlyDroppedIDs
@@ -698,6 +771,7 @@ private struct WidgetRow: View {
 private struct AddWidgetsPanel: View {
     let onAdd: (WidgetConfig) -> Void
     let onCustom: () -> Void
+    var showsHeader = true
 
     private let columns = [
         GridItem(.adaptive(minimum: 104, maximum: 132), spacing: 8)
@@ -705,14 +779,16 @@ private struct AddWidgetsPanel: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack {
-                Label("添加组件", systemImage: "plus.circle")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                Button(action: onCustom) {
-                    Label("自定义", systemImage: "slider.horizontal.3")
+            if showsHeader {
+                HStack {
+                    Label("添加组件", systemImage: "plus.circle")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button(action: onCustom) {
+                        Label("自定义", systemImage: "slider.horizontal.3")
+                    }
+                    .font(.caption)
                 }
-                .font(.caption)
             }
 
             ScrollView {
@@ -728,7 +804,7 @@ private struct AddWidgetsPanel: View {
                 }
                 .padding(1)
             }
-            .frame(minHeight: 220)
+            .frame(minHeight: 170)
         }
         .frame(maxWidth: .infinity, alignment: .topLeading)
     }

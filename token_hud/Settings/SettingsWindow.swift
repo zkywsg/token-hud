@@ -5,29 +5,72 @@ import ServiceManagement
 struct SettingsWindow: View {
     @Environment(WidgetStore.self) private var widgetStore
     @Environment(AppFilterStore.self) private var appFilterStore
-    @State private var selectedSection: SettingsSection? = .widgets
+    @State private var selectedSection: SettingsSection = .widgets
+
+    private let sidebarWidth: CGFloat = 220
+    private let chromeTopInset: CGFloat = 18
 
     var body: some View {
-        NavigationSplitView {
-            List(SettingsSection.allCases, selection: $selectedSection) { section in
-                Label(section.title, systemImage: section.systemImage)
-                    .tag(section)
+        HStack(spacing: 0) {
+            sidebar
+                .frame(width: sidebarWidth)
+            Divider()
+            detail
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .frame(width: 900, height: 620)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private var sidebar: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(SettingsSection.allCases) { section in
+                Button {
+                    selectedSection = section
+                } label: {
+                    Label(section.title, systemImage: section.systemImage)
+                        .font(.system(size: 14, weight: .semibold))
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.horizontal, 12)
+                        .padding(.vertical, 9)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(selectedSection == section ? .white : .primary)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(selectedSection == section ? Color.accentColor : Color.clear)
+                )
             }
-            .navigationTitle("Settings")
-            .frame(minWidth: 170)
-        } detail: {
-            switch selectedSection ?? .widgets {
-            case .widgets:
+            Spacer()
+        }
+        .padding(.top, chromeTopInset)
+        .padding(.horizontal, 12)
+        .padding(.bottom, 12)
+        .background(Color(nsColor: .controlBackgroundColor))
+    }
+
+    @ViewBuilder
+    private var detail: some View {
+        switch selectedSection {
+        case .widgets:
+            ScrollView {
                 WidgetListEditor()
-            case .platforms:
-                PlatformListView()
-            case .general:
+                    .padding(.top, 4)
+            }
+            .scrollIndicators(.visible)
+            .contentMargins(.top, chromeTopInset, for: .scrollContent)
+        case .platforms:
+            PlatformListView()
+                .padding(.top, chromeTopInset)
+        case .general:
+            ScrollView {
                 GeneralSettingsView()
                     .environment(appFilterStore)
                     .padding()
             }
+            .contentMargins(.top, chromeTopInset, for: .scrollContent)
         }
-        .frame(width: 900, height: 620)
     }
 }
 

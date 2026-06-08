@@ -30,7 +30,7 @@ actor SessionKeyExtractor {
     }
 
     func loadFromKeychain() -> String? {
-        KeychainHelper.load()
+        KeychainHelper.load(allowUserInteraction: false)
     }
 
     func writeConfigFile(sessionKey: String) throws {

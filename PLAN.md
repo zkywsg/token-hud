@@ -2,6 +2,482 @@
 
 这个文件跟踪当前项目正在进行的实现工作。保持内容小而可执行；可长期保留的决策沉淀到 `docs/`。
 
+## 当前重点：Settings 窗口标题栏安全区错位修复（已实现，待手动体验验证）
+
+### 问题
+
+用户截图反馈 Settings 页面仍存在明显 UI 错位：
+
+- 左侧 sidebar 的背景和首个选中项侵入窗口红黄绿按钮/标题栏区域。
+- 右侧“小组件”标题贴近标题栏下方分割线，视觉上被压住。
+- 推荐组件区域首屏被迫贴近顶部，整体像内容没有避开 macOS titlebar/toolbar safe area。
+
+本轮已阅读：
+
+- `PLAN.md`
+- `docs/work-log/2026-06-06-settings-platform-query.md`
+- `docs/work-log/2026-05-10-widget-settings-preview.md`
+- `docs/work-log/2026-06-07-widget-recommendations-notch-collapsed.md`
+- `Settings/SettingsWindow.swift`
+- `Settings/WidgetListEditor.swift`
+- `App/AppDelegate.swift`
+
+初步排查：
+
+- Settings 外层目前是 `NavigationSplitView`，sidebar 内使用 `List` 和 `.navigationTitle("Settings")`。
+- Settings 窗口由 AppKit 手动创建：`NSWindow(styleMask: [.titled, .closable, .miniaturizable])`，再直接把 `NSHostingView(rootView: SettingsWindow())` 设为 `contentView`。
+- 在当前 macOS 样式下，`NavigationSplitView/List` 的 sidebar 背景会延伸到标题栏/toolbar 区域，导致 sidebar 顶部和红黄绿按钮区域视觉重叠。
+- 内部 `WidgetListEditor.padding()` 只能移动右侧内容，无法解决 sidebar 背景侵入 titlebar 的根因。
+
+### 本轮目标
+
+- 让 Settings 内容明确避开 macOS 标题栏区域：
+  - 左侧导航首项不再贴近红黄绿按钮。
+  - 右侧页面标题不再贴到 toolbar 分割线。
+  - sidebar 背景不再显得覆盖标题栏。
+- 保持当前信息结构：
+  - 小组件 / 平台 / 通用三段导航。
+  - 小组件页推荐、预览、刘海收起态、管理组件功能不丢。
+- 不引入新的复杂视觉系统，本轮只处理外壳错位和必要的顶部间距。
+
+### 实施步骤
+
+1. **替换 Settings 外层导航壳**
+   - 不再依赖 `NavigationSplitView + List` 的系统 sidebar 标题栏融合行为。
+   - 改成自定义 `HStack`：
+     - 左侧固定宽度 sidebar。
+     - 右侧 detail 内容。
+     - 中间 `Divider`。
+   - 自定义 sidebar 使用普通 `Button`/`Label` row，显式控制顶部 padding。
+
+2. **显式预留标题栏安全区**
+   - 在 Settings 根视图统一定义顶部 inset，例如 `settingsChromeTopInset`。
+   - sidebar 和 detail 都从该 inset 之后开始布局。
+   - 保留窗口原生标题 `token_hud Settings`，不在内容区重复大标题压到 titlebar。
+
+3. **右侧内容容器统一**
+   - 为 `WidgetListEditor`、`PlatformListView`、`GeneralSettingsView` 提供一致的 detail 容器。
+   - 避免每个子页面自己猜测顶部安全距离。
+   - 如 `PlatformListView` 已有内部分栏，外层只给顶部/边界，不改平台页内部逻辑。
+
+4. **视觉检查**
+   - 检查截图中的窗口宽度下：
+     - 红黄绿按钮与 sidebar 不重叠。
+     - sidebar 第一项有稳定顶部留白。
+     - 右侧标题和推荐组件不贴标题栏分割线。
+   - 检查三页切换不会出现内容跳高。
+
+5. **验证**
+   - 编译 Settings 相关 SwiftUI。
+   - 跑现有 widget/settings 相关测试，确认数据逻辑未变。
+   - app target 构建通过。
+
+### 验证
+
+- `swift test --filter WidgetRecommendation`
+- `swift test --filter ProviderCapability`
+- `swift test`
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+- 手动验证：
+  - 打开 Settings，小组件页不再侵入标题栏。
+  - 切换“平台 / 通用”顶部间距一致。
+  - 缩小到截图类似宽度时，sidebar 和 detail 不重叠、不裁切。
+
+### 风险
+
+- 自定义 sidebar 会失去少量系统 `NavigationSplitView` 默认行为，例如系统自动 sidebar toggle；但当前窗口是固定设置页，这个取舍可接受。
+- 顶部 inset 如果写死过大，会浪费垂直空间；需要控制在只避开 titlebar 的范围。
+- `PlatformListView` 内部已有 sidebar/detail 分栏，外层容器不能再额外压缩太多宽度。
+
+### 本轮实现结果（2026-06-08）
+
+- `SettingsWindow` 外层从 `NavigationSplitView + List` 改为自定义 `HStack` 壳：
+  - 左侧固定宽度 sidebar。
+  - 中间 `Divider`。
+  - 右侧 detail 内容区。
+- 自定义 sidebar 使用普通 `Button + Label` row，不再依赖系统 sidebar 的标题栏融合样式。
+- sidebar 和 detail 都显式使用 `chromeTopInset` 预留顶部安全区，避免内容贴近窗口标题栏/红黄绿按钮区域。
+- 小组件页和通用页放入 `ScrollView` detail 容器；平台页保留现有内部双栏，只在外层增加顶部 inset。
+- 保留现有三个入口：
+  - 小组件
+  - 平台
+  - 通用
+
+### 验证结果
+
+- `swift test --filter WidgetRecommendation`：通过，4 个测试通过。
+- `swift test --filter ProviderCapability`：通过，10 个测试通过。
+- `swift test`：通过，146 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- 打开 Settings，小组件页 sidebar 不再侵入红黄绿按钮/标题栏区域。
+- 右侧“小组件”标题和说明不再贴近顶部分割线。
+- 切换“平台 / 通用”，顶部间距应保持一致。
+- 缩到截图类似宽度时，sidebar 与 detail 不应重叠或裁切。
+
+---
+
+## 当前重点：启动浮窗旧样式/重叠形状排查（已实现，待手动体验验证）
+
+### 问题
+
+用户反馈：App 一打开时，刘海/浮窗区域仍会出现一个重叠形状，且视觉像旧版浮窗样式，整体很丑。
+
+本轮已阅读：
+
+- `docs/work-log/2026-05-31-notch-collapsed-status.md`
+- `docs/work-log/2026-06-04-notch-fusion-rebuild.md`
+- `docs/work-log/2026-06-04-notch-policy-cleanup.md`
+- `docs/work-log/2026-06-04-notch-compact-pills.md`
+- `Overlay/NotchHostPanelManager.swift`
+- `Overlay/NotchHostedSurfaceView.swift`
+- `Overlay/NotchHostRootView.swift`
+- `Overlay/FloatingPanelView.swift`
+- `Sources/token_hudCore/NotchGeometryCalculator.swift`
+
+初步排查：
+
+- 旧的 `NotchFusionView` / `NotchCollapsedView` / `NotchExpandedView` / `NotchEarView` 没有继续被引用，问题不像是旧文件直接回流。
+- 当前 `detachedWindow` 和 `overlayWindow` 都使用同一个 `NotchHostRootView`，再由全局 `hostState.mode` 决定渲染 `FloatingPanelView` 还是 `NotchHostedSurfaceView`。
+- 如果 UserDefaults 中保存的是 `detached`，但保存的 detached frame 实际贴近刘海/顶部区域，启动恢复会直接显示旧 `FloatingPanelView` 样式；现有清理逻辑只判断 `frames.snapZone.contains(candidateTop)`，可能漏掉贴近顶部但 top-center 没落入 snap zone 的坏 frame。
+- 如果 UserDefaults 中保存的是 `hosted`，启动会恢复为 collapsed hosted surface；需要确认首帧是否只绘制 `topCap`，没有把 body 或旧浮窗背景露出来。
+
+### 本轮目标
+
+- 定位启动时“旧样式/重叠形状”的具体来源：
+  - 是 detached window 被错误恢复到顶部。
+  - 还是 overlay hosted surface 首帧绘制不正确。
+  - 或者两个 NSPanel 同时可见。
+- 修复启动恢复策略：
+  - 不允许贴近刘海/菜单栏的 detached frame 以 detached 形态恢复。
+  - hosted 启动时只显示新版 collapsed surface，不显示旧浮窗背景/resize grip。
+  - 启动阶段确保只有一个窗口可见。
+- 保留用户真正拖出来的 detached 浮窗位置，不误删正常桌面区域的自由位置。
+
+### 实施步骤
+
+1. **补充启动恢复诊断**
+   - 在 `restoreState()` 增加更明确的日志：
+     - saved mode。
+     - saved detached frame。
+     - 是否判定为 stale/top-near frame。
+     - restore 后 detached/overlay 是否可见。
+   - 复用现有 `[NotchDiagnostics]` 前缀，方便真机控制台过滤。
+
+2. **收紧 stale detached frame 判定**
+   - 新增纯逻辑方法，例如 `NotchGeometryCalculator.isStaleHostedLikeDetachedFrame(...)`。
+   - 判定维度不只看 `topCenter in snapZone`：
+     - frame 顶部贴近屏幕顶部/菜单栏区域。
+     - frame 与 hosted expanded/collapsed 区域有明显交集。
+     - frame 宽高接近 hosted surface 或旧 body 形态。
+   - 命中后不再恢复 detached frame，改走 hosted collapsed 或默认 detached 安全位置。
+
+3. **修正 restore 状态顺序**
+   - 在显示任一窗口前，先明确 `hostState.mode`、`expansionProgress` 和目标 frame。
+   - restore hosted 时先 `detachedWindow.orderOut(nil)`，再显示 overlay。
+   - restore detached 时先 `overlayWindow.orderOut(nil)`，再显示 detached。
+   - 必要时把 detached/overlay root view 拆成带 `WindowRole` 的 root，避免隐藏窗口在状态变化时渲染另一种样式造成首帧残影。
+
+4. **检查 hosted collapsed 首帧绘制**
+   - 确认 `NotchHostedSurfaceView` 在 `expansionProgress == 0` 时：
+     - body height 为 0 且不可见。
+     - 不出现 `FloatingPanelView` 的圆角卡片、阴影、resize grip。
+     - top cap 宽度符合 compact 目标。
+   - 如果首帧动画从旧 progress 进入，强制 restore 前将 `expansionProgress = 0` 且关闭不必要的隐式动画。
+
+5. **测试覆盖**
+   - 增加或更新 `NotchGeometryCalculatorTests`：
+     - 顶部附近 detached frame 会被识别为 stale。
+     - 正常屏幕中部 detached frame 不会被误判。
+     - hosted collapsed layout 在 progress 0 时 body 高度为 0。
+   - 如 restore 逻辑可拆成纯函数，补对应单元测试；否则用构建验证和真机日志辅助。
+
+### 验证
+
+- `swift test --filter NotchGeometryCalculator`
+- `swift test --filter NotchSurfacePolicyTests`
+- `swift test`
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+- 手动验证：
+  - 删除/保留不同 UserDefaults 状态启动，观察是否只出现一个窗口。
+  - 上次吸附在刘海后重启，启动应是新版 collapsed 状态。
+  - 上次拖到桌面中部后重启，启动应恢复正常 detached 浮窗。
+  - 不再出现旧 `FloatingPanelView` 样式叠在刘海顶部。
+
+### 风险
+
+- stale frame 判定过宽会误伤用户确实想放在屏幕顶部附近的 detached 浮窗；需要只针对明显贴近刘海/菜单栏和 hosted surface 的 frame。
+- SkyLight / publicPanel 的窗口层级差异可能导致真机首帧表现与单元测试不同；需要保留诊断日志用于下一轮定位。
+- 如果两个窗口共享 root view 是根因，改动会涉及窗口创建结构，需小心避免破坏拖拽脱离和重新吸附。
+
+### 本轮实现结果（2026-06-08）
+
+- 新增 `NotchGeometryCalculator.shouldDiscardSavedDetachedFrame(...)`：
+  - 继续保留旧的 `topCenter in snapZone` 判定。
+  - 额外识别贴近 hosted expanded surface 的历史 detached frame。
+  - 额外识别贴在菜单栏/刘海 hosted 横向区域的 detached frame。
+- `restoreState()` 启动恢复逻辑改为：
+  - 打印 saved mode、frames、candidate frame、discard 决策和最终窗口可见性。
+  - 如果保存的 detached frame 被判定为 stale/top-near frame，则删除该 saved frame。
+  - stale frame 命中时不再恢复默认旧浮窗，而是恢复 hosted collapsed。
+  - restore hosted 时先 `detachedWindow.orderOut(nil)`，restore detached 时先 `overlayWindow.orderOut(nil)`，降低两个窗口同时可见风险。
+- 新增测试覆盖：
+  - 顶部/刘海附近残留 detached frame 即使 top-center 没落入 snapZone，也会被识别为 stale。
+  - 正常屏幕中部 detached frame 不会被误删。
+- 根因和处理沉淀到 `docs/work-log/2026-06-08-notch-restore-stale-frame.md`。
+
+### 验证结果
+
+- `swift test --filter NotchGeometryCalculator`：通过，47 个测试通过。
+- `swift test --filter NotchSurfacePolicyTests`：通过，16 个测试通过。
+- `swift test`：通过，146 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- 上次把浮窗吸附到刘海后重启：启动应恢复新版 hosted collapsed，而不是旧圆角浮窗卡片。
+- 上次拖到桌面中部后重启：仍应恢复正常 detached 浮窗。
+- 如果历史保存了贴近顶部的坏 frame，首次启动会自动清理并回到 hosted collapsed；控制台可用 `[NotchDiagnostics] restore` 过滤确认。
+
+---
+
+## 当前重点：Keychain 静默刷新与按平台授权刷新（已实现，待手动体验验证）
+
+### 问题
+
+用户反馈：明明 Settings 已经能显示平台数据，仍然经常弹出 macOS Keychain 权限窗口，要求允许 `token_hud` 读取密钥。
+
+排查确认：
+
+- Settings 显示“有数据”很多来自 `~/.token-hud/state.json` 缓存，不代表当前进程已经获得 Keychain secret 读取权限。
+- 后台启动/定时刷新已经走 `allowUserInteraction: false`，理论上不弹系统框。
+- 但当前 Settings 里的手动刷新和保存后刷新仍会调用：
+  - `PlatformListView.refresh(provider:)`
+  - `APIPlatformFetcher.fetchSingle(platform:)`
+  - 内部再用 `allowUserInteraction: true` 读取 API key/cookie。
+- 因此用户点击刷新、保存凭据后自动刷新、或某些 Settings 操作触发刷新时，macOS 会弹 Keychain 授权框。
+
+### 本轮目标
+
+- 默认所有刷新都先静默读取 Keychain，不弹系统权限窗口。
+- 如果某个平台静默读取不到 secret，但 metadata 显示该平台确实配置过凭据，则该平台显示“需要授权刷新”。
+- 用户明确点击“授权刷新”时，才允许 `allowUserInteraction: true`，让 macOS 弹一次授权窗口。
+- 保存 key/cookie 后不要立刻走允许弹窗的 Keychain 读取；优先：
+  - 只刷新 credential snapshot。
+  - 或后续单独增加“用刚保存的值立即查询”的路径，本轮先避免保存后自动弹窗。
+- UI 粒度按平台展示：哪个平台需要授权，就只在该平台详情和 row 中体现，不全局打扰。
+
+### 实施步骤
+
+1. **增加刷新结果语义**
+   - 为 `APIPlatformFetcher.fetchSingle` 增加返回结果，例如：
+     - `updated`
+     - `noCredential`
+     - `needsAuthorization`
+     - `noData`
+   - 静默读取 secret 失败且 `hasCredential(for:) == true` 时返回 `needsAuthorization`。
+   - 保持后台 `fetchAll(allowUserInteraction: false)` 不弹窗。
+
+2. **拆分静默刷新与授权刷新**
+   - 新增 `fetchSingle(platform:allowUserInteraction:)` 或等价重载。
+   - Settings 普通“刷新”按钮调用 `allowUserInteraction: false`。
+   - 新增“授权刷新”按钮调用 `allowUserInteraction: true`。
+   - `CodexFetcher` 也按同样思想处理 Codex extras：
+     - 普通 Codex 本地 usage 不需要 Keychain。
+     - 可选 Admin/API extras 只有授权刷新时才读。
+
+3. **Settings 平台页状态提示**
+   - `PlatformListView` 增加 `authorizationNeededPlatformIDs` state。
+   - 普通刷新返回 `needsAuthorization` 时，把该平台标记为需要授权。
+   - 平台 row 和详情 header 增加小型橙色提示：
+     - `需要授权刷新`
+   - 详情页在该平台需要授权时显示按钮：
+     - `授权刷新`
+   - 成功授权刷新后清除该平台的需要授权状态。
+
+4. **保存凭据后不自动弹窗**
+   - `onCredentialChanged` 不再直接触发允许交互的刷新。
+   - 保存成功后只刷新 snapshot；需要查询时用户点普通刷新，若静默不行再显示授权刷新。
+
+5. **验证**
+   - 编译验证 UI。
+   - 手动验证：
+     - 打开 Settings、切换平台、普通刷新不弹 Keychain 窗口。
+     - 对需要授权的平台，普通刷新后出现“需要授权刷新”按钮。
+     - 点击“授权刷新”才弹 macOS 授权框。
+     - 授权成功后刷新数据，并清除提示。
+
+### 验证
+
+- `swift test --filter ProviderCapability`
+- `swift test`
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+
+### 风险
+
+- 静默读取被系统拒绝时无法区分“真的没有 secret”与“有 secret 但 ACL 不允许静默读取”；本轮用 `hasCredential` metadata 作为判断依据。
+- 老的 Keychain item ACL 可能依旧需要用户点一次“始终允许”；本轮只保证这一步发生在明确点击“授权刷新”时。
+- 如果保存 key 后不自动查询，用户需要多点一次刷新；这是为避免保存后立即弹权限窗的有意取舍。
+
+### 本轮实现结果（2026-06-08）
+
+- `APIPlatformFetcher.fetchSingle` 改为默认静默刷新，并返回结构化结果：
+  - `updated`
+  - `noCredential`
+  - `needsAuthorization`
+  - `noData`
+- Settings 平台页普通“刷新”现在调用 `allowUserInteraction: false`，不会主动弹出 macOS Keychain 密码框。
+- 仅当静默读取失败、且该平台 metadata 显示已经配置过凭据时，平台 row 和详情页才显示橙色“需要授权刷新 / 需授权”状态。
+- 详情页新增“授权刷新”按钮；只有点击这个按钮时才调用 `allowUserInteraction: true`，允许系统弹出 Keychain 授权窗口。
+- 保存 API key、Cookie、Claude session key、Codex extras key 后不再自动触发交互式刷新，只刷新 credential snapshot 并提示后续刷新会先静默查询。
+- 旧的 Settings 视图中用于展示已保存 key/cookie 的读取改成静默读取或 metadata 检查，避免打开/切换设置页时触发 Keychain 弹窗。
+- `SessionKeyExtractor.loadFromKeychain()` 改为静默读取，避免 Claude row 仅展示已保存 session key 时弹窗。
+
+### 验证结果
+
+- `swift test --filter ProviderCapability`：通过，10 个测试通过。
+- `swift test`：通过，144 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- 打开 Settings、切换平台、查看已配置状态：不应弹 Keychain 密码框。
+- 点击普通“刷新”：不应弹 Keychain 密码框。
+- 如果某个平台需要 Keychain 授权，普通刷新后应显示“需要授权刷新”。
+- 点击“授权刷新”：只对当前平台触发 macOS Keychain 授权框。
+- 授权成功后对应平台刷新数据，并清除“需要授权刷新”提示。
+
+---
+
+## 当前重点：Settings 页面适配修复与简化精修（已实现，待手动体验验证）
+
+### 问题
+
+用户截图反馈 Settings 存在两类问题：
+
+- **平台页适配瑕疵**
+  - 右侧详情区顶部卡片在当前窗口宽度下横向并排，内容被裁切到标题栏附近。
+  - `认证` 与 `查询能力` 两个卡片同时占据首屏横向空间，文字过多、视觉拥挤。
+  - 平台列表 row 状态标签偏多，当前选中项面积较大，整体显得重。
+- **小组件页过于复杂**
+  - 首屏同时展示推荐、预览、刘海收起态、已添加、添加组件，信息层级过多。
+  - 推荐卡片过大且多列铺开，已添加/添加组件两块同时出现，操作区占用太高。
+  - 刘海收起态配置虽然有用，但默认展开会进一步增加页面复杂度。
+
+本轮已阅读：
+
+- `docs/work-log/2026-05-10-widget-settings-preview.md`
+- `docs/work-log/2026-06-07-widget-recommendations-notch-collapsed.md`
+- `Settings/WidgetListEditor.swift`
+- `Settings/PlatformListView.swift`
+
+### 本轮目标
+
+- 修复平台页横向裁切：
+  - 右侧详情改成更稳的单列/自适应布局，避免顶部卡片被窗口宽度挤压。
+  - 卡片内部长文案不再把布局撑宽。
+- 简化平台页视觉：
+  - 顶部只保留平台名、关键状态和刷新。
+  - `认证` 作为主卡片，`查询能力` 改成更轻的摘要或折叠说明。
+  - 重置操作下沉，避免一进入页面就看到一排危险按钮。
+- 简化小组件页：
+  - 首屏只保留三个主要区块：
+    - 精简推荐条。
+    - 当前效果预览。
+    - 刘海收起态紧凑配置。
+  - `已添加` 和 `添加组件` 合并为一个“管理组件”区域，默认更紧凑。
+  - “添加组件”预设不再默认大面积网格铺开，改为轻量横向/折叠入口。
+- 保持现有功能不丢：
+  - 推荐添加、预览、拖拽排序、自定义组件、刘海左右来源选择都保留。
+
+### 实施步骤
+
+1. **平台页布局改为稳态单列**
+   - `PlatformDetailView` 中 `认证 + 查询能力` 的 `HStack` 改为单列或 `ViewThatFits`。
+   - `PlatformCapabilityPanel` 改成 compact summary：显示两行关键值，长说明使用更短文案或 `DisclosureGroup`。
+   - `PlatformCredentialPanel` 的 GroupBox 保持全宽，内部按钮用 `ViewThatFits` 或换行容器，避免横向溢出。
+
+2. **平台页状态与重置降噪**
+   - `PlatformSidebarRow` 状态只保留一个关键 data pill + 一个小认证 dot；减少 row 高度。
+   - `PlatformResetPanel` 默认折叠为“重置与清理”，展开后再显示重置按钮。
+   - `InfoRow` 的 value 限制宽度并允许中间截断，避免 email/path 撑宽。
+
+3. **小组件推荐区压缩**
+   - `ConfiguredWidgetRecommendationPanel` 改为更轻的横向 ScrollView 或最多两行 compact chips。
+   - 移除多余副文案，保留标题、缺失数量、补齐按钮。
+   - 推荐 chip 减小高度，长指标名截断但不挤压按钮。
+
+4. **小组件管理区合并**
+   - 把 `ActiveWidgetsPanel` 和 `AddWidgetsPanel` 合并成一个 `WidgetManagementPanel`：
+     - 顶部 segmented / picker 切换“已添加”和“添加”。
+     - 默认展示“已添加”，添加预设作为次级 tab。
+   - 保留拖拽排序和自定义按钮。
+
+5. **刘海收起态配置压缩**
+   - `NotchCollapsedSettingsPanel` 改为 compact：预览 + 两个 picker 一行优先，宽度不够时自动换行。
+   - 减少外层卡片感，和预览区视觉统一。
+
+6. **验证**
+   - 核心逻辑不应改变，优先编译验证。
+   - 运行现有 widget/notch tests，确保配置模型未回归。
+   - app 编译后手动检查：
+     - 平台页当前窗口宽度下不再裁切。
+     - 小组件页首屏明显更简洁，且所有原功能入口仍可找到。
+
+### 验证
+
+- `swift test --filter WidgetRecommendation`
+- `swift test --filter NotchCollapsedStatusTests`
+- `swift test`
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+
+### 风险
+
+- 过度折叠可能让新增用户找不到“添加组件”；需要保留清晰的 tab/按钮入口。
+- 平台页如果把查询能力压得太轻，用户可能不理解为什么普通 API key 不能查账单；保留短说明和可展开详情。
+- 本轮以布局和视觉为主，不改数据模型；如果后续需要更精致的设置架构，可再拆 Settings 子页面。
+
+### 本轮实现结果（2026-06-08）
+
+- 平台页详情从 `认证 + 查询能力` 横向并排改为单列布局，避免右侧卡片在当前窗口宽度下被挤压和裁切。
+- 平台页 `查询能力` 改成轻量摘要：
+  - 首行只显示当前用量路径。
+  - 详细说明放入 `DisclosureGroup`。
+- 平台页 `重置` 改为默认折叠的“重置与清理”，危险操作不再占据首屏。
+- 平台列表 row 降噪：
+  - 保留认证状态点。
+  - 只显示一个数据状态 pill，减少 row 高度和标签拥挤。
+- `InfoRow` 对 email/path/key 等长字段增加最大宽度、中间截断和缩放，降低撑宽风险。
+- 小组件页推荐区从多列大网格改为横向 compact chips：
+  - 标题压缩为“推荐组件”。
+  - `补齐缺失` 按钮显示缺失数量。
+  - chip 只保留核心信息和加号/勾选图标。
+- 刘海收起态配置改成 `ViewThatFits` 自适应：
+  - 宽度足够时标题、预览、左右 picker 同行。
+  - 宽度不足时自动换成两行。
+- `已添加` 和 `添加组件` 合并为 `WidgetManagementPanel`：
+  - 使用 segmented picker 切换“已添加 / 添加”。
+  - 默认展示“已添加”，添加预设作为次级 tab。
+  - 保留拖拽排序、自定义组件、点击添加预设能力。
+
+### 验证结果
+
+- `swift test --filter WidgetRecommendation`：通过，4 个测试通过。
+- `swift test --filter NotchCollapsedStatusTests`：通过，2 个测试通过。
+- `swift test`：通过，144 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- Settings → 平台：右侧详情在截图中的窗口宽度下不再裁切到顶部栏，不再出现两列卡片互相挤压。
+- Settings → 平台：重置操作默认折叠，查询能力说明可展开。
+- Settings → 小组件：首屏只突出推荐、预览、刘海收起态和一个管理区，整体更简洁。
+- Settings → 小组件：切换到“添加”后仍可添加预设和打开自定义组件。
+
+---
+
 ## 当前重点：MiniMax 普通 API Key 与 Token Plan 查询能力分离（已实现，待手动体验验证）
 
 ### 问题

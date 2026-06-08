@@ -519,4 +519,40 @@ struct NotchGeometryCalculatorTests {
                            width: 100, height: 60)
         #expect(!NotchGeometryCalculator.shouldSnapToNotch(panelFrame: panel, snapZone: frames.snapZone))
     }
+
+    // MARK: - Restore stale detached frame detection
+
+    @Test func topDetachedFrameNearHostedSurfaceIsStaleEvenWhenTopCenterMissesSnapZone() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
+        let stale = CGRect(
+            x: frames.expanded.midX - 150,
+            y: frames.snapZone.minY - 88,
+            width: 300,
+            height: 60
+        )
+        #expect(!frames.snapZone.contains(CGPoint(x: stale.midX, y: stale.maxY)))
+        #expect(NotchGeometryCalculator.shouldDiscardSavedDetachedFrame(
+            stale,
+            screenFrame: screen,
+            frames: frames
+        ))
+    }
+
+    @Test func normalDetachedFrameInWorkAreaIsNotStale() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
+        let normal = CGRect(x: 180, y: 360, width: 360, height: 120)
+        #expect(!NotchGeometryCalculator.shouldDiscardSavedDetachedFrame(
+            normal,
+            screenFrame: screen,
+            frames: frames
+        ))
+    }
 }

@@ -210,6 +210,29 @@ enum NotchGeometryCalculator {
         return snapZone.contains(topCenter)
     }
 
+    static func shouldDiscardSavedDetachedFrame(
+        _ frame: CGRect,
+        screenFrame: CGRect,
+        frames: NotchFrames
+    ) -> Bool {
+        let topCenter = CGPoint(x: frame.midX, y: frame.maxY)
+        if frames.snapZone.contains(topCenter) { return true }
+
+        let restoreGuardZone = frames.expanded.insetBy(
+            dx: -snapZoneExpandX,
+            dy: -expandedHeight * 0.75
+        )
+        if frame.intersects(restoreGuardZone) { return true }
+
+        let menuBarBand = CGRect(
+            x: frames.expanded.minX - snapZoneExpandX,
+            y: frames.collapsed.minY,
+            width: frames.expanded.width + snapZoneExpandX * 2,
+            height: max(0, screenFrame.maxY - frames.collapsed.minY)
+        )
+        return frame.intersects(menuBarBand)
+    }
+
     static func shouldDetachFromCollapsed(
         panelFrame: CGRect,
         collapsedFrame: CGRect

@@ -114,7 +114,7 @@ struct PlatformRowView: View {
                         try KeychainHelper.saveMiMoConsoleCookie(cookie)
                         storedMiMoCookie = cookie
                         isShowingMiMoConnector = false
-                        Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                        Task { _ = await apiPlatformFetcher.fetchSingle(platform: platform.id) }
                     } catch {
                         miMoConnectorStatus = "保存 Cookie 失败：\(error.localizedDescription)"
                     }
@@ -165,7 +165,7 @@ struct PlatformRowView: View {
                     .disabled(codexFetcher.isFetching)
                 } else if platform.credentialType == .apiKey {
                     Button {
-                        Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                        Task { _ = await apiPlatformFetcher.fetchSingle(platform: platform.id) }
                     } label: {
                         Label("刷新", systemImage: "arrow.clockwise")
                             .font(.caption)
@@ -297,7 +297,7 @@ struct PlatformRowView: View {
                     try? KeychainHelper.saveAPIKey(key, for: platform.id)
                     storedKey = key
                     openAIInput = ""
-                    await apiPlatformFetcher.fetchSingle(platform: platform.id)
+                    _ = await apiPlatformFetcher.fetchSingle(platform: platform.id)
                 }
             }
             .disabled(openAIInput.trimmingCharacters(in: .whitespaces).isEmpty)
@@ -339,7 +339,7 @@ struct PlatformRowView: View {
                         try? KeychainHelper.saveMiMoConsoleCookie(cookie)
                         storedMiMoCookie = cookie
                         miMoCookieInput = ""
-                        await apiPlatformFetcher.fetchSingle(platform: platform.id)
+                        _ = await apiPlatformFetcher.fetchSingle(platform: platform.id)
                     }
                 }
                 .disabled(miMoCookieInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
@@ -571,7 +571,7 @@ struct PlatformRowView: View {
                 case .codexLocalAuth:
                     await codexFetcher.fetch()
                 case .apiKey:
-                    await apiPlatformFetcher.fetchSingle(platform: platform.id)
+                    _ = await apiPlatformFetcher.fetchSingle(platform: platform.id)
                 case .sessionKey:
                     break
                 }
@@ -597,9 +597,9 @@ struct PlatformRowView: View {
         case .sessionKey:
             storedKey = await extractor.loadFromKeychain()
         case .apiKey:
-            storedKey = KeychainHelper.loadAPIKey(for: platform.id)
+            storedKey = KeychainHelper.loadAPIKey(for: platform.id, allowUserInteraction: false)
             if platform.id == "mimo" {
-                storedMiMoCookie = KeychainHelper.loadMiMoConsoleCookie()
+                storedMiMoCookie = KeychainHelper.loadMiMoConsoleCookie(allowUserInteraction: false)
             }
         case .codexLocalAuth: loadCodexStatus()
         }
@@ -691,7 +691,7 @@ struct APIKeyGroupView: View {
                 Text("API Key 平台").fontWeight(.medium)
                 Spacer()
                 Button {
-                    Task { await apiPlatformFetcher.fetchSingle(platform: selectedPlatform) }
+                    Task { _ = await apiPlatformFetcher.fetchSingle(platform: selectedPlatform) }
                 } label: {
                     Image(systemName: "arrow.clockwise")
                         .font(.caption)
@@ -726,7 +726,7 @@ struct APIKeyGroupView: View {
                         .padding(12)
                 } else {
                     VStack(spacing: 4) {
-                        if KeychainHelper.loadAPIKey(for: selectedPlatform) != nil {
+                        if KeychainHelper.hasAPIKey(for: selectedPlatform) {
                             Text("API key 已配置，暂无数据")
                                 .font(.caption).foregroundColor(.secondary)
                             Text("点击刷新按钮获取最新状态")
@@ -750,7 +750,7 @@ struct APIKeyGroupView: View {
                         try KeychainHelper.saveMiMoConsoleCookie(cookie)
                         miMoCookieRefreshID = UUID()
                         isShowingMiMoConnector = false
-                        Task { await apiPlatformFetcher.fetchSingle(platform: "mimo") }
+                        Task { _ = await apiPlatformFetcher.fetchSingle(platform: "mimo") }
                     } catch {
                         miMoConnectorStatus = "保存 Cookie 失败：\(error.localizedDescription)"
                     }
@@ -803,14 +803,14 @@ private struct APIPlatformRow: View {
         }
         .buttonStyle(.plain)
         .task {
-            storedKey = KeychainHelper.loadAPIKey(for: platform.id)
+            storedKey = KeychainHelper.loadAPIKey(for: platform.id, allowUserInteraction: false)
             if platform.id == "mimo" {
-                storedMiMoCookie = KeychainHelper.loadMiMoConsoleCookie()
+                storedMiMoCookie = KeychainHelper.loadMiMoConsoleCookie(allowUserInteraction: false)
             }
         }
         .task(id: miMoCookieRefreshID) {
             if platform.id == "mimo" {
-                storedMiMoCookie = KeychainHelper.loadMiMoConsoleCookie()
+                storedMiMoCookie = KeychainHelper.loadMiMoConsoleCookie(allowUserInteraction: false)
             }
         }
 
@@ -827,7 +827,7 @@ private struct APIPlatformRow: View {
                             storedKey = key
                             keyInput = ""
                             isEditing = false
-                            Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                            Task { _ = await apiPlatformFetcher.fetchSingle(platform: platform.id) }
                         }
                         .disabled(keyInput.trimmingCharacters(in: .whitespaces).isEmpty)
                         if storedKey != nil {
@@ -891,7 +891,7 @@ private struct APIPlatformRow: View {
                             try? KeychainHelper.saveMiMoConsoleCookie(cookie)
                             storedMiMoCookie = cookie
                             cookieInput = ""
-                            Task { await apiPlatformFetcher.fetchSingle(platform: platform.id) }
+                            Task { _ = await apiPlatformFetcher.fetchSingle(platform: platform.id) }
                         }
                         .disabled(cookieInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }

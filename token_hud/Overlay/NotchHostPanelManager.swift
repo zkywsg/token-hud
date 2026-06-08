@@ -861,16 +861,41 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         guard let frames = hostState.frames, let geo = hostState.geometry else { return }
 
         let savedMode = UserDefaults.standard.string(forKey: Self.modeKey) ?? "detached"
+        var shouldRestoreHosted = savedMode == "hosted"
+        var didDiscardStaleDetachedFrame = false
+        print(
+            """
+            [NotchDiagnostics] restore state start
+              savedMode: \(savedMode)
+              frames.expanded: \(frames.expanded)
+              frames.collapsed: \(frames.collapsed)
+              frames.snapZone: \(frames.snapZone)
+            """
+        )
 
         // Restore detached frame if available — but discard if it looks
         // like leftover hosted geometry (frame sitting inside the snap
-        // zone). A previous bug could persist such a frame mid-drag.
+        // zone or near the hosted surface). A previous bug could persist
+        // such a frame mid-drag.
         if let dict = UserDefaults.standard.dictionary(forKey: Self.detachedFrameKey) as? [String: CGFloat],
            let x = dict["x"], let y = dict["y"],
            let w = dict["w"], let h = dict["h"] {
             let candidate = NSRect(x: x, y: y, width: w, height: h)
-            let candidateTop = CGPoint(x: candidate.midX, y: candidate.maxY)
-            if frames.snapZone.contains(candidateTop) {
+            let shouldDiscard = NotchGeometryCalculator.shouldDiscardSavedDetachedFrame(
+                candidate,
+                screenFrame: screen.frame,
+                frames: frames
+            )
+            print(
+                """
+                [NotchDiagnostics] restore detached frame candidate
+                  frame: \(candidate)
+                  shouldDiscard: \(shouldDiscard)
+                """
+            )
+            if shouldDiscard {
+                didDiscardStaleDetachedFrame = true
+                shouldRestoreHosted = true
                 savedDetachedFrame = nil
                 UserDefaults.standard.removeObject(forKey: Self.detachedFrameKey)
             } else {
@@ -878,7 +903,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             }
         }
 
-        if savedMode == "hosted" {
+        if shouldRestoreHosted {
             detachedWindow?.orderOut(nil)
             hostState.mode = .collapsed
             setFrameWithDiagnostics(
@@ -905,6 +930,17 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             overlayWindow?.orderOut(nil)
             detachedWindow?.orderFrontRegardless()
         }
+
+        print(
+            """
+            [NotchDiagnostics] restore state complete
+              mode: \(hostState.mode)
+              expansionProgress: \(hostState.expansionProgress)
+              didDiscardStaleDetachedFrame: \(didDiscardStaleDetachedFrame)
+              detachedVisible: \(detachedWindow?.isVisible ?? false)
+              overlayVisible: \(overlayWindow?.isVisible ?? false)
+            """
+        )
 
         // Restore saved free frame for snap-back
         if let dict = UserDefaults.standard.dictionary(forKey: Self.savedFreeFrameKey) as? [String: CGFloat],

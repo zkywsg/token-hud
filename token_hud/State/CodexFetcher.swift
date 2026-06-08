@@ -567,6 +567,13 @@ final class APIPlatformFetcher {
 
     // MARK: - Fetch
 
+    enum SingleFetchResult: Equatable {
+        case updated
+        case noCredential
+        case needsAuthorization
+        case noData
+    }
+
     func fetchAll(allowUserInteraction: Bool = true) async {
         isFetching = true
         defer { isFetching = false }
@@ -594,17 +601,20 @@ final class APIPlatformFetcher {
         persist(updated, to: path)
     }
 
-    func fetchSingle(platform: String) async {
+    func fetchSingle(
+        platform: String,
+        allowUserInteraction: Bool = false
+    ) async -> SingleFetchResult {
         isFetching = true
         defer { isFetching = false }
         guard hasCredential(for: platform) else {
             print("[APIPlatformFetcher] fetchSingle(\(platform)): no credential in Keychain, skipping")
-            return
+            return .noCredential
         }
         print("[APIPlatformFetcher] fetchSingle(\(platform)): credential found, fetching...")
-        guard let service = await fetch(platform: platform, allowUserInteraction: true) else {
+        guard let service = await fetch(platform: platform, allowUserInteraction: allowUserInteraction) else {
             print("[APIPlatformFetcher] fetchSingle(\(platform)): fetch returned nil, skipping")
-            return
+            return (!allowUserInteraction && platformRequiresSecretRead(platform)) ? .needsAuthorization : .noData
         }
         print("[APIPlatformFetcher] fetchSingle(\(platform)): got service \(service.label), quotas=\(service.quotas.count), error=\(service.error ?? "nil")")
         let (path, existing) = readStateFile()
@@ -617,12 +627,22 @@ final class APIPlatformFetcher {
         )
         persist(updated, to: path)
         print("[APIPlatformFetcher] fetchSingle(\(platform)): persisted to \(path)")
+        return .updated
     }
 
     private nonisolated func hasCredential(for platform: String) -> Bool {
         if KeychainHelper.hasAPIKey(for: platform) { return true }
         if platform == "mimo", KeychainHelper.hasMiMoConsoleCookie() { return true }
         return false
+    }
+
+    private nonisolated func platformRequiresSecretRead(_ platform: String) -> Bool {
+        switch platform {
+        case "deepseek", "minimax", "mimo":
+            return true
+        default:
+            return false
+        }
     }
 
     nonisolated func fetch(platform: String, allowUserInteraction: Bool = true) async -> Service? {
