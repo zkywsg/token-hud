@@ -58,11 +58,33 @@ struct PlatformListView: View {
     }
 
     private var platformSidebar: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        let configuredCount = ProviderCapability.all.filter {
+            CredentialStatusReader.status(for: $0, snapshot: credentialSnapshot) == .configured
+        }.count
+        let providers = ProviderCapability.all.sorted { lhs, rhs in
+            let lhsConfigured = CredentialStatusReader.status(for: lhs, snapshot: credentialSnapshot) == .configured
+            let rhsConfigured = CredentialStatusReader.status(for: rhs, snapshot: credentialSnapshot) == .configured
+            if lhsConfigured != rhsConfigured { return lhsConfigured && !rhsConfigured }
+            let lhsIndex = ProviderCapability.all.firstIndex { $0.id == lhs.id } ?? 0
+            let rhsIndex = ProviderCapability.all.firstIndex { $0.id == rhs.id } ?? 0
+            return lhsIndex < rhsIndex
+        }
+
+        return VStack(alignment: .leading, spacing: 12) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("平台")
-                    .font(.headline)
-                Text("集中管理认证、查询能力和当前数据。")
+                HStack {
+                    Text("平台")
+                        .font(.headline)
+                    Spacer()
+                    Text("已配置 \(configuredCount)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.green)
+                        .padding(.horizontal, 8)
+                        .padding(.vertical, 4)
+                        .background(Color.green.opacity(0.13))
+                        .clipShape(Capsule())
+                }
+                Text("已配置平台会排在前面。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
@@ -71,7 +93,7 @@ struct PlatformListView: View {
 
             ScrollView {
                 LazyVStack(spacing: 8) {
-                    ForEach(ProviderCapability.all) { provider in
+                    ForEach(providers) { provider in
                         PlatformSidebarRow(
                             provider: provider,
                             service: stateWatcher.currentState?.services[provider.id],
@@ -143,7 +165,7 @@ struct PlatformListView: View {
     }
 }
 
-private enum MiMoAPIKeyRoleStore {
+enum MiMoAPIKeyRoleStore {
     private static let defaultsKey = "mimoAPIKeyRole"
 
     static func saveRole(for key: String) {
@@ -201,7 +223,7 @@ private struct PlatformSidebarRow: View {
                 }
                 HStack(spacing: 6) {
                     StatusPill(title: credentialStatus.title, color: credentialStatus.color)
-                    StatusPill(title: dataStatus.title, color: dataStatus.color)
+                    StatusPill(title: dataStatus.title(for: provider.id), color: dataStatus.color)
                 }
             }
             .padding(10)
@@ -281,7 +303,7 @@ private struct PlatformDetailView: View {
                     .font(.title2.weight(.semibold))
                 HStack(spacing: 8) {
                     StatusPill(title: credentialStatus.title, color: credentialStatus.color)
-                    StatusPill(title: dataStatus.title, color: dataStatus.color)
+                    StatusPill(title: dataStatus.title(for: provider.id), color: dataStatus.color)
                 }
             }
             Spacer()
@@ -655,7 +677,7 @@ private struct PlatformCredentialPanel: View {
         case "gemini":    return "AIza…"
         case "deepseek":  return "sk-…"
         case "anthropic": return "sk-ant-…"
-        case "minimax":   return "eyJ…"
+        case "minimax":   return "Token Plan key 或 Open Platform key"
         case "mimo":      return "tp-… 或 sk-…"
         default:          return "API key"
         }
@@ -667,7 +689,7 @@ private struct PlatformCredentialPanel: View {
         case "gemini":    return "Gemini API key 可验证调用能力；费用侧建议接 Google Cloud Billing。"
         case "deepseek":  return "DeepSeek API key 可用于官方余额接口。"
         case "anthropic": return "Anthropic 普通 API key 可验证调用能力；费用报告需要 Console 权限。"
-        case "minimax":   return "MiniMax Token Plan key 可查询 remains；普通 key 只做调用验证。"
+        case "minimax":   return "MiniMax Token Plan key 可查询 remains；普通 Open Platform key 只能验证调用，公开 API 暂不能查余额。"
         case "mimo":      return "MiMo `tp-` Token Plan key 用于套餐服务；`sk-` 按量 key 只验证调用能力。"
         default:          return "输入平台 API key。"
         }
@@ -712,7 +734,7 @@ private struct PlatformMetricsPanel: View {
                         }
                     }
                 } else {
-                    Label(dataStatus.detail, systemImage: dataStatus.systemImage)
+                    Label(dataStatus.detail(for: provider.id), systemImage: dataStatus.systemImage)
                         .font(.caption)
                         .foregroundStyle(dataStatus.color)
                 }
@@ -879,7 +901,7 @@ private enum CredentialStatusReader {
     }
 }
 
-private enum CodexAuthReader {
+enum CodexAuthReader {
     static func status() -> CodexAuthStatus {
         let authPath = (NSHomeDirectory() as NSString).appendingPathComponent(".codex/auth.json")
         guard
@@ -1108,6 +1130,13 @@ private extension ProviderUsageCapability {
 
 private extension ProviderDataStatus {
     var title: String {
+        title(for: nil)
+    }
+
+    func title(for providerID: String?) -> String {
+        if self == .usageUnsupported, providerID == "minimax" {
+            return "无套餐数据"
+        }
         switch self {
         case .notQueried:       return "未查询"
         case .noUsageData:      return "暂无数据"
@@ -1121,12 +1150,19 @@ private extension ProviderDataStatus {
     }
 
     var detail: String {
+        detail(for: nil)
+    }
+
+    func detail(for providerID: String?) -> String {
         switch self {
         case .notQueried:
             return "还没有当前平台的数据。配置认证后点击刷新，或等待自动刷新。"
         case .noUsageData:
             return "已配置或已连接，但当前平台暂无可展示的用量数据。"
         case .usageUnsupported:
+            if providerID == "minimax" {
+                return "MiniMax 普通 Open Platform API Key 可验证调用，但公开接口不能查询余额/套餐；只有 Token Plan remains 返回 quota 时才会展示用量。"
+            }
             return "普通 API key 暂不支持直接读取用量或账单，需要额外组织/账单权限或外部数据源。"
         case .tokenExpired:
             return "认证已过期，需要重新登录或重新配置凭据。"

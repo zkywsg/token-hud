@@ -98,3 +98,28 @@ extension WidgetStyle {
         }
     }
 }
+
+extension WidgetConfig {
+    init?(descriptor: WidgetDescriptor) {
+        guard let metric = WidgetMetric(rawValue: descriptor.metric),
+              let style = WidgetStyle(rawValue: descriptor.style)
+        else { return nil }
+        self.init(
+            id: UUID(uuidString: descriptor.id) ?? UUID(),
+            service: descriptor.service,
+            metric: metric,
+            style: style,
+            quotaIndex: descriptor.quotaIndex
+        )
+    }
+
+    var descriptor: WidgetDescriptor {
+        WidgetDescriptor(
+            id: id.uuidString,
+            service: service,
+            metric: metric.rawValue,
+            style: style.rawValue,
+            quotaIndex: quotaIndex
+        )
+    }
+}

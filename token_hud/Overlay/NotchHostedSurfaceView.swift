@@ -9,6 +9,8 @@ struct NotchHostedSurfaceView: View {
     @Environment(WidgetStore.self) private var store
     @Environment(StateWatcher.self) private var watcher
     @AppStorage("overlayMode") private var overlayMode = "compact"
+    @AppStorage("notchCollapsedLeadingSource") private var collapsedLeadingSource = NotchCollapsedSourceStore.autoRawValue
+    @AppStorage("notchCollapsedTrailingSource") private var collapsedTrailingSource = NotchCollapsedSourceStore.autoRawValue
 
     var body: some View {
         GeometryReader { geo in
@@ -49,14 +51,14 @@ struct NotchHostedSurfaceView: View {
     private func statusSlot(
         _ rect: CGRect,
         isLeading: Bool,
-        status: NotchCollapsedStatusValue,
+        status: NotchCollapsedStatusDisplay,
         layout: NotchHostedSurfaceLayout
     ) -> some View {
         if rect.width > 1 {
             let topY = topOffset(for: rect, in: layout)
 
             if isLeading {
-                progressBar(fraction: status.fraction)
+                progressBar(fraction: status.leadingFraction)
                     .frame(
                         width: max(24, min(42, rect.width - 14)),
                         height: 5
@@ -65,7 +67,7 @@ struct NotchHostedSurfaceView: View {
                     .offset(x: rect.minX, y: topY)
                     .opacity(1 - layout.contentOpacity)
             } else {
-                Text(status.percentText)
+                Text(status.trailingText)
                     .font(.system(size: 10.5, weight: .semibold, design: .rounded))
                     .monospacedDigit()
                     .foregroundColor(.white.opacity(0.9))
@@ -180,93 +182,14 @@ struct NotchHostedSurfaceView: View {
 
     // MARK: - Status
 
-    private var collapsedStatus: NotchCollapsedStatusValue {
-        NotchCollapsedStatusComputer.value(
-            widgets: store.widgets,
-            state: watcher.effectiveState
+    private var collapsedStatus: NotchCollapsedStatusDisplay {
+        NotchCollapsedStatusEngine.value(
+            widgets: store.widgets.map(\.descriptor),
+            state: watcher.effectiveState,
+            configuration: NotchCollapsedStatusConfiguration(
+                leading: NotchCollapsedSourceStore.source(from: collapsedLeadingSource),
+                trailing: NotchCollapsedSourceStore.source(from: collapsedTrailingSource)
+            )
         )
-    }
-}
-
-// MARK: - Shared collapsed status calculation
-
-struct NotchCollapsedStatusValue: Equatable {
-    let fraction: Double
-
-    var percentText: String {
-        "\(Int((fraction.clamped(to: 0...1) * 100).rounded()))%"
-    }
-}
-
-enum NotchCollapsedStatusComputer {
-    static func value(widgets: [WidgetConfig], state: StateFile) -> NotchCollapsedStatusValue {
-        for config in widgets {
-            if let fraction = fraction(for: config, state: state) {
-                return NotchCollapsedStatusValue(fraction: fraction)
-            }
-        }
-        for service in state.services.values {
-            if let quota = service.quotas.first(where: { ($0.total ?? 0) > 0 }) {
-                return NotchCollapsedStatusValue(fraction: WidgetValueComputer.usageFraction(for: quota))
-            }
-        }
-        return NotchCollapsedStatusValue(fraction: 0)
-    }
-
-    private static func fraction(for config: WidgetConfig, state: StateFile) -> Double? {
-        guard let service = state.services[config.service] else { return nil }
-
-        switch config.metric {
-        case .remainingTime:
-            return quotaFraction(type: .time, service: service, config: config)
-        case .tokensRemaining, .usagePercent:
-            return quotaFraction(type: .tokens, service: service, config: config)
-                ?? creditFraction(service: service)
-        case .balance:
-            return quotaFraction(type: .money, service: service, config: config)
-        case .dailyTokens:
-            return quotaFraction(type: .dailyTokens, service: service, config: config)
-        case .monthlyTokens:
-            return quotaFraction(type: .monthlyTokens, service: service, config: config)
-        case .dailyRequests:
-            return quotaFraction(type: .dailyRequests, service: service, config: config)
-        case .monthlyRequests:
-            return quotaFraction(type: .monthlyRequests, service: service, config: config)
-        case .rateLimitStatus:
-            return service.quotas
-                .compactMap { quota -> Double? in
-                    guard (quota.total ?? 0) > 0 else { return nil }
-                    return WidgetValueComputer.usageFraction(for: quota)
-                }
-                .max()
-        case .creditsRemaining, .creditsUsed, .sessionCredits:
-            return creditFraction(service: service)
-        case .subscriptionStatus:
-            return service.error == nil ? 1 : 0
-        case .sessionTokens, .inputTokens, .outputTokens, .costSpent,
-             .resetCountdown, .sessionDuration, .tokensPerMinute,
-             .inputOutputRatio, .costPerRequest, .planName:
-            return firstQuotaFraction(service: service)
-        }
-    }
-
-    private static func quotaFraction(type: QuotaType, service: Service, config: WidgetConfig) -> Double? {
-        let matching = service.quotas.filter { $0.type == type }
-        guard !matching.isEmpty else { return nil }
-        let quota = config.quotaIndex < matching.count ? matching[config.quotaIndex] : matching[0]
-        guard (quota.total ?? 0) > 0 else { return nil }
-        return WidgetValueComputer.usageFraction(for: quota)
-    }
-
-    private static func creditFraction(service: Service) -> Double? {
-        guard let quota = service.quotas.first(where: { $0.unit.lowercased() == "credits" }),
-              (quota.total ?? 0) > 0
-        else { return nil }
-        return WidgetValueComputer.usageFraction(for: quota)
-    }
-
-    private static func firstQuotaFraction(service: Service) -> Double? {
-        guard let quota = service.quotas.first(where: { ($0.total ?? 0) > 0 }) else { return nil }
-        return WidgetValueComputer.usageFraction(for: quota)
     }
 }

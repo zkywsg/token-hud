@@ -7,9 +7,9 @@ struct StatusWidget: View {
     @Environment(\.panelAdaptiveScale) private var scale
 
     private var color: Color {
-        if fraction >= 0.8 { return .red }
-        if fraction >= 0.5 { return .yellow }
-        return .green
+        if fraction >= 0.8 { return Color(red: 1.0, green: 0.28, blue: 0.34) }
+        if fraction >= 0.5 { return Color(red: 1.0, green: 0.76, blue: 0.20) }
+        return Color(red: 0.30, green: 0.86, blue: 0.55)
     }
 
     private var statusText: String {
@@ -26,11 +26,11 @@ struct StatusWidget: View {
                 .shadow(color: color.opacity(0.6), radius: 3 * scale)
             VStack(alignment: .leading, spacing: 0) {
                 Text(statusText)
-                    .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white)
+                    .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
+                    .foregroundColor(.white.opacity(0.94))
                 Text(label)
                     .font(.system(size: 8 * scale, weight: .regular, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
+                    .foregroundColor(.white.opacity(0.56))
             }
         }
     }

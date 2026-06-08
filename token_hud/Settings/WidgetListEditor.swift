@@ -155,16 +155,31 @@ struct WidgetListEditor: View {
     @Environment(StateWatcher.self) private var watcher
     @State private var showCustomSheet = false
     @State private var recentlyDroppedIDs = Set<UUID>()
+    @State private var credentialSnapshot = ProviderCredentialSnapshot.empty
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
             header
+
+            ConfiguredWidgetRecommendationPanel(
+                currentWidgets: store.widgets,
+                recommendations: recommendedWidgets,
+                configuredCount: configuredProviderCount,
+                onAdd: prependWidget,
+                onPrependMissing: prependMissingRecommendations
+            )
 
             WidgetPreviewPanel(widgets: store.widgets, state: watcher.effectiveState)
                 .onDrop(of: [.text], delegate: WidgetListDropDelegate(
                     widgets: Bindable(store).widgets,
                     recentlyDroppedIDs: $recentlyDroppedIDs
                 ))
+
+            NotchCollapsedSettingsPanel(
+                widgets: store.widgets,
+                recommendations: recommendedWidgets,
+                state: watcher.effectiveState
+            )
 
             HStack(alignment: .top, spacing: 14) {
                 ActiveWidgetsPanel(
@@ -180,6 +195,10 @@ struct WidgetListEditor: View {
         .padding()
         .sheet(isPresented: $showCustomSheet) {
             CustomWidgetSheet(store: store)
+        }
+        .task {
+            reloadCredentialSnapshot()
+            populateEmptyWidgetListIfNeeded()
         }
     }
 
@@ -210,6 +229,314 @@ struct WidgetListEditor: View {
             quotaIndex: config.quotaIndex
         ))
     }
+
+    private func prependWidget(_ config: WidgetConfig) {
+        let key = config.descriptor.semanticKey
+        guard !store.widgets.contains(where: { $0.descriptor.semanticKey == key }) else { return }
+        store.widgets.insert(WidgetConfig(
+            service: config.service,
+            metric: config.metric,
+            style: config.style,
+            quotaIndex: config.quotaIndex
+        ), at: 0)
+    }
+
+    private var recommendedWidgets: [WidgetConfig] {
+        WidgetRecommendationEngine
+            .recommendations(
+                for: credentialSnapshot,
+                state: watcher.effectiveState,
+                includeCodexLocalAuth: isCodexConfigured
+            )
+            .compactMap(WidgetConfig.init(descriptor:))
+    }
+
+    private var configuredProviderCount: Int {
+        ProviderCapability.all.filter { provider in
+            switch provider.credentialKind {
+            case .codexLocalAuth:
+                return isCodexConfigured
+            default:
+                return credentialSnapshot.status(for: provider) == .configured
+            }
+        }.count
+    }
+
+    private var isCodexConfigured: Bool {
+        if case .configured = CodexAuthReader.status() {
+            return true
+        }
+        return false
+    }
+
+    private func prependMissingRecommendations() {
+        let existingKeys = Set(store.widgets.map { $0.descriptor.semanticKey })
+        let missing = recommendedWidgets.filter { !existingKeys.contains($0.descriptor.semanticKey) }
+        guard !missing.isEmpty else { return }
+        store.widgets = missing + store.widgets
+    }
+
+    private func populateEmptyWidgetListIfNeeded() {
+        guard store.widgets.isEmpty else { return }
+        let recommended = recommendedWidgets
+        store.widgets = recommended.isEmpty ? WidgetStore.defaultWidgets : recommended
+    }
+
+    private func reloadCredentialSnapshot() {
+        var apiKeys: [String: String] = [:]
+        for provider in ProviderCapability.all {
+            switch provider.credentialKind {
+            case .apiKey, .apiKeyAndConsoleCookie:
+                if KeychainHelper.hasAPIKey(for: provider.id) {
+                    apiKeys[provider.id] = provider.id == "mimo"
+                        ? MiMoAPIKeyRoleStore.snapshotValue()
+                        : "saved"
+                }
+            case .sessionKey, .codexLocalAuth:
+                break
+            }
+        }
+
+        credentialSnapshot = ProviderCredentialSnapshot(
+            claudeSessionKey: KeychainHelper.hasClaudeSessionKey() ? "saved" : nil,
+            apiKeys: apiKeys,
+            mimoConsoleCookie: KeychainHelper.hasMiMoConsoleCookie() ? "saved" : nil,
+            codexAdminKey: KeychainHelper.hasCodexAdminKey() ? "saved" : nil
+        )
+    }
+}
+
+// MARK: - Configured Recommendations
+
+private struct ConfiguredWidgetRecommendationPanel: View {
+    let currentWidgets: [WidgetConfig]
+    let recommendations: [WidgetConfig]
+    let configuredCount: Int
+    let onAdd: (WidgetConfig) -> Void
+    let onPrependMissing: () -> Void
+
+    private let columns = [
+        GridItem(.adaptive(minimum: 210, maximum: 280), spacing: 8)
+    ]
+
+    private var existingKeys: Set<String> {
+        Set(currentWidgets.map { $0.descriptor.semanticKey })
+    }
+
+    private var missingCount: Int {
+        recommendations.filter { !existingKeys.contains($0.descriptor.semanticKey) }.count
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .center) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Label("可添加的小组件推荐", systemImage: "plus.square.on.square")
+                        .font(.caption.weight(.semibold))
+                    Text(configuredCount > 0
+                         ? "来自 \(configuredCount) 个已配置平台，可加入当前小组件。"
+                         : "配置平台后，这里会显示可直接加入的小组件。")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+                Spacer()
+                Button {
+                    onPrependMissing()
+                } label: {
+                    Label("补齐缺失", systemImage: "text.insert")
+                }
+                .font(.caption)
+                .disabled(missingCount == 0)
+            }
+
+            if recommendations.isEmpty {
+                Text("暂无可推荐组件")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity, minHeight: 54)
+                    .background(Color.secondary.opacity(0.05))
+                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(Color.secondary.opacity(0.12), lineWidth: 0.5)
+                    )
+            } else {
+                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                    ForEach(recommendations, id: \.descriptor.semanticKey) { widget in
+                        RecommendationChip(
+                            widget: widget,
+                            isAdded: existingKeys.contains(widget.descriptor.semanticKey),
+                            onAdd: { onAdd(widget) }
+                        )
+                    }
+                }
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 0.8)
+        )
+    }
+}
+
+private struct RecommendationChip: View {
+    let widget: WidgetConfig
+    let isAdded: Bool
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: metricIcon(widget.metric))
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(isAdded ? Color.secondary : Color.accentColor)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(serviceDisplayName(widget.service))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(isAdded ? .secondary : .primary)
+                Text(metricTitle(widget))
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+            }
+            Spacer(minLength: 0)
+
+            if isAdded {
+                Label("已添加", systemImage: "checkmark")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(.secondary)
+                    .labelStyle(.titleAndIcon)
+            } else {
+                Button {
+                    onAdd()
+                } label: {
+                    Label("添加", systemImage: "plus")
+                }
+                .font(.system(size: 10, weight: .semibold))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(isAdded ? Color.secondary.opacity(0.06) : Color.accentColor.opacity(0.07))
+        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .overlay(
+            RoundedRectangle(cornerRadius: 7)
+                .stroke(isAdded ? Color.secondary.opacity(0.10) : Color.accentColor.opacity(0.14), lineWidth: 0.6)
+        )
+    }
+}
+
+// MARK: - Notch Collapsed Settings
+
+private struct NotchCollapsedSettingsPanel: View {
+    let widgets: [WidgetConfig]
+    let recommendations: [WidgetConfig]
+    let state: StateFile
+
+    @AppStorage("notchCollapsedLeadingSource") private var leadingSource = NotchCollapsedSourceStore.autoRawValue
+    @AppStorage("notchCollapsedTrailingSource") private var trailingSource = NotchCollapsedSourceStore.autoRawValue
+
+    private var status: NotchCollapsedStatusDisplay {
+        NotchCollapsedStatusEngine.value(
+            widgets: widgets.map(\.descriptor),
+            state: state,
+            configuration: NotchCollapsedStatusConfiguration(
+                leading: NotchCollapsedSourceStore.source(from: leadingSource),
+                trailing: NotchCollapsedSourceStore.source(from: trailingSource)
+            )
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Label("刘海收起态", systemImage: "rectangle.compress.vertical")
+                    .font(.caption.weight(.semibold))
+                Spacer()
+                compactPreview
+            }
+
+            HStack(spacing: 12) {
+                sourcePicker(title: "左侧", selection: $leadingSource)
+                sourcePicker(title: "右侧", selection: $trailingSource)
+            }
+        }
+        .padding(12)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.72))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.secondary.opacity(0.12), lineWidth: 0.8)
+        )
+    }
+
+    private var compactPreview: some View {
+        HStack(spacing: 8) {
+            ZStack(alignment: .leading) {
+                Capsule()
+                    .fill(Color.white.opacity(0.16))
+                Capsule()
+                    .fill(progressColor(for: status.leadingFraction))
+                    .frame(width: 42 * status.leadingFraction.clamped(to: 0...1))
+            }
+            .frame(width: 42, height: 5)
+
+            Text(status.trailingText)
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(.white.opacity(0.92))
+                .frame(width: 34, alignment: .trailing)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(Color.black.opacity(0.92))
+        .clipShape(Capsule())
+    }
+
+    private func sourcePicker(title: String, selection: Binding<String>) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+            Picker(title, selection: selection) {
+                Text("自动").tag(NotchCollapsedSourceStore.autoRawValue)
+                if !widgets.isEmpty {
+                    Section("当前小组件") {
+                        ForEach(widgets) { widget in
+                            Text("\(serviceDisplayName(widget.service)) · \(metricTitle(widget))")
+                                .tag(NotchCollapsedSourceStore.rawValue(for: .widget(widget.id.uuidString)))
+                        }
+                    }
+                }
+                if !recommendations.isEmpty {
+                    Section("已配置推荐") {
+                        ForEach(recommendations, id: \.descriptor.semanticKey) { widget in
+                            Text("\(serviceDisplayName(widget.service)) · \(metricTitle(widget))")
+                                .tag(NotchCollapsedSourceStore.rawValue(for: .metric(
+                                    service: widget.service,
+                                    metric: widget.metric.rawValue,
+                                    quotaIndex: widget.quotaIndex
+                                )))
+                        }
+                    }
+                }
+            }
+            .labelsHidden()
+            .pickerStyle(.menu)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func progressColor(for fraction: Double) -> Color {
+        if fraction >= 0.85 { return Color(red: 1.0, green: 0.28, blue: 0.34) }
+        if fraction >= 0.65 { return Color(red: 1.0, green: 0.76, blue: 0.20) }
+        return Color(red: 0.30, green: 0.86, blue: 0.55)
+    }
 }
 
 // MARK: - Preview
@@ -232,20 +559,12 @@ private struct WidgetPreviewPanel: View {
 
             ZStack {
                 RoundedRectangle(cornerRadius: 10)
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                Color(nsColor: .black).opacity(0.90),
-                                Color(red: 0.08, green: 0.09, blue: 0.12).opacity(0.96)
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .fill(Color(red: 0.015, green: 0.017, blue: 0.02).opacity(0.96))
                     .overlay(
                         RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.white.opacity(0.08), lineWidth: 1)
+                            .stroke(Color.white.opacity(0.10), lineWidth: 0.8)
                     )
+                    .shadow(color: Color.black.opacity(0.16), radius: 14, y: 8)
 
                 if widgets.isEmpty {
                     VStack(spacing: 6) {

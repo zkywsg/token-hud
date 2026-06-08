@@ -11,10 +11,11 @@ struct AggregateWidget: View {
         HStack(spacing: 2 * scale) {
             Image(systemName: icon)
                 .font(.system(size: 8 * scale, weight: .bold))
-                .foregroundColor(.white.opacity(0.7))
+                .foregroundColor(.white.opacity(0.62))
             Text(value)
-                .font(.system(size: 11 * scale, weight: .semibold, design: .rounded))
-                .foregroundColor(.white)
+                .font(.system(size: 12 * scale, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(.white.opacity(0.94))
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }

@@ -20,7 +20,7 @@
 | Codex | 本地 session token、rate limit 事件、账号/plan、可选 dashboard extras | `~/.codex/auth.json`、`~/.codex/sessions` JSONL；CodexBar 也扫描本地 session 和 archived session；OpenAI Admin Usage/Costs 只能做 extras | Codex CLI 本地登录态；可选 OpenAI Admin/API key | 保持本地优先，不接管 auth；Admin/API key 单独存储、单独重置，不影响 `codex login` |
 | Claude / Claude Code | session token、costUSD、模型、5h/weekly block、统计缓存；API usage/cost report | `~/.claude/projects` JSONL、`~/.claude/stats-cache.json`；API Console reports/Admin API | Claude Code 本地文件；Console Developer/Billing/Admin 角色 | Claude Code 用本地 JSONL 优先；Claude Web session key 只作为 web quota 补充，避免频繁读 Keychain |
 | DeepSeek | 账户余额、币种、赠金、充值余额、是否可用 | 官方 `GET /user/balance` | DeepSeek API key Bearer token | 当前路径正确，可继续作为余额查询主路径 |
-| MiniMax | Token Plan remains、套餐/窗口/每日 quota；普通 key 可验证模型调用 | 官方 `GET https://www.minimax.io/v1/token_plan/remains`；失败时 `/v1/models` 验证 | Token Plan API key；普通 key只能验证 | 当前路径正确，UI 必须区分 “Token Plan key” 与 “普通 key” |
+| MiniMax | Token Plan remains、套餐/窗口/每日 quota；普通 key 可验证模型调用 | 官方 `GET https://www.minimax.io/v1/token_plan/remains`；失败时 `/v1/models` 验证 | Token Plan API key；普通 Open Platform key 只能验证调用 | 不把普通 key 表达成可查余额；只有 remains 返回 quota 后才推荐 MiniMax 用量组件 |
 | MiMO | Token Plan credits、plan、到期/进度；普通 key 可验证模型调用 | 优先 Token Plan `tp-` key；其次 WebView 登录控制台后读取 cookie 调控制台 JSON；普通 `sk-` key 调 `/v1/models` 验证 | `tp-` Token Plan key、控制台 cookie 或 `sk-` API key | 不再要求用户手贴 cookie；恢复/迁移已有 WKWebView 自动连接入口，并把 `tp-` key 作为首选 |
 
 ## MiMO 获取方法优化
@@ -141,6 +141,13 @@ MiniMax 官方 Token Plan FAQ 给出 remains 接口：
 - Token Plan 的 M2.7 是 5 小时 rolling window，其他多模态能力是 daily quota。
 
 MiniMax 官方 CLI 也提供 `mmx quota`，说明“CLI 登录/Token Plan key + quota 查询”是官方支持的产品路径。token-hud 可以继续直接查 remains，失败时用 `/v1/models` 验证普通 key，但 UI 要明确“普通 key 无套餐数据”。
+
+普通 Open Platform API key 的边界要单独表达：
+
+- 可以用 `/v1/models` 验证 key/base URL 是否可调用。
+- 不应显示成“可查询余额”或“查询失败”；公开文档没有稳定余额查询 endpoint。
+- Settings 中应显示“无套餐数据”或“API Key 已连接，但余额/套餐查询需要 Token Plan remains 或后续控制台路径”。
+- 小组件推荐不能只凭 MiniMax key 已配置就自动推荐用量组件；只有 `state.json` 中已有 MiniMax quota，或未来能明确识别 Token Plan key 时，才推荐 MiniMax Token / 使用率组件。
 
 如果 MiniMax 返回 `no active token plan subscription`，这表示当前 key 没有关联 active Token Plan 套餐，应归类为 `usageUnsupported`，不要显示成“查询异常”。普通 key 通过 `/v1/models` 验证成功但没有 remains 数据时，也应归类为 `usageUnsupported`。
 

@@ -12,15 +12,16 @@ struct BarWidget: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 2 * scale) {
             Text(label)
-                .font(.system(size: 9 * scale, weight: .medium, design: .rounded))
-                .foregroundColor(.white.opacity(0.9))
-            .lineLimit(1)
-            .minimumScaleFactor(0.65)
+                .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
+                .monospacedDigit()
+                .foregroundColor(.white.opacity(0.94))
+                .lineLimit(1)
+                .minimumScaleFactor(0.65)
 
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2 * scale)
-                        .fill(Color.white.opacity(0.15))
+                        .fill(Color.white.opacity(0.13))
                         .frame(height: 4 * scale)
 
                     RoundedRectangle(cornerRadius: 2 * scale)
@@ -33,8 +34,9 @@ struct BarWidget: View {
 
             if let detail {
                 Text(detail)
-                    .font(.system(size: 7 * scale, weight: .regular, design: .rounded))
-                    .foregroundColor(.white.opacity(0.6))
+                    .font(.system(size: 8 * scale, weight: .medium, design: .rounded))
+                    .monospacedDigit()
+                    .foregroundColor(.white.opacity(0.58))
                     .lineLimit(1)
                     .minimumScaleFactor(0.7)
             }
@@ -46,9 +48,9 @@ struct BarWidget: View {
         // fraction is usage; bar width = 1 - fraction. Color by actual usage.
         let usage = 1 - fraction
         switch usage {
-        case 0..<0.5:   return .green
-        case 0..<0.8:   return .yellow
-        default:         return .red
+        case 0..<0.5:   return Color(red: 0.30, green: 0.86, blue: 0.55)
+        case 0..<0.8:   return Color(red: 1.0, green: 0.76, blue: 0.20)
+        default:         return Color(red: 1.0, green: 0.28, blue: 0.34)
         }
     }
 }

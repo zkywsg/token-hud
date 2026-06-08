@@ -2,7 +2,201 @@
 
 这个文件跟踪当前项目正在进行的实现工作。保持内容小而可执行；可长期保留的决策沉淀到 `docs/`。
 
-## 当前重点：Settings 已配置可见性、小组件默认添加与刘海收起态配置（待确认）
+## 当前重点：MiniMax 普通 API Key 与 Token Plan 查询能力分离（已实现，待手动体验验证）
+
+### 问题
+
+用户当前配置了 MiniMax API token，并期望至少能查询剩余金额。
+
+结合 `docs/model-usage-query-practices.md` 和当前实现，MiniMax 这里有两类凭据：
+
+- **Token Plan key**：可调用官方 `GET https://www.minimax.io/v1/token_plan/remains`，能返回 Token Plan quota / 用量 / Credits。
+- **普通 Open Platform API key**：可调用模型或 `/v1/models` 验证 key 是否可用，但目前没有公开稳定的余额查询 API。
+
+当前实现虽然已经把 “no active token plan subscription” 从“查询异常”降级为 `usageUnsupported`，但 UI 仍容易让用户误解：
+
+- “已配置”看起来像已经具备余额/套餐查询能力。
+- “暂无数据 / 用量不支持”没有明确说明是普通 key 的能力边界。
+- MiniMax 设置里没有把 Token Plan 查询凭据和普通调用 key 的用途分开表达。
+
+### 本轮目标
+
+- MiniMax 普通 API key 验证成功时，显示为“API Key 已连接，但无法查询余额/套餐”，而不是让用户误以为查询失败。
+- MiniMax Token Plan remains 成功时，继续展示 quota / credits / 使用率。
+- Settings 的 MiniMax 详情页明确区分：
+  - Token Plan Key：用于套餐/额度查询。
+  - Open Platform API Key：用于模型调用验证，不保证可查余额。
+- 小组件推荐逻辑避免在仅有普通 MiniMax key、没有 Token Plan 数据时默认推荐“余额/用量”组件。
+- 更新 MiniMax 文档沉淀，记录“普通 API key 不能直接查余额；如需余额，需要后续控制台登录/cookie JSON 路径”。
+
+### 实施步骤
+
+1. **先补失败测试**
+   - 在 `ProviderCapabilityTests` 或新增 MiniMax 状态测试中覆盖：
+     - MiniMax `/v1/models` 验证成功但无 Token Plan remains 时，应归类为“凭据有效但用量查询不支持”。
+     - 该状态不应显示为“查询异常”或“暂无数据”。
+   - 在小组件推荐测试中覆盖：
+     - 只有 MiniMax 普通 key、无 MiniMax quotas 时，不自动推荐 MiniMax 用量组件。
+     - 有 MiniMax quotas 时，才推荐 MiniMax Token / 使用率类组件。
+
+2. **增强状态语义**
+   - 复用或扩展 `ProviderQueryError.usageUnsupported` 的表现层文案。
+   - 如现有枚举无法表达清楚，可新增更细的 provider-specific detail helper，但不大改 `state.json` 主结构。
+   - MiniMax fallback `/v1/models` 成功时写入规范状态，含义是“API Key 可用，但余额/套餐查询无公开接口”。
+
+3. **优化 Settings MiniMax 详情**
+   - MiniMax 卡片文案改为：
+     - `Token Plan Key`：可查询套餐 remains。
+     - `Open Platform API Key`：可验证调用；余额/账单暂不能通过公开 API 查询。
+   - 当前数据区遇到 `usageUnsupported` 时，为 MiniMax 显示更具体解释，避免泛用“用量不支持”太模糊。
+   - 保留现有保存/重置入口，不在本轮引入不稳定网页抓取。
+
+4. **收紧推荐组件来源**
+   - 推荐引擎不要仅凭 MiniMax key 已配置就推荐 MiniMax 用量组件。
+   - 推荐 MiniMax 组件的条件改为：
+     - state 中已有可展示 MiniMax quota；或
+     - 后续明确配置了 Token Plan key。
+   - 避免用户普通 key 配置成功后，小组件页自动出现永远没数据的 MiniMax widget。
+
+5. **文档更新**
+   - 更新 `docs/model-usage-query-practices.md` MiniMax 段落：
+     - ordinary API key 的可用能力是“调用验证”。
+     - 余额/账单查询无公开稳定 API。
+     - 后续可研究控制台登录 JSON 路径，但不能作为本轮默认方案。
+
+### 验证
+
+- `swift test --filter ProviderCapability`
+- `swift test --filter WidgetRecommendation`
+- `swift test`
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+- 手动验证：
+  - MiniMax 普通 API key 配置后，Settings 显示“API Key 已连接 / 无法查询余额套餐”，不显示“查询异常”。
+  - MiniMax 没有 Token Plan 数据时，小组件推荐区不再自动推荐 MiniMax 用量组件。
+  - 如果 state 中已有 MiniMax quota，MiniMax 组件仍可被推荐和展示。
+
+### 风险
+
+- MiniMax 可能存在未公开的控制台余额 JSON 接口，但本轮不引入未验证 cookie 抓取，避免把不稳定路径做成主能力。
+- 如果用户手里的 token 实际是 Token Plan key，但账户没有 active subscription，UI 会显示“无套餐数据”；这符合后端语义，但需要用户换正确 key 或检查订阅。
+- 推荐逻辑依赖 `state.json` 是否已有 quotas，首次配置 Token Plan key 后需要刷新一次才能出现 MiniMax 推荐组件。
+
+### 本轮实现结果（2026-06-08）
+
+- `WidgetRecommendationEngine.recommendations` 新增可选 `state` 参数。
+- MiniMax 推荐规则从“只要 Keychain 有 MiniMax API key 就推荐”改为：
+  - 只有 `state.json` 中已有 MiniMax quota 证据时，才推荐 MiniMax monthly tokens / usage percent 组件。
+  - 仅有普通 Open Platform API key 时，不再自动推荐 MiniMax 用量组件。
+- Settings → 小组件页的推荐入口已接入 `watcher.effectiveState`，可以根据当前 MiniMax 数据决定是否展示推荐。
+- Settings → 平台页对 MiniMax 的 `usageUnsupported` 显示做了 provider-specific 文案：
+  - 状态胶囊显示“无套餐数据”。
+  - 当前数据区解释普通 Open Platform API key 只能验证调用，公开接口不能查询余额/套餐。
+- MiniMax API key 输入说明改为明确区分 Token Plan key 和普通 Open Platform key。
+- `docs/model-usage-query-practices.md` 已补充 MiniMax 普通 key / Token Plan key 的边界和推荐组件规则。
+
+### 验证结果
+
+- `swift test --filter WidgetRecommendation`：通过，4 个 Widget recommendation 测试通过。
+- `swift test --filter ProviderCapability`：通过，10 个 ProviderCapability 测试通过。
+- `swift test`：通过，144 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- Settings → 平台 → MiniMax：普通 Open Platform API key 查询后应显示“无套餐数据”，不再显示“查询异常”或让人误以为可查余额。
+- Settings → 小组件：MiniMax 只有普通 key、无 quota 数据时，不应自动出现在推荐组件里。
+- 如果后续 MiniMax remains 返回 quota，MiniMax 用量组件应重新出现在推荐区。
+
+---
+
+## 当前重点：优化小组件推荐区表达，避免被误解为状态区（已实现）
+
+### 问题
+
+用户反馈 Settings → 小组件页顶部绿色区域看起来像“状态”，不清楚它有什么用。
+
+实际实现中，这块区域是“已配置平台推荐组件”：
+
+- 根据已配置平台生成可添加的小组件。
+- 点击“补齐推荐”会把缺失推荐插入当前小组件列表最前面。
+
+当前问题是视觉表达错误：
+
+- 整块绿色背景让它像平台状态，而不是可添加组件。
+- 卡片没有区分“已添加 / 未添加”。
+- 没有足够明确的操作提示。
+- 已添加的推荐仍然和未添加项长得一样，用户无法判断是否还需要操作。
+
+### 本轮目标
+
+- 把顶部区域从“绿色状态卡”改成“可添加的小组件推荐”。
+- 明确每个推荐项的状态：
+  - 已添加：灰化/勾选，弱化操作。
+  - 未添加：显示清晰的“添加”操作。
+- 保留“补齐推荐”能力，但让它成为次级批量操作。
+- 减少绿色面积，只保留小型状态点/标签用于表达“来自已配置平台”。
+- 不改推荐生成逻辑、不改小组件数据模型、不改刘海收起态配置逻辑。
+
+### 实施步骤
+
+1. **重命名推荐区文案**
+   - 标题从“已配置推荐”改为“可添加的小组件推荐”。
+   - 副文案说明“来自已配置平台，可加入当前小组件”。
+
+2. **调整推荐区布局**
+   - 去掉大面积绿色背景和绿色描边。
+   - 使用普通设置页卡片背景。
+   - 推荐项改为更轻的 chip / list row。
+
+3. **区分已添加与未添加**
+   - 基于 `WidgetConfig.descriptor.semanticKey` 判断推荐是否已存在于当前列表。
+   - 已添加：
+     - 显示 `已添加` / checkmark。
+     - 灰色弱化。
+   - 未添加：
+     - 显示 `添加` 按钮。
+     - 点击后把该推荐插入当前小组件列表最前面。
+
+4. **保留批量补齐**
+   - `补齐推荐` 保留在右上角，但文案改为“补齐缺失”。
+   - 仅当存在未添加推荐时可点击。
+
+5. **验证**
+   - 编译验证 Settings UI。
+   - 手动验证：
+     - 已添加项不再像可重复添加项。
+     - 未添加项可单独添加。
+     - “补齐缺失”不会重复添加。
+
+### 验证
+
+- `swift test --filter Widget`
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+
+### 风险
+
+- 推荐区如果过于弱化，用户可能又找不到“补齐推荐”；需要保留清晰标题和批量按钮。
+- 只做 UI 表达，不改变推荐算法，所以平台是否推荐仍沿用上一轮决策。
+
+### 本轮实现结果（2026-06-08）
+
+- 推荐区标题改为“可添加的小组件推荐”，副文案说明来源于已配置平台。
+- 去掉大面积绿色背景和绿色描边，改为普通设置页卡片背景。
+- 推荐项改为更轻的 row/chip：
+  - 已添加项显示 `已添加` 和 checkmark，并弱化为灰色。
+  - 未添加项显示独立 `添加` 按钮。
+- 点击单个推荐项的“添加”会把该组件插到当前小组件列表最前面。
+- 批量按钮文案改为“补齐缺失”，仅当存在未添加推荐时可点击。
+- 推荐算法、刘海收起态配置、平台查询逻辑均未改动。
+
+### 验证结果
+
+- `swift test --filter Widget`：通过，34 个 Widget 相关测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+---
+
+## 当前重点：Settings 已配置可见性、小组件默认添加与刘海收起态配置（已实现，待手动体验验证）
 
 ### 问题
 
@@ -129,6 +323,44 @@
 - 如果把 OpenAI/Gemini/Anthropic 普通 API key 也自动生成用量组件，可能继续出现“已配置但无数据”的困惑；本轮默认不自动添加这些不稳定用量来源。
 - 刘海收起态可配置项过多会让 Settings 复杂；第一版只做左右 slot 来源选择，不做字体、颜色、宽度等细粒度调节。
 - 视觉优化会影响多个 widget 子组件，需要防止小尺寸下文本溢出或导致刘海 compact slot 变宽。
+
+### 本轮实现结果（2026-06-07）
+
+- 新增 `WidgetDescriptor`、`WidgetRecommendationEngine`、`NotchCollapsedStatusConfiguration`、`NotchCollapsedStatusEngine` 到 core：
+  - 已配置平台可生成推荐小组件。
+  - 推荐补齐按语义去重。
+  - 刘海收起态左右 slot 可分别指定来源，并在来源无数据或组件被删时回退自动值。
+- Settings → 平台页：
+  - 顶部显示“已配置 N”。
+  - 已配置平台排在列表前面，未配置平台保留原相对顺序。
+- Settings → 小组件页：
+  - 最前面新增“已配置推荐”区域。
+  - “补齐推荐”会把缺失推荐组件插到当前小组件列表最前面。
+  - 当前小组件列表为空时自动填充已配置平台推荐；没有可推荐项时回退默认组件。
+  - 新增“刘海收起态”区域，左右 slot 可分别选择自动、当前小组件或已配置推荐指标，并带 compact 预览。
+- 刘海 hosted 收起态：
+  - `NotchHostedSurfaceView` 改为读取 `notchCollapsedLeadingSource` / `notchCollapsedTrailingSource`。
+  - 左侧进度条和右侧百分比可来自不同指标。
+  - 保持原有 compact 小格形态，不扩大触发区或改动 hover 状态机。
+- 小组件视觉：
+  - 调整 bar/text/status/aggregate 的字号、字重、数字等宽和状态色。
+  - Settings 预览区改为更克制的暗色 HUD 背景。
+- `xcodegen generate` 在当前机器上写入现有 `.xcodeproj` 时失败，报目标已存在；本轮已手动把新增 Swift 文件加入 `token_hud.xcodeproj/project.pbxproj`。
+
+### 验证结果
+
+- `swift test --filter Widget`：通过，34 个 Widget 相关测试通过。
+- `swift test --filter NotchCollapsedStatusTests`：通过，2 个刘海收起态测试通过。
+- `swift test`：通过，142 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- 打开 Settings → 小组件，确认最前面出现“已配置推荐”。
+- 点击“补齐推荐”，确认已配置平台组件插入到当前列表最前面，且重复点击不会产生重复组件。
+- Settings → 平台页确认已配置平台排在前面，顶部显示已配置数量。
+- 在“刘海收起态”中分别调整左侧/右侧来源，确认刘海收起后内容随配置变化。
+- 真机确认小组件新字体和颜色在展开 HUD、Settings 预览、刘海 compact 小格里都自然。
 
 ---
 
