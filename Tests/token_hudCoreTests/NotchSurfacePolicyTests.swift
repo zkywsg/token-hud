@@ -97,4 +97,34 @@ struct NotchSurfacePolicyTests {
         #expect(!gate.isCurrent(old))
         #expect(gate.isCurrent(current))
     }
+
+    @Test func hideCleanupCancelsPendingWorkAndDragState() {
+        let cleanup = NotchPanelLifecyclePolicy.cleanup(for: .hide)
+
+        #expect(cleanup.cancelsCollapseTimer)
+        #expect(cleanup.removesMouseMoveMonitors)
+        #expect(cleanup.removesMouseDownMonitor)
+        #expect(cleanup.removesMouseUpMonitor)
+        #expect(cleanup.resetsDraggingState)
+    }
+
+    @Test func teardownCleanupRemovesEveryMonitor() {
+        let cleanup = NotchPanelLifecyclePolicy.cleanup(for: .teardown)
+
+        #expect(cleanup.cancelsCollapseTimer)
+        #expect(cleanup.removesMouseMoveMonitors)
+        #expect(cleanup.removesMouseDownMonitor)
+        #expect(cleanup.removesMouseUpMonitor)
+        #expect(cleanup.resetsDraggingState)
+    }
+
+    @Test func switchToDetachedKeepsMouseUpPathForSnapAndPersistence() {
+        let cleanup = NotchPanelLifecyclePolicy.cleanup(for: .switchToDetached)
+
+        #expect(cleanup.cancelsCollapseTimer)
+        #expect(cleanup.removesMouseMoveMonitors)
+        #expect(cleanup.removesMouseDownMonitor)
+        #expect(!cleanup.removesMouseUpMonitor)
+        #expect(!cleanup.resetsDraggingState)
+    }
 }

@@ -11,15 +11,28 @@ struct SettingsWindow: View {
     private let chromeTopInset: CGFloat = 18
 
     var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-                .frame(width: sidebarWidth)
-            Divider()
-            detail
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        ZStack {
+            SettingsGlassBackground()
+
+            HStack(spacing: 0) {
+                sidebar
+                    .frame(width: sidebarWidth)
+                Rectangle()
+                    .fill(Color.primary.opacity(0.08))
+                    .frame(width: 0.8)
+                detail
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .background(Color.white.opacity(0.035))
+            }
         }
-        .frame(width: 900, height: 620)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .frame(
+            minWidth: 760,
+            idealWidth: 900,
+            maxWidth: .infinity,
+            minHeight: 560,
+            idealHeight: 620,
+            maxHeight: .infinity
+        )
     }
 
     private var sidebar: some View {
@@ -28,18 +41,25 @@ struct SettingsWindow: View {
                 Button {
                     selectedSection = section
                 } label: {
-                    Label(section.title, systemImage: section.systemImage)
-                        .font(.system(size: 14, weight: .semibold))
-                        .frame(maxWidth: .infinity, alignment: .leading)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 9)
-                        .contentShape(Rectangle())
+                    HStack(spacing: 10) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(selectedSection == section ? Color.accentColor : Color.clear)
+                            .frame(width: 3, height: 18)
+                        Label(section.title, systemImage: section.systemImage)
+                            .font(.system(size: 14, weight: .semibold))
+                            .lineLimit(1)
+                        Spacer(minLength: 0)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 9)
+                    .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(selectedSection == section ? .white : .primary)
+                .foregroundStyle(selectedSection == section ? .primary : .secondary)
                 .background(
                     RoundedRectangle(cornerRadius: 8)
-                        .fill(selectedSection == section ? Color.accentColor : Color.clear)
+                        .fill(selectedSection == section ? Color.accentColor.opacity(0.16) : Color.clear)
                 )
             }
             Spacer()
@@ -47,7 +67,12 @@ struct SettingsWindow: View {
         .padding(.top, chromeTopInset)
         .padding(.horizontal, 12)
         .padding(.bottom, 12)
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(.regularMaterial.opacity(0.78))
+        .overlay(alignment: .trailing) {
+            Rectangle()
+                .fill(Color.white.opacity(0.08))
+                .frame(width: 1)
+        }
     }
 
     @ViewBuilder
@@ -59,6 +84,7 @@ struct SettingsWindow: View {
                     .padding(.top, 4)
             }
             .scrollIndicators(.visible)
+            .scrollContentBackground(.hidden)
             .contentMargins(.top, chromeTopInset, for: .scrollContent)
         case .platforms:
             PlatformListView()
@@ -69,7 +95,29 @@ struct SettingsWindow: View {
                     .environment(appFilterStore)
                     .padding()
             }
+            .scrollContentBackground(.hidden)
             .contentMargins(.top, chromeTopInset, for: .scrollContent)
+        }
+    }
+}
+
+private struct SettingsGlassBackground: View {
+    var body: some View {
+        ZStack {
+            Rectangle()
+                .fill(.regularMaterial)
+            Rectangle()
+                .fill(
+                    LinearGradient(
+                        colors: [
+                            Color.white.opacity(0.16),
+                            Color.white.opacity(0.07),
+                            Color.black.opacity(0.05)
+                        ],
+                        startPoint: .topLeading,
+                        endPoint: .bottomTrailing
+                    )
+                )
         }
     }
 }
@@ -117,6 +165,7 @@ struct GeneralSettingsView: View {
             SystemSection()
         }
         .formStyle(.grouped)
+        .scrollContentBackground(.hidden)
     }
 
     private func browseFile() {
@@ -137,6 +186,7 @@ private struct FloatingPanelSection: View {
     @AppStorage("floatingHotkeyModifiers") private var modifiers = 0
     @AppStorage("floatingPanelScale") private var scale = 1.0
     @AppStorage("overlayMode") private var overlayMode = "compact"
+    @State private var accessibilityEnabled = GlobalHotkeyManager.isAccessibilityEnabled
 
     var body: some View {
         Section("浮动面板") {
@@ -148,6 +198,19 @@ private struct FloatingPanelSection: View {
                 }
                 .pickerStyle(.segmented)
                 KeyRecorder(label: "快捷键", keyCode: $keyCode, modifiers: $modifiers)
+                if requiresAccessibilityPrompt {
+                    HStack(alignment: .firstTextBaseline, spacing: 10) {
+                        Label("全局快捷键需要辅助功能权限", systemImage: "lock")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .lineLimit(2)
+                        Spacer(minLength: 8)
+                        Button("授权") {
+                            GlobalHotkeyManager.requestAccessibility()
+                            refreshAccessibilityStatus()
+                        }
+                    }
+                }
                 Picker("缩放", selection: $scale) {
                     Text("0.5x").tag(0.5)
                     Text("0.75x").tag(0.75)
@@ -158,6 +221,24 @@ private struct FloatingPanelSection: View {
                 .pickerStyle(.menu)
             }
         }
+        .onAppear(perform: refreshAccessibilityStatus)
+        .onChange(of: keyCode) { _, _ in refreshAccessibilityStatus() }
+        .onChange(of: modifiers) { _, _ in refreshAccessibilityStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshAccessibilityStatus()
+        }
+    }
+
+    private var hasConfiguredHotkey: Bool {
+        keyCode >= 0 && modifiers != 0
+    }
+
+    private var requiresAccessibilityPrompt: Bool {
+        hasConfiguredHotkey && !accessibilityEnabled
+    }
+
+    private func refreshAccessibilityStatus() {
+        accessibilityEnabled = GlobalHotkeyManager.isAccessibilityEnabled
     }
 }
 
@@ -258,6 +339,7 @@ private struct KeyRecorder: View {
 
             if keyCode >= 0 {
                 Button(role: .destructive) {
+                    stopRecording()
                     keyCode = -1
                     modifiers = 0
                 } label: {
@@ -267,6 +349,7 @@ private struct KeyRecorder: View {
                 .buttonStyle(.plain)
             }
         }
+        .onDisappear(perform: stopRecording)
     }
 
     private var displayString: String {
@@ -275,6 +358,8 @@ private struct KeyRecorder: View {
     }
 
     private func startRecording() {
+        stopRecording()
+        isRecording = true
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             if event.type == .keyDown {
                 let cleanMods = event.modifierFlags.intersection([.command, .option, .control, .shift])

@@ -35,14 +35,21 @@ struct NotchHostedSurfaceView: View {
         let topY = topOffset(for: rect, in: layout)
         let collapsedRadius = min(14, max(0, rect.height / 2))
         let bottomRadius = bodyHeight > 0.5 ? 0 : collapsedRadius
-
-        return UnevenRoundedRectangle(
+        let capShape = UnevenRoundedRectangle(
             topLeadingRadius: 0,
             bottomLeadingRadius: bottomRadius,
             bottomTrailingRadius: bottomRadius,
             topTrailingRadius: 0
         )
-        .fill(Color.black.opacity(0.97))
+
+        return ZStack {
+            capShape
+                .fill(.thinMaterial)
+            capShape
+                .fill(Color.black.opacity(0.90))
+            capShape
+                .stroke(Color.white.opacity(bodyHeight > 0.5 ? 0.06 : 0.10), lineWidth: 0.7)
+        }
         .frame(width: rect.width, height: rect.height)
         .offset(x: rect.minX, y: topY)
     }
@@ -89,16 +96,21 @@ struct NotchHostedSurfaceView: View {
         let topY = topOffset(for: rect, in: layout)
         let bottomRadius = min(16, max(0, rect.height / 2))
         let isVisible = rect.height > 0.5
+        let panelShape = UnevenRoundedRectangle(
+            topLeadingRadius: 0,
+            bottomLeadingRadius: bottomRadius,
+            bottomTrailingRadius: bottomRadius,
+            topTrailingRadius: 0
+        )
 
         return ZStack {
-            UnevenRoundedRectangle(
-                topLeadingRadius: 0,
-                bottomLeadingRadius: bottomRadius,
-                bottomTrailingRadius: bottomRadius,
-                topTrailingRadius: 0
-            )
-            .fill(Color.black.opacity(0.96))
-            .shadow(color: Color.black.opacity(0.24 * opacity), radius: 18, y: 10)
+            panelShape
+                .fill(.regularMaterial)
+            panelShape
+                .fill(Color.black.opacity(0.70))
+            panelShape
+                .stroke(Color.white.opacity(0.12 * opacity), lineWidth: 0.8)
+                .shadow(color: Color.black.opacity(0.20 * opacity), radius: 18, y: 10)
 
             VStack {
                 if overlayMode == "grouped" {

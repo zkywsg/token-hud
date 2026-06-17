@@ -26,6 +26,7 @@ final class StateWatcher {
     private var dispatchSource: DispatchSourceFileSystemObject?
     private var fileDescriptor: Int32 = -1
     private var isRunning = false
+    private var watchGeneration = NotchTransitionGate()
 
     // MARK: - Init
 
@@ -38,15 +39,19 @@ final class StateWatcher {
     func start() {
         guard !isRunning else { return }
         isRunning = true
+        watchGeneration.advance()
         readNow()
         startWatching()
     }
 
     func stop() {
         isRunning = false
-        dispatchSource?.cancel()
-        dispatchSource = nil
-        if fileDescriptor >= 0 {
+        watchGeneration.advance()
+        if let source = dispatchSource {
+            source.cancel()
+            dispatchSource = nil
+            fileDescriptor = -1
+        } else if fileDescriptor >= 0 {
             close(fileDescriptor)
             fileDescriptor = -1
         }
@@ -59,8 +64,9 @@ final class StateWatcher {
         let fd = open(path, O_EVTONLY)
         guard fd >= 0 else {
             // File doesn't exist yet — retry after 2s on main queue
+            let token = watchGeneration.advance()
             DispatchQueue.main.asyncAfter(deadline: .now() + 2) { [weak self] in
-                guard let self, self.isRunning else { return }
+                guard let self, self.isRunning, self.watchGeneration.isCurrent(token) else { return }
                 self.readNow()
                 self.startWatching()
             }

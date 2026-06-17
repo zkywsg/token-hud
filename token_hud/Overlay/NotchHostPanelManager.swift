@@ -37,6 +37,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         .nonactivatingPanel
     ]
     private static let detachedStyleMask: NSWindow.StyleMask = [.borderless, .resizable, .nonactivatingPanel]
+    private static let hostedTransitionAnimation = Animation.spring(response: 0.32, dampingFraction: 0.82)
 
     init(stateWatcher: StateWatcher, widgetStore: WidgetStore) {
         self.stateWatcher = stateWatcher
@@ -62,9 +63,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
 
     func teardown() {
         NotificationCenter.default.removeObserver(self)
-        removeMouseMoveMonitors()
-        removeMouseUpMonitor()
-        removeMouseDownMonitor()
+        applyLifecycleCleanup(for: .teardown)
         saveState()
         detachedWindow?.close()
         overlayWindow?.close()
@@ -75,7 +74,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             saveState()
             detachedWindow?.orderOut(nil)
             overlayWindow?.orderOut(nil)
-            removeMouseMoveMonitors()
+            applyLifecycleCleanup(for: .hide)
         } else {
             NSApp.activate(ignoringOtherApps: true)
             if hostState.isDetached {
@@ -416,6 +415,25 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         }
     }
 
+    private func applyLifecycleCleanup(for event: NotchPanelLifecycleEvent) {
+        let cleanup = NotchPanelLifecyclePolicy.cleanup(for: event)
+        if cleanup.cancelsCollapseTimer {
+            cancelCollapseTimer()
+        }
+        if cleanup.removesMouseMoveMonitors {
+            removeMouseMoveMonitors()
+        }
+        if cleanup.removesMouseDownMonitor {
+            removeMouseDownMonitor()
+        }
+        if cleanup.removesMouseUpMonitor {
+            removeMouseUpMonitor()
+        }
+        if cleanup.resetsDraggingState {
+            isDragging = false
+        }
+    }
+
     private func handleMouseMove(_ event: NSEvent, source: MouseMoveSource) {
         guard hostState.isHosted, !isDragging else { return }
         let isInside = isMouseInNotchRegion()
@@ -542,7 +560,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         win.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .collapsed)
         removeMouseDownMonitor()
 
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+        withAnimation(Self.hostedTransitionAnimation) {
             hostState.expansionProgress = 0
         }
         installMouseMoveMonitors()
@@ -562,7 +580,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         win.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .expanded)
         installMouseDownMonitorIfNeeded()
 
-        withAnimation(.spring(response: 0.32, dampingFraction: 0.82)) {
+        withAnimation(Self.hostedTransitionAnimation) {
             hostState.expansionProgress = 1
         }
         installMouseMoveMonitors()
@@ -585,9 +603,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
 
     private func switchToDetached() {
         guard let win = detachedWindow else { return }
-        removeMouseMoveMonitors()
-        cancelCollapseTimer()
-        removeMouseDownMonitor()
+        applyLifecycleCleanup(for: .switchToDetached)
         applyDetachedStyle()
         win.isMovableByWindowBackground = true
         win.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .detached)
@@ -860,13 +876,12 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         refreshGeometry(for: screen)
         guard let frames = hostState.frames, let geo = hostState.geometry else { return }
 
-        let savedMode = UserDefaults.standard.string(forKey: Self.modeKey) ?? "detached"
-        var shouldRestoreHosted = savedMode == "hosted"
+        let savedMode = UserDefaults.standard.string(forKey: Self.modeKey)
         var didDiscardStaleDetachedFrame = false
         print(
             """
             [NotchDiagnostics] restore state start
-              savedMode: \(savedMode)
+              savedMode: \(savedMode ?? "nil")
               frames.expanded: \(frames.expanded)
               frames.collapsed: \(frames.collapsed)
               frames.snapZone: \(frames.snapZone)
@@ -877,15 +892,19 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         // like leftover hosted geometry (frame sitting inside the snap
         // zone or near the hosted surface). A previous bug could persist
         // such a frame mid-drag.
+        var savedDetachedCandidate: CGRect?
         if let dict = UserDefaults.standard.dictionary(forKey: Self.detachedFrameKey) as? [String: CGFloat],
            let x = dict["x"], let y = dict["y"],
            let w = dict["w"], let h = dict["h"] {
             let candidate = NSRect(x: x, y: y, width: w, height: h)
-            let shouldDiscard = NotchGeometryCalculator.shouldDiscardSavedDetachedFrame(
-                candidate,
+            savedDetachedCandidate = candidate
+            let restoreMode = NotchRestorePolicy.restoreMode(
+                savedMode: savedMode,
+                savedDetachedFrame: candidate,
                 screenFrame: screen.frame,
                 frames: frames
             )
+            let shouldDiscard = restoreMode == .hostedCollapsed && savedMode == "detached"
             print(
                 """
                 [NotchDiagnostics] restore detached frame candidate
@@ -895,7 +914,6 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             )
             if shouldDiscard {
                 didDiscardStaleDetachedFrame = true
-                shouldRestoreHosted = true
                 savedDetachedFrame = nil
                 UserDefaults.standard.removeObject(forKey: Self.detachedFrameKey)
             } else {
@@ -903,28 +921,35 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             }
         }
 
-        if shouldRestoreHosted {
+        let restoreMode = NotchRestorePolicy.restoreMode(
+            savedMode: savedMode,
+            savedDetachedFrame: savedDetachedCandidate,
+            screenFrame: screen.frame,
+            frames: frames
+        )
+
+        switch restoreMode {
+        case .hostedCollapsed:
             detachedWindow?.orderOut(nil)
             hostState.mode = .collapsed
+            hostState.expansionProgress = 0
             setFrameWithDiagnostics(
                 frames.expanded,
-                display: true,
+                display: false,
                 label: "restore hosted surface",
                 screen: screen,
                 geometry: geo
             )
-            hostState.expansionProgress = 0
             applyHostedStyle()
             overlayWindow?.isMovableByWindowBackground = false
             overlayWindow?.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .collapsed)
             prepareOverlayForDisplay(label: "restore hosted")
             installMouseMoveMonitors()
-        } else {
-            if let saved = savedDetachedFrame {
-                setFrameWithDiagnostics(saved, display: true, label: "restore detached saved", screen: screen, geometry: geo)
-            }
+        case .detached(let saved):
+            savedDetachedFrame = saved
             hostState.mode = .detached
             hostState.expansionProgress = 1
+            setFrameWithDiagnostics(saved, display: true, label: "restore detached saved", screen: screen, geometry: geo)
             applyDetachedStyle()
             detachedWindow?.isMovableByWindowBackground = true
             overlayWindow?.orderOut(nil)

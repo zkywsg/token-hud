@@ -105,3 +105,40 @@ struct NotchTransitionGate: Equatable {
         token == generation
     }
 }
+
+enum NotchPanelLifecycleEvent: Equatable {
+    case hide
+    case teardown
+    case switchToDetached
+}
+
+struct NotchPanelLifecycleCleanup: Equatable {
+    let cancelsCollapseTimer: Bool
+    let removesMouseMoveMonitors: Bool
+    let removesMouseDownMonitor: Bool
+    let removesMouseUpMonitor: Bool
+    let resetsDraggingState: Bool
+}
+
+enum NotchPanelLifecyclePolicy {
+    static func cleanup(for event: NotchPanelLifecycleEvent) -> NotchPanelLifecycleCleanup {
+        switch event {
+        case .hide, .teardown:
+            NotchPanelLifecycleCleanup(
+                cancelsCollapseTimer: true,
+                removesMouseMoveMonitors: true,
+                removesMouseDownMonitor: true,
+                removesMouseUpMonitor: true,
+                resetsDraggingState: true
+            )
+        case .switchToDetached:
+            NotchPanelLifecycleCleanup(
+                cancelsCollapseTimer: true,
+                removesMouseMoveMonitors: true,
+                removesMouseDownMonitor: true,
+                removesMouseUpMonitor: false,
+                resetsDraggingState: false
+            )
+        }
+    }
+}

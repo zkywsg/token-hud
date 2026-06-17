@@ -34,11 +34,15 @@ struct GroupedOverlayView: View {
             Text(label)
                 .font(.system(size: 10 * scale, weight: .regular, design: .rounded))
                 .foregroundColor(.white.opacity(0.4))
+                .lineLimit(1)
+                .truncationMode(.tail)
                 .frame(width: 70 * scale, alignment: .leading)
 
-            HStack(spacing: 6 * scale) {
-                ForEach(serviceWidgets) { config in
-                    WidgetRenderer(config: config, state: state)
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 6 * scale) {
+                    ForEach(serviceWidgets) { config in
+                        WidgetRenderer(config: config, state: state)
+                    }
                 }
             }
         }

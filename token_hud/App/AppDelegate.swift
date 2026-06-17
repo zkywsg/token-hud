@@ -45,10 +45,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
         hotkeyManager.setup()
 
-        if !GlobalHotkeyManager.isAccessibilityEnabled {
-            GlobalHotkeyManager.requestAccessibility()
-        }
-
         setupStatusBar()
         didFinishInitialLaunch = true
 
@@ -230,12 +226,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .environment(codexFetcher)
             .environment(apiPlatformFetcher)
         let win = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 560, height: 520),
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
             styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         win.title = "token_hud Settings"
+        win.isOpaque = false
+        win.backgroundColor = .clear
+        win.minSize = NSSize(width: 760, height: 560)
         win.center()
         win.contentView = NSHostingView(rootView: settingsView)
         win.isReleasedWhenClosed = false

@@ -20,6 +20,7 @@
 		30E795CACD86590CD9E9D8B9 /* AppWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C48CCA51D172C3DCF98FB3B /* AppWatcher.swift */; };
 		34B8718E407C7C76D123A018 /* NotchSurfacePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7536E4487B53C4EF8C154B46 /* NotchSurfacePolicy.swift */; };
 		35D7C64A7839E023FE5CD1CD /* PanelResizeCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22F16105F2EE3761E5514C69 /* PanelResizeCalculator.swift */; };
+		3848C0E6E3F84147B71C95E4 /* NotchRestorePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F766DF1667142689F8FB5AA /* NotchRestorePolicy.swift */; };
 		39FC590951E1660217CEE82E /* NotchHostPanelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1CBC92BDA19F74479D1BCC5 /* NotchHostPanelManager.swift */; };
 		3A37C347F92EE850901370D0 /* NotchSurfaceWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF2BBCA6B02D5038050AC31 /* NotchSurfaceWindow.swift */; };
 		40A6924E9860250BF8373C7D /* TextWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64092BD47770FC0CCEB8EFB /* TextWidget.swift */; };
@@ -60,6 +61,7 @@
 		15FA515D5AD06D073A0B6352 /* WidgetListEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetListEditor.swift; sourceTree = "<group>"; };
 		18C08E05A79F9F9E1A1A1A71 /* PanelAdaptiveScale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelAdaptiveScale.swift; sourceTree = "<group>"; };
 		1DE640C0DC152941C36FEAA5 /* CountdownWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountdownWidget.swift; sourceTree = "<group>"; };
+		1F766DF1667142689F8FB5AA /* NotchRestorePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchRestorePolicy.swift; sourceTree = "<group>"; };
 		22F16105F2EE3761E5514C69 /* PanelResizeCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelResizeCalculator.swift; sourceTree = "<group>"; };
 		240CEC7D3AC16015AF25170B /* NotchGeometryCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchGeometryCalculator.swift; sourceTree = "<group>"; };
 		2C48CCA51D172C3DCF98FB3B /* AppWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppWatcher.swift; sourceTree = "<group>"; };
@@ -231,6 +233,7 @@
 			children = (
 				5F0CA083103E2DD60D1D80EC /* CodexJWT.swift */,
 				240CEC7D3AC16015AF25170B /* NotchGeometryCalculator.swift */,
+				1F766DF1667142689F8FB5AA /* NotchRestorePolicy.swift */,
 				7536E4487B53C4EF8C154B46 /* NotchSurfacePolicy.swift */,
 				22F16105F2EE3761E5514C69 /* PanelResizeCalculator.swift */,
 				9A9DADE13CB5357B82D092F1 /* StateModel.swift */,
@@ -327,6 +330,7 @@
 				DD26E1DB0A41D26BD3A26788 /* ModelBreakdownWidget.swift in Sources */,
 				96D7EF137D976D0F179E73D0 /* MultiWidget.swift in Sources */,
 				F2E71681CDA08A979ACF1C4B /* NotchGeometryCalculator.swift in Sources */,
+				3848C0E6E3F84147B71C95E4 /* NotchRestorePolicy.swift in Sources */,
 				39FC590951E1660217CEE82E /* NotchHostPanelManager.swift in Sources */,
 				AF11C5D10A39AD7C0177817F /* NotchHostRootView.swift in Sources */,
 				18901551287115DD273D1C05 /* NotchHostState.swift in Sources */,

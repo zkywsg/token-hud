@@ -35,6 +35,35 @@ extension WidgetDescriptor: Equatable {
     }
 }
 
+public struct WidgetServiceGroup: Equatable, Sendable {
+    public let service: String
+    public let widgets: [WidgetDescriptor]
+
+    public init(service: String, widgets: [WidgetDescriptor]) {
+        self.service = service
+        self.widgets = widgets
+    }
+}
+
+public enum WidgetServiceGrouping {
+    public static func groups(for widgets: [WidgetDescriptor]) -> [WidgetServiceGroup] {
+        var services: [String] = []
+        var grouped: [String: [WidgetDescriptor]] = [:]
+
+        for widget in widgets {
+            if grouped[widget.service] == nil {
+                services.append(widget.service)
+                grouped[widget.service] = []
+            }
+            grouped[widget.service]?.append(widget)
+        }
+
+        return services.map { service in
+            WidgetServiceGroup(service: service, widgets: grouped[service] ?? [])
+        }
+    }
+}
+
 public enum WidgetRecommendationEngine {
     public static func recommendations(
         for snapshot: ProviderCredentialSnapshot,

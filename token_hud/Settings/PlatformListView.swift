@@ -8,6 +8,8 @@ struct PlatformListView: View {
     @State private var selectedPlatformID = "codex"
     @State private var revision = 0
     @State private var resetMessage: String?
+    @State private var resetMessageGate = NotchTransitionGate()
+    @State private var refreshingPlatformIDs = Set<String>()
     @State private var credentialSnapshot = ProviderCredentialSnapshot.empty
     @State private var authorizationNeededPlatformIDs = Set<String>()
 
@@ -19,17 +21,20 @@ struct PlatformListView: View {
         HStack(spacing: 0) {
             platformSidebar
                 .frame(width: 260)
-            Divider()
+            Rectangle()
+                .fill(Color.primary.opacity(0.08))
+                .frame(width: 0.8)
             PlatformDetailView(
                 provider: selectedProvider,
                 service: stateWatcher.currentState?.services[selectedProvider.id],
                 revision: revision,
                 credentialSnapshot: credentialSnapshot,
                 needsAuthorization: authorizationNeededPlatformIDs.contains(selectedProvider.id),
+                isRefreshInFlight: refreshingPlatformIDs.contains(selectedProvider.id),
                 onCredentialChanged: {
                     reloadCredentialSnapshot()
                     authorizationNeededPlatformIDs.remove(selectedProvider.id)
-                    resetMessage = "已保存认证；刷新会先静默查询。"
+                    showResetMessage("已保存认证；刷新会先静默查询。")
                 },
                 onClearData: {
                     clearData(for: selectedProvider.id)
@@ -46,6 +51,7 @@ struct PlatformListView: View {
             .environment(apiPlatformFetcher)
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(Color.clear)
         .overlay(alignment: .bottom) {
             if let resetMessage {
                 Text(resetMessage)
@@ -93,6 +99,7 @@ struct PlatformListView: View {
                 Text("已配置平台会排在前面。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(1)
             }
             .padding(.horizontal, 14)
             .padding(.top, 14)
@@ -118,15 +125,29 @@ struct PlatformListView: View {
                 .padding(.bottom, 14)
             }
         }
-        .background(Color(nsColor: .controlBackgroundColor))
+        .background(.ultraThinMaterial)
+        .overlay {
+            Color.white.opacity(0.035)
+                .allowsHitTesting(false)
+        }
     }
 
     private func refresh(provider: ProviderCapability, allowUserInteraction: Bool) {
-        Task {
+        guard provider.canRefresh else { return }
+        guard !refreshingPlatformIDs.contains(provider.id) else { return }
+
+        refreshingPlatformIDs.insert(provider.id)
+        let platformID = provider.id
+        Task { @MainActor in
+            defer {
+                refreshingPlatformIDs.remove(platformID)
+                stateWatcher.readNow()
+            }
             switch provider.credentialKind {
             case .codexLocalAuth:
                 await codexFetcher.fetch(allowUserInteraction: allowUserInteraction)
                 authorizationNeededPlatformIDs.remove(provider.id)
+                showResetMessage("已刷新 \(provider.displayName)")
             case .apiKey, .apiKeyAndConsoleCookie:
                 let result = await apiPlatformFetcher.fetchSingle(
                     platform: provider.id,
@@ -136,7 +157,6 @@ struct PlatformListView: View {
             case .sessionKey:
                 break
             }
-            stateWatcher.readNow()
         }
     }
 
@@ -147,18 +167,15 @@ struct PlatformListView: View {
         switch result {
         case .updated:
             authorizationNeededPlatformIDs.remove(provider.id)
-            resetMessage = "已刷新 \(provider.displayName)"
+            showResetMessage("已刷新 \(provider.displayName)")
         case .needsAuthorization:
             authorizationNeededPlatformIDs.insert(provider.id)
-            resetMessage = "\(provider.displayName) 需要授权刷新"
+            showResetMessage("\(provider.displayName) 需要授权刷新")
         case .noCredential:
             authorizationNeededPlatformIDs.remove(provider.id)
-            resetMessage = "\(provider.displayName) 未配置认证"
+            showResetMessage("\(provider.displayName) 未配置认证")
         case .noData:
-            resetMessage = "\(provider.displayName) 暂无可更新数据"
-        }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            resetMessage = nil
+            showResetMessage("\(provider.displayName) 暂无可更新数据")
         }
     }
 
@@ -189,12 +206,20 @@ struct PlatformListView: View {
         do {
             try StateServiceResetter.clearService(platformID)
             stateWatcher.readNow()
-            resetMessage = "已清空 \(ProviderCapability.catalog[platformID]?.displayName ?? platformID) 数据"
+            showResetMessage("已清空 \(ProviderCapability.catalog[platformID]?.displayName ?? platformID) 数据")
         } catch {
-            resetMessage = error.localizedDescription
+            showResetMessage(error.localizedDescription)
         }
-        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
-            resetMessage = nil
+    }
+
+    private func showResetMessage(_ message: String, duration: TimeInterval = 2.5) {
+        resetMessage = message
+        let token = resetMessageGate.advance()
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
+            if resetMessageGate.isCurrent(token) {
+                resetMessage = nil
+            }
         }
     }
 }
@@ -244,8 +269,11 @@ private struct PlatformSidebarRow: View {
 
     var body: some View {
         Button(action: onSelect) {
-            VStack(alignment: .leading, spacing: 6) {
+            VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
+                    RoundedRectangle(cornerRadius: 2)
+                        .fill(isSelected ? Color.accentColor : Color.clear)
+                        .frame(width: 3, height: 18)
                     Image(systemName: iconName)
                         .font(.system(size: 13, weight: .semibold))
                         .frame(width: 18)
@@ -253,19 +281,26 @@ private struct PlatformSidebarRow: View {
                     Text(provider.displayName)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.primary)
-                    Spacer()
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                    Spacer(minLength: 4)
                     StatusDot(color: credentialStatus.color)
                 }
                 StatusPill(
                     title: needsAuthorization ? "需授权" : dataStatus.title(for: provider.id),
                     color: needsAuthorization ? .orange : dataStatus.color
                 )
+                .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .padding(.horizontal, 10)
+            .padding(.horizontal, 9)
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.12) : Color.clear)
+            .background(isSelected ? Color.accentColor.opacity(0.14) : Color.white.opacity(0.035))
             .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(isSelected ? Color.accentColor.opacity(0.28) : Color.white.opacity(0.06), lineWidth: 0.8)
+            )
         }
         .buttonStyle(.plain)
     }
@@ -290,6 +325,7 @@ private struct PlatformDetailView: View {
     let revision: Int
     let credentialSnapshot: ProviderCredentialSnapshot
     let needsAuthorization: Bool
+    let isRefreshInFlight: Bool
     let onCredentialChanged: () -> Void
     let onClearData: () -> Void
     let onRefresh: () -> Void
@@ -334,24 +370,52 @@ private struct PlatformDetailView: View {
     }
 
     private var header: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(provider.displayName)
-                    .font(.title2.weight(.semibold))
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 12) {
+                headerTitle
+                Spacer(minLength: 12)
+                headerActions
+            }
+            VStack(alignment: .leading, spacing: 10) {
+                headerTitle
+                headerActions
+            }
+        }
+    }
+
+    private var headerTitle: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(provider.displayName)
+                .font(.title2.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.82)
+            ViewThatFits(in: .horizontal) {
                 HStack(spacing: 8) {
-                    StatusPill(title: credentialStatus.title, color: credentialStatus.color)
-                    StatusPill(title: dataStatus.title(for: provider.id), color: dataStatus.color)
-                    if needsAuthorization {
-                        StatusPill(title: "需要授权刷新", color: .orange)
-                    }
+                    statusPills
+                }
+                VStack(alignment: .leading, spacing: 6) {
+                    statusPills
                 }
             }
-            Spacer()
+        }
+    }
+
+    @ViewBuilder
+    private var statusPills: some View {
+        StatusPill(title: credentialStatus.title, color: credentialStatus.color)
+        StatusPill(title: dataStatus.title(for: provider.id), color: dataStatus.color)
+        if needsAuthorization {
+            StatusPill(title: "需授权刷新", color: .orange)
+        }
+    }
+
+    private var headerActions: some View {
+        HStack(spacing: 8) {
             if needsAuthorization {
                 Button {
                     onAuthorizeRefresh()
                 } label: {
-                    Label("授权刷新", systemImage: "key")
+                    Label("授权", systemImage: "key")
                 }
                 .disabled(isRefreshing || !provider.canRefresh)
                 .help("允许 macOS 弹出 Keychain 授权窗口，并只刷新当前平台")
@@ -372,6 +436,7 @@ private struct PlatformDetailView: View {
     }
 
     private var isRefreshing: Bool {
+        if isRefreshInFlight { return true }
         switch provider.credentialKind {
         case .codexLocalAuth: return codexFetcher.isFetching
         case .apiKey, .apiKeyAndConsoleCookie: return apiPlatformFetcher.isFetching
@@ -400,7 +465,7 @@ private struct PlatformCredentialPanel: View {
     private let extractor = SessionKeyExtractor()
 
     var body: some View {
-        GroupBox {
+        GlassPanel {
             VStack(alignment: .leading, spacing: 12) {
                 sectionHeader("认证", systemImage: "key")
                 switch provider.credentialKind {
@@ -465,6 +530,7 @@ private struct PlatformCredentialPanel: View {
                 Text(extractionStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
         }
     }
@@ -493,6 +559,7 @@ private struct PlatformCredentialPanel: View {
             Text(apiKeyHelpText(for: platformID))
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -545,6 +612,7 @@ private struct PlatformCredentialPanel: View {
             }
         }
         .font(.caption)
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     private var cookieContent: some View {
@@ -564,6 +632,7 @@ private struct PlatformCredentialPanel: View {
             Text("手动 Cookie 仅作为备用路径；推荐优先使用控制台自动连接。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
     }
 
@@ -578,27 +647,27 @@ private struct PlatformCredentialPanel: View {
                 Text("Codex 优先读取 ChatGPT/Codex usage 限额，并在失败时回退本地 `~/.codex/sessions` 日志。")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             case .expired:
                 Label("认证已过期，请在 Terminal 运行 `codex login`。", systemImage: "exclamationmark.triangle")
                     .font(.caption)
                     .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
             case .notConfigured:
                 Label("未找到 Codex 登录信息，请在 Terminal 运行 `codex login`。", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack(spacing: 8) {
-                Button {
-                    runCodexLogin()
-                } label: {
-                    Label("重新登录 Codex", systemImage: "terminal")
+            ViewThatFits(in: .horizontal) {
+                HStack(spacing: 8) {
+                    codexLoginButton
+                    codexFolderButton
                 }
-
-                Button {
-                    openCodexFolder()
-                } label: {
-                    Label("打开 ~/.codex", systemImage: "folder")
+                VStack(alignment: .leading, spacing: 8) {
+                    codexLoginButton
+                    codexFolderButton
                 }
             }
 
@@ -606,6 +675,7 @@ private struct PlatformCredentialPanel: View {
                 Text(codexActionStatus)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
             }
 
             Divider()
@@ -623,16 +693,35 @@ private struct PlatformCredentialPanel: View {
             Text("本地 Codex 用量不需要这个 key；它只用于可选 OpenAI Usage/Costs extras，通常需要组织或项目权限。")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
 
             if credentialSnapshot.hasCodexAdminKey {
                 Label("Extras key 已配置；刷新时会尝试查询 Usage/Costs。权限不足时不会覆盖本地 Codex 数据。", systemImage: "checkmark.circle")
                     .font(.caption)
                     .foregroundStyle(.green)
+                    .fixedSize(horizontal: false, vertical: true)
             } else {
                 Label("未配置 extras key；Codex 仍会使用 Codex 本地登录查询套餐和限额。", systemImage: "info.circle")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
+        }
+    }
+
+    private var codexLoginButton: some View {
+        Button {
+            runCodexLogin()
+        } label: {
+            Label("重新登录 Codex", systemImage: "terminal")
+        }
+    }
+
+    private var codexFolderButton: some View {
+        Button {
+            openCodexFolder()
+        } label: {
+            Label("打开 ~/.codex", systemImage: "folder")
         }
     }
 
@@ -750,7 +839,7 @@ private struct PlatformCapabilityPanel: View {
     @State private var isExpanded = false
 
     var body: some View {
-        GroupBox {
+        GlassPanel {
             VStack(alignment: .leading, spacing: 10) {
                 HStack(spacing: 12) {
                     sectionHeader("查询能力", systemImage: "chart.bar.doc.horizontal")
@@ -759,6 +848,7 @@ private struct PlatformCapabilityPanel: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
+                        .minimumScaleFactor(0.8)
                 }
 
                 InfoRow(label: "凭据", value: provider.credentialKind.displayTitle)
@@ -781,9 +871,10 @@ private struct PlatformMetricsPanel: View {
     let provider: ProviderCapability
     let service: Service?
     let dataStatus: ProviderDataStatus
+    @State private var isDetailExpanded = false
 
     var body: some View {
-        GroupBox {
+        GlassPanel {
             VStack(alignment: .leading, spacing: 12) {
                 sectionHeader("当前数据", systemImage: "gauge.with.dots.needle.67percent")
                 if let service, dataStatus == .ready {
@@ -796,9 +887,19 @@ private struct PlatformMetricsPanel: View {
                         }
                     }
                 } else {
-                    Label(dataStatus.detail(for: provider.id), systemImage: dataStatus.systemImage)
+                    VStack(alignment: .leading, spacing: 6) {
+                        Label(dataStatus.title(for: provider.id), systemImage: dataStatus.systemImage)
+                            .font(.caption.weight(.medium))
+                            .foregroundStyle(dataStatus.color)
+                        DisclosureGroup("查看详情", isExpanded: $isDetailExpanded) {
+                            Text(dataStatus.detail(for: provider.id))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                                .padding(.top, 3)
+                        }
                         .font(.caption)
-                        .foregroundStyle(dataStatus.color)
+                    }
                 }
             }
             .padding(4)
@@ -815,7 +916,7 @@ private struct PlatformResetPanel: View {
     @State private var isConfirmingLocalAuthRemoval = false
 
     var body: some View {
-        GroupBox {
+        GlassPanel {
             DisclosureGroup {
                 VStack(alignment: .leading, spacing: 12) {
                     resetButtons
@@ -1038,6 +1139,28 @@ private struct StatusDot: View {
     }
 }
 
+private struct GlassPanel<Content: View>: View {
+    let content: Content
+
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
+    }
+
+    var body: some View {
+        content
+            .padding(12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(.thinMaterial)
+            .background(Color.white.opacity(0.06))
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
+            )
+            .shadow(color: Color.black.opacity(0.05), radius: 10, y: 4)
+    }
+}
+
 private struct StatusPill: View {
     let title: String
     let color: Color
@@ -1046,6 +1169,8 @@ private struct StatusPill: View {
         Text(title)
             .font(.caption2.weight(.medium))
             .foregroundStyle(color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.78)
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
             .background(color.opacity(0.12))
@@ -1067,19 +1192,34 @@ private struct InfoRow: View {
     let value: String
 
     var body: some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-            Spacer()
-            Text(value)
-                .font(.caption.monospaced())
-                .foregroundStyle(.primary)
-                .lineLimit(1)
-                .truncationMode(.middle)
-                .frame(maxWidth: 260, alignment: .trailing)
-                .minimumScaleFactor(0.82)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline) {
+                labelText
+                Spacer(minLength: 12)
+                valueText
+                    .frame(maxWidth: 280, alignment: .trailing)
+            }
+            VStack(alignment: .leading, spacing: 3) {
+                labelText
+                valueText
+            }
         }
+    }
+
+    private var labelText: some View {
+        Text(label)
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+    }
+
+    private var valueText: some View {
+        Text(value)
+            .font(.caption.monospaced())
+            .foregroundStyle(.primary)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .minimumScaleFactor(0.82)
     }
 }
 
@@ -1093,8 +1233,10 @@ private struct QuotaStatusRow: View {
                     .font(.caption.weight(.medium))
                 Spacer()
                 Text(quotaValue)
-                    .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                .font(.caption.monospaced())
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.75)
             }
             if quota.total != nil {
                 ProgressView(value: min(max(quota.usedFraction, 0), 1))
@@ -1144,6 +1286,8 @@ private struct SessionStatusRow: View {
             Text(sessionText)
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .truncationMode(.tail)
         }
     }
 

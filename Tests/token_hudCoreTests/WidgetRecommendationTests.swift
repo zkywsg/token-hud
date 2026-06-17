@@ -84,4 +84,21 @@ struct WidgetRecommendationTests {
             WidgetDescriptor(service: "codex", metric: "remaining_time", style: "bar", quotaIndex: 1)
         ])
     }
+
+    @Test func serviceGroupsPreserveFirstAppearanceAndWidgetOrder() {
+        let widgets = [
+            WidgetDescriptor(id: "codex-5h", service: "codex", metric: "remaining_time", style: "bar", quotaIndex: 0),
+            WidgetDescriptor(id: "claude-time", service: "claude", metric: "remaining_time", style: "bar", quotaIndex: 0),
+            WidgetDescriptor(id: "codex-7d", service: "codex", metric: "remaining_time", style: "bar", quotaIndex: 1),
+            WidgetDescriptor(id: "mimo-plan", service: "mimo", metric: "plan_name", style: "text", quotaIndex: 0),
+            WidgetDescriptor(id: "claude-session", service: "claude", metric: "session_tokens", style: "text", quotaIndex: 0)
+        ]
+
+        let groups = WidgetServiceGrouping.groups(for: widgets)
+
+        #expect(groups.map(\.service) == ["codex", "claude", "mimo"])
+        #expect(groups[0].widgets.map(\.id) == ["codex-5h", "codex-7d"])
+        #expect(groups[1].widgets.map(\.id) == ["claude-time", "claude-session"])
+        #expect(groups[2].widgets.map(\.id) == ["mimo-plan"])
+    }
 }

@@ -555,4 +555,56 @@ struct NotchGeometryCalculatorTests {
             frames: frames
         ))
     }
+
+    @Test func restorePolicyDefaultsToHostedCollapsedWhenSavedModeIsMissing() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
+
+        #expect(NotchRestorePolicy.restoreMode(
+            savedMode: nil,
+            savedDetachedFrame: nil,
+            screenFrame: screen,
+            frames: frames
+        ) == .hostedCollapsed)
+    }
+
+    @Test func restorePolicyCollapsesHostedWhenSavedDetachedFrameTouchesTopSurface() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
+        let staleDetachedFrame = CGRect(
+            x: frames.expanded.minX,
+            y: frames.expanded.minY + 12,
+            width: frames.expanded.width,
+            height: frames.expanded.height
+        )
+
+        #expect(NotchRestorePolicy.restoreMode(
+            savedMode: "detached",
+            savedDetachedFrame: staleDetachedFrame,
+            screenFrame: screen,
+            frames: frames
+        ) == .hostedCollapsed)
+    }
+
+    @Test func restorePolicyKeepsDetachedFrameInWorkArea() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let frames = NotchGeometryCalculator.notchFrames(screenFrame: screen, geometry: geo)
+        let detachedFrame = CGRect(x: 180, y: 360, width: 360, height: 120)
+
+        #expect(NotchRestorePolicy.restoreMode(
+            savedMode: "detached",
+            savedDetachedFrame: detachedFrame,
+            screenFrame: screen,
+            frames: frames
+        ) == .detached(detachedFrame))
+    }
 }

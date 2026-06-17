@@ -6,10 +6,13 @@ struct CompactOverlayContent: View {
     @Environment(\.panelAdaptiveScale) private var scale
 
     var body: some View {
-        HStack(spacing: 6 * scale) {
-            ForEach(store.widgets) { config in
-                WidgetRenderer(config: config, state: watcher.effectiveState, showServiceLabel: true)
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6 * scale) {
+                ForEach(store.widgets) { config in
+                    WidgetRenderer(config: config, state: watcher.effectiveState, showServiceLabel: true)
+                }
             }
+            .padding(.horizontal, 1)
         }
     }
 }

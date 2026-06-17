@@ -13,6 +13,5 @@ struct NotchHostRootView: View {
                     .transition(.identity)
             }
         }
-        .animation(.spring(response: 0.32, dampingFraction: 0.82), value: hostState.expansionProgress)
     }
 }

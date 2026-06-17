@@ -2,6 +2,707 @@
 
 这个文件跟踪当前项目正在进行的实现工作。保持内容小而可执行；可长期保留的决策沉淀到 `docs/`。
 
+## 当前重点：Xcode 运行时 LLDB attach failed 修复（待确认）
+
+### 问题
+
+用户在 Xcode 运行 app 时看到：
+
+- `Could not attach to pid`
+- `attach failed (attached to process, but could not pause execution; attach failed)`
+
+本轮排查结论：
+
+- 直接运行 Debug 产物时，app 可以常驻运行，没有立即崩溃。
+- 当前 Xcode Debug 产物包含 `token_hud.debug.dylib`，构建设置里 `ENABLE_DEBUG_DYLIB = YES`。
+- 该产物带有 `com.apple.security.get-task-allow = true`，不是缺少调试授权。
+- 命令行 LLDB 附加到 `ENABLE_DEBUG_DYLIB=YES` 的进程时复现同样错误。
+- 用同一份代码临时构建 `ENABLE_DEBUG_DYLIB=NO` 后，LLDB 可以正常 attach/detach。
+
+因此根因锁定为当前 Xcode/LLDB 与 Debug Dylib 模式组合下无法暂停该 macOS app 进程，而不是 app 业务代码崩溃。
+
+### 本轮目标
+
+- 让 Xcode 运行 `token_hud` 时能正常启动并附加调试器。
+- 保持 Debug 可调试能力和现有 app 行为不变。
+- 不改 UI、状态模型、权限逻辑和 runtime 行为。
+
+### 实施步骤
+
+1. 在 `project.yml` 的 target build settings 中显式设置 `ENABLE_DEBUG_DYLIB: "NO"`。
+2. 同步更新 `token_hud.xcodeproj/project.pbxproj` 中 Debug/Release 对应 build settings，避免 Xcode 当前项目继续使用旧值。
+3. 重新构建验证：
+   - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+4. 运行构建产物并用 LLDB attach 验证：
+   - app 进程保持运行。
+   - `lldb -p <pid> -o detach -o quit` 可以成功暂停并 detach。
+
+### 验证
+
+- `xcodebuild` build 通过。
+- `codesign -d --entitlements :-` 仍保留 `com.apple.security.get-task-allow = true`。
+- 构建产物不再生成/依赖 `token_hud.debug.dylib`。
+- LLDB attach 成功，Xcode 不应再出现同类 attach failed。
+
+### 风险
+
+- 关闭 `ENABLE_DEBUG_DYLIB` 只影响 Xcode 的新式 Debug Dylib 调试模式；常规源码断点和 LLDB 调试仍可用。
+- 当前项目同时维护 `project.yml` 和已生成的 `.xcodeproj`，需要同步修改两处，避免下次打开 Xcode 和下次生成项目配置不一致。
+- 如果后续升级 Xcode 后该 bug 被修复，可以再评估是否恢复 Debug Dylib。
+
+## 当前重点：App 动画、溢出与重复操作稳定性深度体检（已实现，待手动体验验证）
+
+### 问题
+
+用户希望再做一次全 App 深度体检，重点优化：
+
+- 动画不连贯。
+- 页面溢出。
+- 开启应用或重复操作时可能出现的 bug。
+
+本轮已阅读：
+
+- `PLAN.md`
+- `docs/project-summary.md`
+- `docs/work-log/2026-06-01-notch-fusion-smooth.md`
+- `docs/work-log/2026-06-08-notch-restore-stale-frame.md`
+- `docs/work-log/2026-06-11-startup-collapse-accessibility.md`
+- `token_hud/Overlay/NotchHostPanelManager.swift`
+- `token_hud/Overlay/NotchHostedSurfaceView.swift`
+- `token_hud/Overlay/NotchHostRootView.swift`
+- `Sources/token_hudCore/NotchSurfacePolicy.swift`
+- `token_hud/Settings/SettingsWindow.swift`
+- `token_hud/Settings/PlatformListView.swift`
+- `token_hud/Settings/WidgetListEditor.swift`
+- `token_hud/State/StateWatcher.swift`
+- `token_hud/State/AppWatcher.swift`
+
+初步体检发现的高风险点：
+
+- 刘海 hosted 浮窗的状态机仍有重复操作风险：
+  - `toggle()` 隐藏窗口时只移除 mouse move monitor，没有统一取消 collapse timer、mouseDown/mouseUp monitor 和拖拽状态；如果隐藏前有 collapse timer 排队，后续可能把 overlay 又拉回前台。
+  - `isDragging` 依赖 local mouseUp monitor 复位；如果 mouseUp 丢失，后续 hover 会被 `guard !isDragging` 阻断，`saveState()` 也会因为 `isDragging` 直接返回。
+  - `screenParametersChanged()` 在 hosted expanded 时重新打开 `isMovableByWindowBackground`，和“hosted frame 始终 canonical”的约束需要重新核对。
+- 动画路径分散：
+  - hosted/collapsed/expanded/detached 的切换、`prepareOverlayForDisplay`、`setFrame`、`orderFront/orderOut` 和 SwiftUI `withAnimation` 分散在多个函数里，重复点击/hover 可能产生时序竞争。
+  - Widget 内部 ring/bar/countdown 也有独立 animation，和外层 expanded/collapsed 动画同时发生时可能显得不连贯。
+- Settings 页存在布局溢出风险：
+  - `SettingsWindow` 固定 `900x620`，sidebar 和 detail 均有固定宽度，窗口被系统缩放或内容变长时缺少统一最小宽度/换行策略。
+  - `PlatformListView` 仍有多处固定宽度（sidebar 260、label/value width、status pill），长 provider 名、长路径、长错误和权限文案可能挤压。
+  - `WidgetListEditor` 的预览、分组预览和小组件管理区包含多个固定 card width / fixed height，配置数量多时容易横向或纵向拥挤。
+  - `KeyRecorder` 没有 `onDisappear` 清理 local monitor，重复打开/关闭设置页时可能留下录制状态。
+- 重复操作并发风险：
+  - `PlatformListView.refresh()` 每次点击都会启动新的 `Task`，没有按平台做 in-flight guard；连续点击可能出现旧结果覆盖新结果。
+  - `resetMessage` 使用多个 `DispatchQueue.main.asyncAfter`，旧 timer 可能清掉新的提示。
+  - `StateWatcher` 在 state file 不存在时用 `asyncAfter` 重试；路径变化或 stop/start 后旧重试闭包可能在新一轮运行中继续触发，造成重复 watcher 或多次 read。
+
+### 本轮目标
+
+- 让启动、hover、隐藏/显示、拖拽、吸附、屏幕变化这些浮窗动作更稳：
+  - 关闭窗口或切换状态时统一清理 timer/monitor/drag state。
+  - 重复 hover、重复点击菜单项、重复拖拽不会让 overlay 意外重新出现、卡住或忽略 hover。
+  - hosted frame 继续保持 canonical，不引入新的漂移路径。
+- 让动画更连贯：
+  - hosted 展开/收起只由一个清晰的 transition coordinator 驱动。
+  - 减少外层 surface 动画与内部 widget 动画互相抢节奏。
+  - 不做大规模视觉重做，只修掉明显不顺和状态竞争。
+- 修复页面溢出：
+  - Settings 三页在当前窗口宽度下不横向溢出、不重叠。
+  - 长文本、长路径、长错误、长平台状态统一换行/截断。
+  - 小组件多、模型多、服务多时仍可滚动查看，不撑破容器。
+- 加固重复操作：
+  - 刷新、授权刷新、清空数据、快捷键录制、state watcher 重启都要避免旧任务覆盖新状态。
+- 保留已有行为：
+  - 不改平台认证数据模型。
+  - 不改 state.json schema。
+  - 不回滚前几轮 Settings 磨砂、小组件分组删除、启动收起和权限入口改动。
+
+### 方案取舍
+
+- **推荐方案：集中体检 + 小步修复**
+  - 先加/调整 core 纯逻辑测试和少量 app 侧生命周期 guard。
+  - 优点：能覆盖这次提到的启动/重复操作问题，风险受控。
+  - 缺点：不会一次性重构所有 Settings 大文件。
+- **更激进方案：重构浮窗状态机和 Settings 页面结构**
+  - 把 `NotchHostPanelManager` 拆成状态机/窗口控制器/monitor 管理器，把 Settings 大文件拆分。
+  - 优点：长期结构更干净。
+  - 缺点：改动面大，容易引入新回归，不适合当前已有多轮未提交视觉改动的工作区。
+- **保守方案：只修肉眼可见溢出和一个两个动画点**
+  - 优点：最快。
+  - 缺点：无法覆盖“开启应用或重复操作时”的深层 bug。
+
+本轮建议采用“集中体检 + 小步修复”。
+
+### 实施步骤
+
+1. **建立体检清单与可测策略**
+   - 复核现有 `NotchTransitionPolicy`、`NotchHoverRegionPolicy`、`NotchRestorePolicy` 测试覆盖。
+   - 增加或调整纯逻辑测试，覆盖：
+     - 隐藏窗口时 pending collapse 不应再次显示 overlay。
+     - 拖拽结束/取消后 drag state 必须复位。
+     - repeated hover collapse/expand 的 token gate 不接受旧 timer。
+     - state file missing retry 在 stop/start 或路径变化后不产生旧重试副作用。
+
+2. **加固刘海浮窗状态机**
+   - 增加一个内部 cleanup 方法，用于隐藏、detach、teardown、screen change 前清理：
+     - collapse timer
+     - mouseDown/mouseUp monitor
+     - dragging flag
+   - `toggle()` hide 分支调用 cleanup，避免隐藏后旧 timer 把 overlay order front。
+   - mouseUp monitor 丢失时增加兜底：切换到 detached/hidden/teardown 时强制 `isDragging = false`。
+   - 复核 expanded 是否还需要 `isMovableByWindowBackground = true`；如果会破坏 canonical frame，改为更明确的 body mouseDown → detach 路径。
+   - 保持 `hostState.expansionProgress` 是 hosted 动画的唯一视觉进度。
+
+3. **统一动画节奏**
+   - 为 hosted 展开/收起抽出单一 spring 参数，避免多个地方硬编码。
+   - 在 body 逐渐出现阶段降低内部 widget animation 抢节奏的概率；必要时只让外层 opacity/scale 动，内部数值动画保留在数据变化场景。
+   - `NotchHostRootView` 避免对 `expansionProgress` 外再叠加多余隐式动画。
+
+4. **修复 Settings 页面溢出**
+   - `SettingsWindow` 增加合理最小宽高和 detail 区自适应约束。
+   - `PlatformListView`：
+     - header / 状态 pill / 操作按钮继续使用 `ViewThatFits` 或换行策略。
+     - value/path/error/token 文案统一 middle truncation 或 disclosure。
+     - 固定宽度字段改为 min/max 或 flexible layout。
+   - `WidgetListEditor`：
+     - 当前效果/推荐/管理区限制 card 最小最大宽度。
+     - widget 多时优先滚动，不撑破外层。
+     - service/model label 加强截断。
+   - `KeyRecorder` 增加 `onDisappear` 停止录制并移除 monitor。
+
+5. **加固重复操作与并发**
+   - `PlatformListView` 增加 per-platform refreshing 状态：
+     - 同平台刷新进行中时禁用按钮或合并点击。
+     - 旧结果不能覆盖新结果。
+   - `resetMessage` 改用 message token，旧 `asyncAfter` 只能清理自己创建的消息。
+   - `StateWatcher` missing-file retry 增加 generation token，stop/path change 后旧 retry 无效。
+   - 检查 `CodexFetcher` / `APIPlatformFetcher` 的 timer reschedule 是否会重复安装；如果已有 guard，记录不改。
+
+6. **验证**
+   - 自动验证：
+     - `swift test --filter NotchSurfacePolicy`
+     - `swift test --filter NotchGeometryCalculator`
+     - `swift test --filter Widget`
+     - `swift test`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动验证：
+     - 启动 app 多次，顶部 HUD 不闪大面板、不漂移。
+     - 快速 hover 刘海、移出、再 hover，动画不跳、不重影。
+     - 连续点击菜单栏开关浮窗，隐藏后不会被旧 timer 拉回前台。
+     - expanded body 拖动、松手、再吸附回刘海，drag state 不残留。
+     - 连续点击平台刷新/授权刷新，按钮状态和提示不互相覆盖。
+     - Settings 小组件/平台/通用页在默认宽度和较窄宽度下没有文字重叠、横向撑破或按钮挤出。
+
+### 验证
+
+- 单元测试覆盖新增策略或生命周期 helper。
+- 全量 Swift 测试确保 core 行为不回退。
+- Xcode app build 确保新增文件/修改能进入 app target。
+- 手动重点验证真实 macOS 窗口和 hover/drag 行为，因为这部分不是纯测试能完全覆盖。
+
+### 风险
+
+- hosted 浮窗拖拽逻辑历史上多次修改，本轮必须小步验证，避免重新引入“透明大窗口漂移”。
+- macOS 全局/local event monitor 在不同激活状态下行为不同；代码里要以清理和兜底为主，不能依赖某个事件一定到达。
+- Settings 页面文件已经较大，本轮只做局部布局和生命周期修复，不顺手做大拆分。
+- 当前工作区已有多轮未提交 UI 改动，本轮不会回滚它们；如果某些视觉问题来自之前改动，会在其基础上继续修正。
+
+### 本轮实现结果（2026-06-17）
+
+- 浮窗生命周期加固：
+  - 新增 `NotchPanelLifecyclePolicy` 和测试，明确 hide/teardown/switchToDetached 需要清理的 timer、monitor 和 drag state。
+  - `NotchHostPanelManager` 的 hide、teardown、switchToDetached 改用统一 cleanup。
+  - hide/teardown 会取消 collapse timer、移除 mouse move/down/up monitor，并复位 `isDragging`。
+  - switchToDetached 会取消 collapse 和 mouse move/down monitor，但保留 mouseUp 路径与 `isDragging`，避免拖拽中的 transient frame 被写盘。
+- 动画节奏优化：
+  - 移除 `NotchHostRootView` 对 `expansionProgress` 的额外隐式 animation。
+  - hosted 展开/收起的 spring 参数集中在 `NotchHostPanelManager.hostedTransitionAnimation`。
+- 重复操作加固：
+  - `PlatformListView` 增加 per-platform `refreshingPlatformIDs`，同平台刷新进行中会忽略重复点击。
+  - `resetMessage` 使用 `NotchTransitionGate` token，旧延迟清理不能清掉新提示。
+  - `StateWatcher` 缺文件重试使用 generation token，stop/path change 后旧 retry 失效。
+  - `StateWatcher.stop()` 避免 dispatch source cancel handler 和 stop 本身重复 close 同一个 file descriptor。
+  - `KeyRecorder` 在 disappear 和清除快捷键时停止录制并移除 local monitor。
+- 溢出处理：
+  - Settings window 默认内容尺寸改为 900x620，最小尺寸 760x560。
+  - `SettingsWindow` root 从固定 frame 改为 min/ideal/max 自适应 frame。
+  - 平台页 header status pills 使用 `ViewThatFits`，窄宽度下自动换行。
+  - `InfoRow` 改为横向/纵向自适应，长值 middle truncation。
+  - 小组件页 header 使用 `ViewThatFits`，推荐 chip 的 service/metric 文案增加截断保护。
+- 已沉淀 work-log：
+  - `docs/work-log/2026-06-17-app-health-pass.md`
+
+### 验证结果
+
+- `swift test --filter NotchSurfacePolicy`：通过，19 个测试通过。
+- `swift test --filter NotchGeometryCalculator`：通过，50 个测试通过。
+- `swift test --filter Widget`：通过，37 个测试通过。
+- `swift test`：通过，153 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- 快速打开/隐藏浮窗，确认隐藏后不会被旧 collapse timer 拉回前台。
+- 快速 hover 刘海、移出、再 hover，确认展开/收起不跳、不重影。
+- expanded body 拖动到 detached，再吸附回刘海，确认 drag state 不残留。
+- 在平台页连续点击刷新/授权刷新，确认按钮和提示稳定。
+- 缩窄 Settings window，检查平台页和小组件页是否仍有文字重叠或横向撑破。
+
+## 当前重点：启动浮窗自动收起与辅助功能授权弹窗修复（已实现，待手动体验验证）
+
+### 问题
+
+用户反馈两个启动体验问题：
+
+- 顶部浮窗打开时会以大尺寸/大字体状态卡在屏幕顶部，部分内容被刘海遮挡；必须再做一次操作才会缩起来，卡顿感明显。期望启动后直接自动收起。
+- 系统反复弹出“辅助功能访问”授权提示，并要求输入密码授权。
+
+本轮已阅读：
+
+- `PLAN.md`
+- `docs/work-log/2026-06-08-notch-restore-stale-frame.md`
+- `docs/work-log/2026-06-01-notch-fusion-smooth.md`
+- `Overlay/NotchHostPanelManager.swift`
+- `Overlay/GlobalHotkeyManager.swift`
+- `App/AppDelegate.swift`
+- `Sources/token_hudCore/NotchGeometryCalculator.swift`
+
+初步定位：
+
+- 浮窗问题和历史 `notch-restore-stale-frame` 属同一类：app 启动恢复了旧的 detached/expanded 尺寸或顶部附近的窗口状态。当前已有 stale frame guard，但启动默认值和恢复顺序仍偏宽松，可能让“看起来像 hosted 展开态”的窗口以 detached 形态显示出来。
+- 当前 `restoreState()` 的默认 saved mode 是 `"detached"`，这与产品主形态“刘海融合 HUD（hosted）”不一致；没有可靠状态时应优先恢复 hosted collapsed，而不是显示自由浮窗。
+- 当前 app 启动时会无条件执行：
+  - `hotkeyManager.setup()` 安装全局键盘监听。
+  - `GlobalHotkeyManager.requestAccessibility()` 主动触发系统辅助功能授权弹窗。
+- `GlobalHotkeyManager.setup()` 无论用户是否配置了全局快捷键，都会安装 global event monitor；这会放大系统权限提示出现频率。
+
+### 本轮目标
+
+- 启动后顶部 HUD 默认进入 hosted collapsed 状态：
+  - 没有可靠历史状态时，默认收起到刘海位置。
+  - 如果历史 detached frame 靠近刘海、菜单栏或 hosted expanded 区域，视为不可靠，直接恢复 hosted collapsed。
+  - 避免 first frame 先显示大面板再收起。
+- 保留真正的 detached 使用场景：
+  - 用户把浮窗拖到屏幕中部/远离刘海区域时，重启后仍可恢复自由浮窗。
+  - 不粗暴清空所有 detached 状态。
+- 停止启动时反复弹辅助功能授权：
+  - app 启动不主动调用 `AXIsProcessTrustedWithOptions(prompt: true)`。
+  - 未配置全局快捷键时不安装 global key monitor。
+  - 已配置快捷键但未授权时，只在设置页给出明确入口，由用户主动触发授权。
+- 让全局快捷键仍可用：
+  - 用户授权后，app 重新激活或设置变化时刷新 global monitor。
+  - local monitor 保留，app 前台时快捷键仍可响应。
+
+### 实施步骤
+
+1. **补充/调整纯逻辑测试**
+   - 在 `NotchGeometryCalculatorTests` 中覆盖顶部附近、大尺寸、与 menu bar/hosted expanded 区域相交的 detached frame。
+   - 验证远离刘海的 detached frame 不会被误判为 stale。
+   - 如需要，增加“无 saved mode 默认 hosted collapsed”的恢复策略测试，优先放在 core 可测逻辑里。
+
+2. **收紧启动恢复策略**
+   - 将没有 saved mode 时的默认恢复从 detached 调整为 hosted collapsed。
+   - 在 `restoreState()` 中先设置 `hostState.mode = .collapsed` 和 `expansionProgress = 0`，再显示 overlay window，减少首帧大面板闪现。
+   - 对 saved detached frame 增加更保守的顶部/刘海区域判断；命中时不显示 detached window，直接恢复 hosted collapsed。
+   - 保持远离顶部的 detached frame 原样恢复。
+
+3. **修复辅助功能弹窗触发方式**
+   - 移除 `AppDelegate.applicationDidFinishLaunching` 中启动即请求辅助功能权限的逻辑。
+   - `GlobalHotkeyManager.setup()` 改为：
+     - 总是安装 local monitor。
+     - 仅当用户配置了有效全局快捷键且 `AXIsProcessTrusted()` 为 true 时安装 global monitor。
+     - 监听 `UserDefaults.didChangeNotification` 和 app 激活事件，必要时刷新 global monitor。
+   - 避免重复安装 monitor，`teardown()` 清理新增 observer。
+
+4. **设置页增加明确授权入口**
+   - 在通用/浮窗快捷键设置区域显示辅助功能状态。
+   - 当用户已配置全局快捷键但未授权时，展示简短提示和“打开/请求辅助功能权限”按钮。
+   - 只有点击按钮时才调用 `GlobalHotkeyManager.requestAccessibility()`。
+   - 文案控制简洁，不做大段说明。
+
+5. **验证**
+   - 自动验证：
+     - `swift test --filter NotchGeometryCalculator`
+     - `swift test --filter Widget`
+     - `swift test`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动验证：
+     - 启动 app，顶部 HUD 直接处于刘海 collapsed 状态，不出现大字体面板卡住。
+     - 关闭/重启 app，远离刘海的自由浮窗仍能恢复。
+     - 启动 app 时不自动弹出辅助功能授权。
+     - 配置全局快捷键后，设置页显示权限状态；点击授权入口后再授权。
+     - 授权完成并回到 app 后，全局快捷键可用。
+
+### 验证
+
+- 单元测试覆盖启动恢复几何判断，避免再次把顶部旧 detached frame 当成可恢复浮窗。
+- 编译验证 app target。
+- 手动检查权限弹窗只由用户在设置页点击触发，不在普通启动时触发。
+
+### 风险
+
+- 如果用户刻意把 detached 浮窗贴近顶部但不想吸附刘海，本轮会更倾向于把它恢复为 hosted collapsed；这是为了解决启动遮挡刘海和卡住问题的取舍。
+- macOS 辅助功能权限状态不会实时推送给 app；需要通过 app 重新激活、设置变化或重启来刷新 global monitor。本轮会在 app 激活时刷新，降低用户感知成本。
+- 如果系统提示来自其他权限链路（例如 Keychain），本轮只解决截图中明确的辅助功能授权；后续需按新截图/日志继续拆分。
+
+### 本轮实现结果（2026-06-11）
+
+- 新增 `NotchRestorePolicy`，把启动恢复策略从窗口管理器中抽成可测试的 core 逻辑：
+  - 缺失 saved mode 时默认恢复 hosted collapsed。
+  - saved detached frame 靠近刘海/hosted surface 时视为 stale，恢复 hosted collapsed。
+  - 远离顶部工作区的 detached frame 保持自由浮窗恢复。
+- `NotchHostPanelManager.restoreState()` 改用 `NotchRestorePolicy`：
+  - hosted 恢复时先设置 `.collapsed` 和 `expansionProgress = 0`。
+  - hosted surface 恢复 frame 时不强制显示首帧，避免大面板先闪出来。
+  - stale detached frame 继续从 UserDefaults 中移除。
+- 移除 app 启动时主动请求辅助功能权限的逻辑。
+- `GlobalHotkeyManager` 改为按需安装 global monitor：
+  - local monitor 始终保留，app 前台可用。
+  - 只有配置了有效快捷键且辅助功能已授权时，才安装 global monitor。
+  - 监听 UserDefaults 变化和 app 激活，授权后回到 app 会刷新监听状态。
+- Settings 通用 → 浮动面板区域增加辅助功能授权入口：
+  - 只有已配置快捷键且未授权时显示。
+  - 只有点击“授权”按钮时才触发系统权限提示。
+- 已沉淀 work-log：
+  - `docs/work-log/2026-06-11-startup-collapse-accessibility.md`
+
+### 验证结果
+
+- `swift test --filter NotchGeometryCalculator`：通过，50 个测试通过。
+- `swift test --filter Widget`：通过，37 个测试通过。
+- `swift test`：通过，150 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- 启动 app，顶部 HUD 应直接处于刘海 collapsed 状态，不再显示大字体展开面板卡住。
+- 启动 app 不应自动弹出辅助功能授权弹窗。
+- 在 Settings → 通用 → 浮动面板配置快捷键后，如未授权，应只在设置页显示授权入口。
+- 授权完成并回到 app 后，全局快捷键应恢复可用。
+
+## 当前重点：Settings 全局简洁化与磨砂玻璃视觉（已实现，待手动体验验证）
+
+### 问题
+
+用户希望排查整个 app 里 UI 不够简洁清爽、文字溢出和排版不合理的问题，并把页面与浮窗统一调整为“半透明但不要太透”的磨砂质感。
+
+本轮已确认：
+
+- 用户提到的“赛题页面”按当前仓库实际结构理解为 Settings 设置页面，重点是平台页。
+- 当前 app 主要视觉面包括：
+  - Settings 外壳：`Settings/SettingsWindow.swift`
+  - 平台页：`Settings/PlatformListView.swift`
+  - 小组件页：`Settings/WidgetListEditor.swift`
+  - 自由浮窗：`Overlay/FloatingPanelView.swift`
+  - 刘海 hosted 浮窗：`Overlay/NotchHostedSurfaceView.swift`
+  - 浮窗内容：`Overlay/CompactOverlayContent.swift`、`Overlay/GroupedOverlayView.swift`、`Widgets/*`
+
+初步排查：
+
+- Settings window 当前是普通 `NSWindow` + `Color(nsColor: .windowBackgroundColor)`，整体没有透明/磨砂层。
+- Settings sidebar 和平台页 sidebar 使用纯系统背景，detail 区与 sidebar 层级分割偏硬，不够轻。
+- 平台页详情里 `GroupBox` 多、说明文字长，尤其是 Codex extras、MiniMax/MiMo 能力说明、usageUnsupported 详情，容易形成大段文字墙。
+- 平台页 header 在窄宽度下同时放标题、多个状态 pill 和刷新按钮，存在挤压风险。
+- 平台列表行只靠小圆点 + pill 表达状态，选中背景较弱，视觉扫描性一般。
+- 浮窗自由态和刘海 hosted 态目前接近纯黑不透明：
+  - `FloatingPanelView` 使用 `Color.black.opacity(0.75)`。
+  - `NotchHostedSurfaceView` top/body 使用 `Color.black.opacity(0.96~0.97)`。
+  - 视觉稳定但不符合“透透的磨砂质感”。
+- 浮窗内容横向排列时缺少 overflow 保护，组件多时紧凑态可能拥挤。
+
+### 本轮目标
+
+- 给 Settings 设置窗口建立统一的半透明磨砂基底：
+  - 窗口本身透明，内容用 SwiftUI material/半透明层承载。
+  - 透明度控制在可读优先，不做过透的玻璃。
+  - sidebar、detail、卡片边界更轻、更统一。
+- 简化平台页布局：
+  - 平台 sidebar 更清爽，状态不挤压平台名。
+  - detail header 在窄宽度下不溢出。
+  - 长说明默认收起或压缩成短句，必要信息仍可展开查看。
+  - 当前数据/认证/查询能力/重置区域保持清晰，但减少重卡片感。
+- 优化文字溢出：
+  - 长 key/email/path/状态说明使用 `lineLimit`、`truncationMode(.middle)`、`ViewThatFits` 或换行策略。
+  - 按钮组在宽度不足时自动换行。
+  - 状态 pill 不撑破容器。
+- 优化浮窗玻璃质感：
+  - 自由浮窗背景改为深色半透明 material + 细描边 + 更轻阴影。
+  - 刘海 hosted 展开 body 改为更柔和的玻璃层；collapsed top cap 仍保持足够黑度以融合刘海，但可加入轻微 material/高光边界。
+  - resize grip 降低视觉存在感。
+- 保持交互和数据模型不变：
+  - 不改 credential/keychain、fetcher、state.json。
+  - 不改刘海吸附/脱离策略。
+  - 不改 widget 配置存储。
+
+### 实施步骤
+
+1. **建立 Settings 磨砂窗口外壳**
+   - 在 `App/AppDelegate.swift` 的 settings window 创建处：
+     - 设置 `win.isOpaque = false`。
+     - 设置 `win.backgroundColor = .clear`。
+     - 视情况启用透明 titlebar/fullSizeContentView，使磨砂背景覆盖更完整。
+   - 在 `Settings/SettingsWindow.swift`：
+     - 用统一的半透明 material 背景替换纯 `windowBackgroundColor`。
+     - sidebar 使用 `.regularMaterial` 或深浅适中的半透明底。
+     - detail 区使用轻透明层，不让整个页面变成完全透明。
+
+2. **抽取轻量视觉 helper（仅限 Settings 内部）**
+   - 在 `SettingsWindow.swift` 或 `PlatformListView.swift` 局部增加少量 helper：
+     - glass 背景 shape。
+     - subtle border。
+     - compact section/card 样式。
+   - 不新建复杂 design system；只解决当前页面重复的背景/描边/阴影。
+
+3. **整理 Settings sidebar**
+   - 降低选中 row 的厚重色块，改为半透明 tint + 左侧轻强调或更浅背景。
+   - 保持按钮高度稳定，不让字体/图标挤压。
+   - 避免 sidebar 背景和标题栏区域冲突。
+
+4. **整理平台页左栏**
+   - `PlatformSidebarRow` 改为更紧凑可扫描：
+     - 平台名 `lineLimit(1)`。
+     - 状态 pill 缩短并限制宽度。
+     - 选中态更清楚但不使用大块重色。
+   - 已配置数量 badge 改成更轻的玻璃 badge。
+   - 左栏背景改为半透明 material，与 Settings 总背景融合。
+
+5. **整理平台页详情 header**
+   - header 使用 `ViewThatFits`：
+     - 宽屏：标题/状态与刷新按钮同一行。
+     - 窄屏：按钮组换到下一行。
+   - 状态 pill 允许收缩，不挤压 provider 名称。
+   - 刷新/授权刷新按钮使用图标优先，文字保持简短。
+
+6. **压缩平台页卡片与长说明**
+   - 将认证、查询能力、当前数据、重置卡片改为更轻的 glass card。
+   - `PlatformCapabilityPanel` 默认只显示能力类型与凭据，详细解释保留在 Disclosure。
+   - `PlatformMetricsPanel` 中长错误/不支持说明使用简短主文案 + 可展开详情，避免直接铺满页面。
+   - Codex extras、MiMo credential summary 的长 label 使用 `fixedSize(horizontal: false, vertical: true)` 和更紧凑 spacing，必要时改短文案。
+
+7. **优化小组件页与通用页一致性**
+   - 小组件页现有卡片背景过多使用 `Color.secondary.opacity`，统一调整到轻 glass card。
+   - 通用页 `Form` 如系统样式与透明背景冲突，改成更透明的 section 背景或保留系统 Form 但放入统一 material 容器。
+   - 不改变上一轮“当前效果按模型分组与删除”的行为。
+
+8. **优化自由浮窗**
+   - `FloatingPanelView` 背景从纯黑透明改为：
+     - 深色半透明主层。
+     - material/blur 质感。
+     - 细白描边和更轻阴影。
+   - 保持浮窗不太透，确保 widget 文本仍可读。
+   - resize grip 透明度降低，避免抢视觉。
+   - compact 内容在空间不足时至少不产生明显重叠；必要时加横向滚动或收紧 spacing。
+
+9. **优化刘海 hosted 浮窗**
+   - `NotchHostedSurfaceView` 的 expanded body 使用更柔和的半透明 glass。
+   - collapsed top cap 保持接近刘海黑度，不牺牲融合感；只增加微弱边界/高光，避免变成灰色浮块。
+   - 状态 slot 的文字和进度条保留可读性。
+
+10. **验证与手动检查**
+   - 编译和测试：
+     - `swift test --filter Widget`
+     - `swift test --filter NotchGeometryCalculator`
+     - `swift test`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动检查：
+     - Settings 三页都呈现半透明磨砂，但文字不透底难读。
+     - 平台页 Codex/MiMo/MiniMax/OpenAI 等长说明不溢出。
+     - 缩窄 Settings 窗口时 header、按钮、状态 pill 不重叠。
+     - 自由浮窗在浅色/深色桌面背景下都有足够对比度。
+     - 刘海 collapsed/expanded 不出现灰边、重影或过透。
+
+### 验证
+
+- 自动：
+  - `swift test --filter Widget`
+  - `swift test --filter NotchGeometryCalculator`
+  - `swift test`
+  - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+- 手动：
+  - 打开 Settings → 小组件 / 平台 / 通用，检查磨砂背景、文本溢出、滚动和卡片间距。
+  - 平台页逐个切换 provider，重点看 Codex、MiniMax、MiMo、OpenAI 的说明和状态。
+  - 切换浮窗紧凑/分组模式，检查自由浮窗与刘海 hosted 展开态。
+  - 调整窗口宽度，检查标题、按钮、pill 是否换行或截断合理。
+
+### 风险
+
+- macOS material 在不同系统外观、壁纸和 Reduce Transparency 设置下表现不同；需要以可读性优先，不能为了“透”牺牲对比度。
+- Settings window 透明 titlebar 可能影响当前手动预留的 `chromeTopInset`，需要重新检查红黄绿按钮和 sidebar 顶部间距。
+- 刘海 collapsed 状态如果改得太透，会破坏与真实刘海融合；collapsed 只做轻微优化，expanded 和 detached 才更明显玻璃化。
+- 平台页文件已经较大，本轮只做布局和样式整理，不顺手拆旧 `PlatformRowView.swift` 或重构 fetcher。
+- 上一轮 Settings 当前效果分组改动仍未手动验收，本轮不能覆盖或回滚相关行为。
+
+### 本轮实现结果（2026-06-09）
+
+- Settings window 创建处改为透明承载：
+  - `NSWindow.isOpaque = false`
+  - `NSWindow.backgroundColor = .clear`
+- `SettingsWindow` 外壳改为统一 material 磨砂背景：
+  - sidebar 使用更轻的 material 底。
+  - detail 区增加轻透明层。
+  - sidebar 选中态从重色块改为轻 tint + 左侧强调条。
+  - ScrollView/Form 隐藏默认滚动背景，减少系统纯色块。
+- 平台页左栏优化：
+  - 改为 material 背景。
+  - row 增加轻描边和选中态强调。
+  - 平台名、状态 pill 增加 `lineLimit` / `minimumScaleFactor`，降低挤压风险。
+- 平台详情优化：
+  - header 使用 `ViewThatFits`，窄宽度下按钮组自动换到下一行。
+  - 认证、查询能力、当前数据、重置区域从 `GroupBox` 改为轻玻璃卡片 `GlassPanel`。
+  - 当前数据无数据/不支持时只显示短状态，详细说明放入 Disclosure，避免文字墙。
+  - Codex/MiMo/API key 等长说明增加换行/截断保护。
+- 自由浮窗优化：
+  - 背景从纯黑半透明改为 `.regularMaterial` + 深色半透明覆盖 + 细描边。
+  - 阴影更轻，resize grip 透明度降低。
+  - 紧凑内容增加横向 overflow 保护。
+- 刘海 hosted 浮窗优化：
+  - expanded body 改为 material + 深色半透明覆盖 + 轻描边。
+  - collapsed top cap 保持较深黑度以贴合刘海，同时增加轻微边界。
+  - 分组 overlay 行内 widget 增加横向 overflow 保护，service label 防溢出。
+
+### 验证结果
+
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+- `swift test --filter Widget`：通过，37 个测试通过。
+- `swift test --filter NotchGeometryCalculator`：通过，47 个测试通过。
+- `swift test`：通过，147 个测试通过。
+- 最终再次运行 `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- 打开 Settings 三页，确认磨砂透明程度不过透，文字仍清晰。
+- 平台页逐个切换 Codex、MiniMax、MiMo、OpenAI，确认长说明不溢出且页面更清爽。
+- 缩窄 Settings window，确认 header、状态 pill、刷新按钮不会重叠。
+- 切换浮窗紧凑/分组模式，确认自由浮窗内容不会明显挤压。
+- 测试刘海 collapsed/expanded，确认顶部仍与刘海融合，没有灰边或过透。
+
+---
+
+## 当前重点：Settings 当前效果按模型分组与快捷删除（已实现，待手动体验验证）
+
+### 问题
+
+Settings 小组件页的“当前效果”预览目前把所有已添加小组件横向堆在一起：
+
+- 不同平台/模型的小组件混在同一行，数量稍多时视觉层级不清。
+- 用户新增一个效果后，如果发现加错，需要去下方“已添加”列表里找对应项删除；预览区本身没有直接删除入口。
+- 预览区文案提示可以拖拽预设到这里，但已添加后的排序能力主要藏在下方列表，当前区域的编辑边界不够清楚。
+
+本轮已阅读：
+
+- `PLAN.md`
+- `docs/project-summary.md`
+- `docs/work-log/2026-05-10-widget-settings-preview.md`
+- `docs/work-log/2026-06-07-widget-recommendations-notch-collapsed.md`
+- `Settings/WidgetListEditor.swift`
+
+用户已在视觉草图中选择方案 A：
+
+- “当前效果”按模型/平台分组展示。
+- 每个预览项提供删除按钮。
+- 拖拽排序继续由下方“已添加”列表负责，避免预览区同时承担真实 HUD 预览和完整列表编辑器两套职责。
+
+### 本轮目标
+
+- 优化“当前效果”区域视觉结构：
+  - 按 `WidgetConfig.service` 分组展示。
+  - 每组显示平台/模型名称和组件数量。
+  - 每个组件继续复用现有 `WidgetRenderer`，保持预览接近真实 HUD。
+- 在预览项上提供明确删除入口：
+  - 点击删除后从 `WidgetStore.widgets` 移除对应 `WidgetConfig`。
+  - 删除行为与下方 `WidgetRow` 删除保持一致。
+- 明确排序入口：
+  - “当前效果”主要负责预览、分组和快捷删除。
+  - “已添加”列表继续负责拖动排序。
+  - 调整提示文案，避免暗示预览区支持已添加项排序。
+- 保持现有添加方式：
+  - 预设仍可点击添加。
+  - 预设仍可拖到“当前效果”预览或“已添加”列表。
+
+### 实施步骤
+
+1. **调整 `WidgetPreviewPanel` 数据入口**
+   - 将 `WidgetPreviewPanel` 从只读 `widgets: [WidgetConfig]` 改为可写 `@Binding var widgets: [WidgetConfig]`。
+   - 保留 `state: StateFile`。
+   - 在 `WidgetListEditor` 调用处传入 `Bindable(store).widgets`。
+
+2. **新增分组模型**
+   - 在 `WidgetPreviewPanel` 内部按 `service` 分组。
+   - 分组顺序保持用户当前小组件顺序中的首次出现顺序，避免按字母排序打乱用户心理模型。
+   - 每组内部顺序保持 `store.widgets` 当前顺序。
+   - 分组标题使用现有 `serviceDisplayName(_:)`；组件标题继续用 `metricTitle(_:)`。
+
+3. **重做非空预览布局**
+   - 将当前单一横向 `ScrollView + HStack` 改为垂直滚动的分组布局。
+   - 每组内使用横向滚动或可换行布局承载多个预览项，优先保证不同 service 的边界清楚。
+   - 保留深色预览背景、HUD 字体/颜色可读性和 `panelAdaptiveScale`。
+   - 预览区高度根据分组布局适度提高或设定最小/最大高度，避免内容拥挤。
+
+4. **给预览项添加删除按钮**
+   - 每个预览 item 外层增加轻量容器，右上或尾部放 `xmark` 图标按钮。
+   - 按钮使用 `.buttonStyle(.plain)`，并加 `.help("移除")`。
+   - 删除逻辑使用 `widgets.removeAll { $0.id == config.id }`。
+   - 删除按钮不遮挡 `WidgetRenderer` 的主要内容。
+
+5. **更新提示文案**
+   - 空状态文案保留“从下方预设添加，或拖拽预设到这里”。
+   - 非空 header 或说明明确为“按模型分组 · 拖动排序在下方已添加列表”。
+   - 下方“已添加”列表继续显示“拖动调整顺序”。
+
+6. **检查 drop 行为**
+   - 保持 `WidgetPreviewPanel` 外层 `.onDrop` 现有行为。
+   - 确认预览 item 的删除按钮不会破坏拖入预设到预览区。
+
+### 验证
+
+- `swift test --filter Widget`
+- `swift test`
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+- 手动验证：
+  - 打开 Settings → 小组件。
+  - 当前效果按 Codex、Claude、MiniMax、MiMo 等 service 分组。
+  - 添加多个平台的小组件后分组顺序符合添加顺序。
+  - 点击预览项删除按钮后，对应组件从预览和“已添加”列表同时消失。
+  - 下方“已添加”列表仍可拖动排序；排序后预览分组内顺序同步更新。
+  - 将预设拖到当前效果区域仍能添加。
+
+### 风险
+
+- `WidgetListEditor.swift` 已经较大，本轮应控制改动范围，只在预览区局部抽取小视图，不做无关重构。
+- 预览项加容器和删除按钮可能让真实 HUD 预览感变弱，需要保持容器轻量，避免看起来像另一套卡片列表。
+- 如果分组过多，固定高度预览区可能仍会拥挤；需要使用滚动区域和清晰标题控制密度。
+- SwiftUI `Button` 与 `onDrop`/滚动手势可能有交互冲突，需手动检查拖入和点击删除都可用。
+
+### 本轮实现结果（2026-06-08）
+
+- 新增 `WidgetServiceGrouping` / `WidgetServiceGroup`：
+  - 按 `WidgetDescriptor.service` 分组。
+  - 分组顺序保持 service 首次出现顺序。
+  - 组内 widget 顺序保持当前小组件顺序。
+- `WidgetPreviewPanel` 改为接收 `@Binding var widgets`，预览区可以直接删除已添加组件。
+- “当前效果”非空状态改为：
+  - 垂直展示 service 分组。
+  - 每组内横向展示该 service 的预览项。
+  - 每个预览项保留 `WidgetRenderer` 渲染，并新增 `xmark.circle.fill` 删除按钮。
+- Header 文案改为显示组数、组件数，并提示排序在下方列表完成。
+- 保留预览区域 drop 行为，预设仍可拖到“当前效果”区域添加。
+
+### 验证结果
+
+- `swift test --filter serviceGroupsPreserveFirstAppearanceAndWidgetOrder`：通过。
+- `swift test --filter Widget`：通过，37 个测试通过。
+- `swift test`：通过，147 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- 打开 Settings → 小组件，确认“当前效果”按 Codex、Claude、MiniMax、MiMo 等 service 分组。
+- 点击预览项删除按钮后，对应组件从预览和下方“已添加”列表同时消失。
+- 下方“已添加”列表拖动排序后，预览区分组和组内顺序同步更新。
+- 将预设拖到“当前效果”区域仍能添加。
+
+---
+
 ## 当前重点：Settings 窗口标题栏安全区错位修复（已实现，待手动体验验证）
 
 ### 问题

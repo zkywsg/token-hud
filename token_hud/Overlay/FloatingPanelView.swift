@@ -13,8 +13,12 @@ struct FloatingPanelView: View {
             let adaptiveScale = calculateAdaptiveScale(for: geometry.size)
             ZStack(alignment: .bottomTrailing) {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.black.opacity(0.75))
-                    .shadow(color: .black.opacity(0.5), radius: 8, y: 4)
+                    .fill(.regularMaterial)
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(Color.black.opacity(0.58))
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
+                    .shadow(color: .black.opacity(0.28), radius: 12, y: 6)
 
                 overlayContent
                     .padding(12 * adaptiveScale)
@@ -112,7 +116,7 @@ private final class ResizeGripView: NSView {
     override func draw(_ dirtyRect: NSRect) {
         super.draw(dirtyRect)
 
-        let color = NSColor.white.withAlphaComponent(0.35)
+        let color = NSColor.white.withAlphaComponent(0.22)
         color.setStroke()
 
         let path = NSBezierPath()

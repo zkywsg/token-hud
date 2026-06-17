@@ -169,7 +169,7 @@ struct WidgetListEditor: View {
                 onPrependMissing: prependMissingRecommendations
             )
 
-            WidgetPreviewPanel(widgets: store.widgets, state: watcher.effectiveState)
+            WidgetPreviewPanel(widgets: Bindable(store).widgets, state: watcher.effectiveState)
                 .onDrop(of: [.text], delegate: WidgetListDropDelegate(
                     widgets: Bindable(store).widgets,
                     recentlyDroppedIDs: $recentlyDroppedIDs
@@ -199,22 +199,37 @@ struct WidgetListEditor: View {
     }
 
     private var header: some View {
-        HStack(alignment: .firstTextBaseline) {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("小组件")
-                    .font(.headline)
-                Text("配置会立即反映在上方预览和浮动面板中。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline) {
+                headerCopy
+                Spacer(minLength: 12)
+                resetDefaultsButton
             }
-            Spacer()
-            Button {
-                store.resetToDefaults()
-            } label: {
-                Label("恢复默认", systemImage: "arrow.counterclockwise")
+            VStack(alignment: .leading, spacing: 8) {
+                headerCopy
+                resetDefaultsButton
             }
-            .font(.caption)
         }
+    }
+
+    private var headerCopy: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("小组件")
+                .font(.headline)
+            Text("配置会立即反映在上方预览和浮动面板中。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(2)
+        }
+    }
+
+    private var resetDefaultsButton: some View {
+        Button {
+            store.resetToDefaults()
+        } label: {
+            Label("恢复默认", systemImage: "arrow.counterclockwise")
+        }
+        .font(.caption)
     }
 
     private func addWidget(_ config: WidgetConfig) {
@@ -385,10 +400,13 @@ private struct RecommendationChip: View {
                 Text(serviceDisplayName(widget.service))
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(isAdded ? .secondary : .primary)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
                 Text(metricTitle(widget))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .truncationMode(.tail)
             }
             .frame(width: 116, alignment: .leading)
             Spacer(minLength: 0)
@@ -543,7 +561,7 @@ private struct NotchCollapsedSettingsPanel: View {
 // MARK: - Preview
 
 private struct WidgetPreviewPanel: View {
-    let widgets: [WidgetConfig]
+    @Binding var widgets: [WidgetConfig]
     let state: StateFile
 
     var body: some View {
@@ -553,7 +571,7 @@ private struct WidgetPreviewPanel: View {
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
-                Text("\(widgets.count) 个组件")
+                Text(summaryText)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
@@ -580,21 +598,117 @@ private struct WidgetPreviewPanel: View {
                             .foregroundStyle(.white.opacity(0.45))
                     }
                 } else {
-                    ScrollView(.horizontal, showsIndicators: false) {
-                        HStack(spacing: 10) {
-                            ForEach(widgets) { config in
-                                WidgetRenderer(config: config, state: state, showServiceLabel: true)
-                                    .padding(.vertical, 4)
+                    ScrollView(.vertical, showsIndicators: false) {
+                        VStack(alignment: .leading, spacing: 12) {
+                            ForEach(groupedWidgets) { group in
+                                WidgetPreviewGroupView(
+                                    group: group,
+                                    state: state,
+                                    onRemove: removeWidget
+                                )
                             }
                         }
-                        .padding(.horizontal, 16)
-                        .frame(maxWidth: .infinity, alignment: .center)
+                        .padding(14)
+                        .frame(maxWidth: .infinity, alignment: .topLeading)
                     }
                 }
             }
-            .frame(height: 118)
+            .frame(height: widgets.isEmpty ? 118 : 224)
             .environment(\.panelAdaptiveScale, 1.15)
         }
+    }
+
+    private var summaryText: String {
+        guard !widgets.isEmpty else { return "0 个组件" }
+        return "\(groupedWidgets.count) 组 · \(widgets.count) 个组件 · 排序在下方"
+    }
+
+    private var groupedWidgets: [WidgetPreviewGroup] {
+        let configsByID = Dictionary(uniqueKeysWithValues: widgets.map { ($0.id.uuidString, $0) })
+        return WidgetServiceGrouping
+            .groups(for: widgets.map(\.descriptor))
+            .map { group in
+                WidgetPreviewGroup(
+                    service: group.service,
+                    widgets: group.widgets.compactMap { configsByID[$0.id] }
+                )
+            }
+            .filter { !$0.widgets.isEmpty }
+    }
+
+    private func removeWidget(_ config: WidgetConfig) {
+        widgets.removeAll { $0.id == config.id }
+    }
+}
+
+private struct WidgetPreviewGroup: Identifiable {
+    let service: String
+    let widgets: [WidgetConfig]
+
+    var id: String { service }
+}
+
+private struct WidgetPreviewGroupView: View {
+    let group: WidgetPreviewGroup
+    let state: StateFile
+    let onRemove: (WidgetConfig) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 6) {
+                Text(serviceDisplayName(group.service))
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.72))
+                Text("\(group.widgets.count)")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(.white.opacity(0.42))
+                Spacer(minLength: 0)
+            }
+
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 8) {
+                    ForEach(group.widgets) { config in
+                        WidgetPreviewItem(config: config, state: state) {
+                            onRemove(config)
+                        }
+                    }
+                }
+                .padding(.trailing, 2)
+            }
+        }
+    }
+}
+
+private struct WidgetPreviewItem: View {
+    let config: WidgetConfig
+    let state: StateFile
+    let onRemove: () -> Void
+
+    var body: some View {
+        ZStack(alignment: .topTrailing) {
+            WidgetRenderer(config: config, state: state, showServiceLabel: false)
+                .padding(.vertical, 6)
+                .padding(.leading, 8)
+                .padding(.trailing, 24)
+
+            Button(action: onRemove) {
+                Image(systemName: "xmark.circle.fill")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(.white.opacity(0.48))
+                    .frame(width: 20, height: 20)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("移除")
+            .padding(.top, 3)
+            .padding(.trailing, 3)
+        }
+        .background(Color.white.opacity(0.055))
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay(
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.white.opacity(0.10), lineWidth: 0.7)
+        )
     }
 }
 
