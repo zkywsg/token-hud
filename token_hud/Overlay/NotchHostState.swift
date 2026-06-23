@@ -9,6 +9,10 @@ final class NotchHostState {
     var frames: NotchFrames?
     var screenFrame: CGRect = .zero
     var expansionProgress: CGFloat = 0
+    var expandedBodyHeight: CGFloat = NotchGeometryCalculator.expandedHeight
+    var expandedLayoutMode: NotchExpandedLayoutMode = .adaptive
+    var expandedAllowsVerticalScrolling = false
+    var expandedContentScale: CGFloat = 1
 
     /// Gap width within the collapsed window (0 when no notch).
     var gapWidth: CGFloat = 0

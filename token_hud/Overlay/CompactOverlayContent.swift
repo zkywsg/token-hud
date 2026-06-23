@@ -7,7 +7,7 @@ struct CompactOverlayContent: View {
 
     var body: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6 * scale) {
+            HStack(spacing: OverlayModelCardStyle.widgetSpacing(scale: scale)) {
                 ForEach(store.widgets) { config in
                     WidgetRenderer(config: config, state: watcher.effectiveState, showServiceLabel: true)
                 }

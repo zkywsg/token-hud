@@ -33,7 +33,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         floatingPanelManager = NotchHostPanelManager(
             stateWatcher: stateWatcher,
-            widgetStore: widgetStore
+            widgetStore: widgetStore,
+            codexFetcher: codexFetcher,
+            apiPlatformFetcher: apiPlatformFetcher
         )
         floatingPanelManager.setup()
         menuBarBridgeProbe = MenuBarBridgeProbe()

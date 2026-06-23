@@ -92,6 +92,79 @@ enum NotchMouseEventPolicy {
     }
 }
 
+enum NotchWindowMovementPolicy {
+    static func isMovableByWindowBackground(mode: NotchHostMode) -> Bool {
+        switch mode {
+        case .collapsed, .expanded:
+            false
+        case .detached:
+            true
+        }
+    }
+}
+
+enum NotchHostedResizeAction: Equatable {
+    case ignore
+    case reassertHostedFrame
+    case detach
+}
+
+enum NotchHostedResizePolicy {
+    static func action(
+        mode: NotchHostMode,
+        isResettingHostedFrame: Bool,
+        isDragging: Bool
+    ) -> NotchHostedResizeAction {
+        guard mode == .collapsed || mode == .expanded else {
+            return .ignore
+        }
+        if isResettingHostedFrame {
+            return .ignore
+        }
+        if mode == .expanded && isDragging {
+            return .detach
+        }
+        return .reassertHostedFrame
+    }
+}
+
+enum NotchHostedBodyPresentationPolicy {
+    static let minimumBodyHeight: Double = 12
+    static let minimumContentOpacity: Double = 0.10
+
+    static func shouldRenderExpandedContent(
+        bodyHeight: Double,
+        contentOpacity: Double
+    ) -> Bool {
+        bodyHeight >= minimumBodyHeight &&
+            contentOpacity >= minimumContentOpacity
+    }
+}
+
+enum NotchInfoEarPresentationPolicy {
+    static let minimumExpandedOpacity: Double = 0.72
+    static let textMinimumSlotWidth: Double = 42
+    static let progressMinimumWidth: Double = 18
+    static let progressMaximumWidth: Double = 54
+    static let progressHorizontalInset: Double = 14
+
+    static func opacity(contentOpacity: Double) -> Double {
+        let collapsedOpacity = 1 - contentOpacity.clamped(to: 0...1)
+        return max(minimumExpandedOpacity, collapsedOpacity)
+    }
+
+    static func showsText(slotWidth: Double, text: String) -> Bool {
+        slotWidth >= textMinimumSlotWidth && !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    static func progressWidth(slotWidth: Double) -> Double {
+        max(
+            progressMinimumWidth,
+            min(progressMaximumWidth, slotWidth - progressHorizontalInset)
+        )
+    }
+}
+
 struct NotchTransitionGate: Equatable {
     private(set) var generation: Int = 0
 

@@ -13,17 +13,22 @@ struct FloatingPanelView: View {
             let adaptiveScale = calculateAdaptiveScale(for: geometry.size)
             ZStack(alignment: .bottomTrailing) {
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(.regularMaterial)
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.black.opacity(0.58))
+                    .fill(Color.black)
                 RoundedRectangle(cornerRadius: 8)
                     .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
                     .shadow(color: .black.opacity(0.28), radius: 12, y: 6)
 
                 overlayContent
                     .padding(12 * adaptiveScale)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .scaleEffect(scale, anchor: .center)
+                    .frame(
+                        maxWidth: .infinity,
+                        maxHeight: .infinity,
+                        alignment: alignment(for: FloatingPanelContentLayoutPolicy.layout().verticalPlacement)
+                    )
+                    .scaleEffect(
+                        scale,
+                        anchor: unitPoint(for: FloatingPanelContentLayoutPolicy.layout().scaleAnchor)
+                    )
                     .gesture(
                         MagnificationGesture()
                             .onChanged { value in
@@ -62,15 +67,29 @@ struct FloatingPanelView: View {
     }
 
     private func calculateAdaptiveScale(for size: CGSize) -> CGFloat {
-        let baseHeight: CGFloat = 60
-        let idealHeight: CGFloat
-        if overlayMode == "grouped" {
-            let serviceCount = Set(store.widgets.map(\.service)).count
-            idealHeight = max(baseHeight, CGFloat(serviceCount) * 32 + 16)
-        } else {
-            idealHeight = baseHeight
+        FloatingPanelContentLayoutPolicy.adaptiveScale(
+            panelHeight: size.height,
+            overlayMode: overlayMode,
+            serviceCount: Set(store.widgets.map(\.service)).count
+        )
+    }
+
+    private func alignment(for anchor: FloatingPanelContentAnchor) -> Alignment {
+        switch anchor {
+        case .top:
+            return .top
+        case .center:
+            return .center
         }
-        return (size.height / idealHeight).clamped(to: 0.5...3.0)
+    }
+
+    private func unitPoint(for anchor: FloatingPanelContentAnchor) -> UnitPoint {
+        switch anchor {
+        case .top:
+            return .top
+        case .center:
+            return .center
+        }
     }
 }
 

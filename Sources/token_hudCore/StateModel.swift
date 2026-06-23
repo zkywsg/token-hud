@@ -388,6 +388,22 @@ public enum ProviderCredentialSnapshotStatus: String, Sendable, Equatable {
     case notConfigured
 }
 
+public enum KeychainAccessPurpose: Sendable, Equatable {
+    case statusCheck
+    case secretRead(allowUserInteraction: Bool)
+}
+
+public enum KeychainAccessPolicy {
+    public static func allowsUserInteraction(for purpose: KeychainAccessPurpose) -> Bool {
+        switch purpose {
+        case .statusCheck:
+            return false
+        case .secretRead(let allowUserInteraction):
+            return allowUserInteraction
+        }
+    }
+}
+
 public enum MiMoAPIKeyRole: String, Sendable, Equatable {
     case tokenPlanKey
     case payAsYouGoAPIKey

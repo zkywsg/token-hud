@@ -89,6 +89,35 @@ struct NotchSurfacePolicyTests {
         #expect(!NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .detached))
     }
 
+    @Test func hostedModesDisableAppKitBackgroundDragging() {
+        #expect(!NotchWindowMovementPolicy.isMovableByWindowBackground(mode: .collapsed))
+        #expect(!NotchWindowMovementPolicy.isMovableByWindowBackground(mode: .expanded))
+    }
+
+    @Test func detachedModeAllowsAppKitBackgroundDragging() {
+        #expect(NotchWindowMovementPolicy.isMovableByWindowBackground(mode: .detached))
+    }
+
+    @Test func infoEarsRemainVisibleWhenExpandedContentIsFullyVisible() {
+        let opacity = NotchInfoEarPresentationPolicy.opacity(contentOpacity: 1)
+
+        #expect(opacity >= 0.68)
+    }
+
+    @Test func infoEarsUseFullVisibilityWhenCollapsed() {
+        #expect(NotchInfoEarPresentationPolicy.opacity(contentOpacity: 0) == 1)
+    }
+
+    @Test func infoEarsHideTextWhenSlotIsTooNarrow() {
+        #expect(!NotchInfoEarPresentationPolicy.showsText(slotWidth: 30, text: "98% 5 hours"))
+        #expect(NotchInfoEarPresentationPolicy.showsText(slotWidth: 48, text: "98%"))
+    }
+
+    @Test func infoEarProgressWidthKeepsCompactMinimumAndAvoidsOverflow() {
+        #expect(NotchInfoEarPresentationPolicy.progressWidth(slotWidth: 28) == 18)
+        #expect(NotchInfoEarPresentationPolicy.progressWidth(slotWidth: 80) == 54)
+    }
+
     @Test func transitionGateInvalidatesOlderTokens() {
         var gate = NotchTransitionGate()
         let old = gate.advance()
@@ -126,5 +155,44 @@ struct NotchSurfacePolicyTests {
         #expect(cleanup.removesMouseDownMonitor)
         #expect(!cleanup.removesMouseUpMonitor)
         #expect(!cleanup.resetsDraggingState)
+    }
+
+    @Test func hostedResizeDuringFrameResetIsIgnored() {
+        #expect(NotchHostedResizePolicy.action(
+            mode: .collapsed,
+            isResettingHostedFrame: true,
+            isDragging: false
+        ) == .ignore)
+    }
+
+    @Test func hostedResizeOutsideDragReassertsHostedFrame() {
+        #expect(NotchHostedResizePolicy.action(
+            mode: .expanded,
+            isResettingHostedFrame: false,
+            isDragging: false
+        ) == .reassertHostedFrame)
+    }
+
+    @Test func hostedResizeDuringExpandedDragCanDetach() {
+        #expect(NotchHostedResizePolicy.action(
+            mode: .expanded,
+            isResettingHostedFrame: false,
+            isDragging: true
+        ) == .detach)
+    }
+
+    @Test func collapsedBodyDoesNotRenderExpandedContentFragments() {
+        #expect(!NotchHostedBodyPresentationPolicy.shouldRenderExpandedContent(
+            bodyHeight: 0,
+            contentOpacity: 0
+        ))
+        #expect(!NotchHostedBodyPresentationPolicy.shouldRenderExpandedContent(
+            bodyHeight: 4,
+            contentOpacity: 0.04
+        ))
+        #expect(NotchHostedBodyPresentationPolicy.shouldRenderExpandedContent(
+            bodyHeight: 120,
+            contentOpacity: 0.72
+        ))
     }
 }

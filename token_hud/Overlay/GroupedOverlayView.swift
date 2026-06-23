@@ -13,39 +13,96 @@ struct GroupedOverlayView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            ForEach(Array(orderedServices.enumerated()), id: \.element) { index, serviceID in
-                if index > 0 {
-                    Divider()
-                        .background(Color.white.opacity(0.1))
-                        .frame(height: 0.5 * scale)
-                }
-                serviceRow(serviceID: serviceID)
+        OverlayServiceCardGrid {
+            ForEach(orderedServices, id: \.self) { serviceID in
+                serviceCard(serviceID: serviceID)
             }
         }
     }
 
     @ViewBuilder
-    private func serviceRow(serviceID: String) -> some View {
+    private func serviceCard(serviceID: String) -> some View {
         let serviceWidgets = widgets.filter { $0.service == serviceID }
         let label = state?.services[serviceID]?.label ?? serviceID
 
-        HStack(spacing: 8 * scale) {
-            Text(label)
-                .font(.system(size: 10 * scale, weight: .regular, design: .rounded))
-                .foregroundColor(.white.opacity(0.4))
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(width: 70 * scale, alignment: .leading)
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 6 * scale) {
-                    ForEach(serviceWidgets) { config in
-                        WidgetRenderer(config: config, state: state)
-                    }
-                }
+        if !serviceWidgets.isEmpty {
+            OverlayModelCard(serviceLabel: label, componentCount: serviceWidgets.count) {
+                OverlayServiceRefreshButton(serviceID: serviceID)
+            } content: {
+                OverlayMetricGrid(widgets: serviceWidgets, state: state)
             }
         }
-        .padding(.vertical, 3 * scale)
+    }
+}
+
+struct OverlayServiceRefreshButton: View {
+    let serviceID: String
+
+    @Environment(StateWatcher.self) private var stateWatcher
+    @Environment(CodexFetcher.self) private var codexFetcher
+    @Environment(APIPlatformFetcher.self) private var apiPlatformFetcher
+    @Environment(\.panelAdaptiveScale) private var scale
+    @State private var isRefreshing = false
+
+    private var isSupported: Bool {
+        switch serviceID {
+        case "codex", "deepseek", "minimax", "mimo":
+            return true
+        default:
+            return false
+        }
+    }
+
+    var body: some View {
+        if isSupported {
+            Button {
+                refresh()
+            } label: {
+                Group {
+                    if isRefreshing {
+                        ProgressView()
+                            .controlSize(.mini)
+                            .scaleEffect(max(0.65, 0.78 * scale))
+                    } else {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 8.5 * scale, weight: .semibold))
+                    }
+                }
+                .frame(width: 18 * scale, height: 18 * scale)
+                .foregroundStyle(.white.opacity(isRefreshing ? 0.45 : 0.50))
+                .background(
+                    Circle()
+                        .fill(Color.white.opacity(isRefreshing ? 0.055 : 0.035))
+                )
+                .overlay(
+                    Circle()
+                        .stroke(Color.white.opacity(isRefreshing ? 0.12 : 0.075), lineWidth: max(0.5, 0.7 * scale))
+                )
+                .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .disabled(isRefreshing)
+            .help("刷新 \(serviceID)")
+        }
+    }
+
+    private func refresh() {
+        guard !isRefreshing else { return }
+        isRefreshing = true
+        Task { @MainActor in
+            defer {
+                stateWatcher.readNow()
+                isRefreshing = false
+            }
+
+            if serviceID == "codex" {
+                await codexFetcher.fetch(allowUserInteraction: false)
+            } else {
+                _ = await apiPlatformFetcher.fetchSingle(
+                    platform: serviceID,
+                    allowUserInteraction: false
+                )
+            }
+        }
     }
 }

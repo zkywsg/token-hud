@@ -18,11 +18,11 @@ struct SettingsWindow: View {
                 sidebar
                     .frame(width: sidebarWidth)
                 Rectangle()
-                    .fill(Color.primary.opacity(0.08))
+                    .fill(Color.white.opacity(0.10))
                     .frame(width: 0.8)
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.white.opacity(0.035))
+                    .background(Color.black)
             }
         }
         .frame(
@@ -58,8 +58,8 @@ struct SettingsWindow: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(selectedSection == section ? .primary : .secondary)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(selectedSection == section ? Color.accentColor.opacity(0.16) : Color.clear)
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(selectedSection == section ? Color.white.opacity(0.085) : Color.clear)
                 )
             }
             Spacer()
@@ -67,10 +67,10 @@ struct SettingsWindow: View {
         .padding(.top, chromeTopInset)
         .padding(.horizontal, 12)
         .padding(.bottom, 12)
-        .background(.regularMaterial.opacity(0.78))
+        .background(Color(red: 0.025, green: 0.026, blue: 0.028))
         .overlay(alignment: .trailing) {
             Rectangle()
-                .fill(Color.white.opacity(0.08))
+                .fill(Color.white.opacity(0.10))
                 .frame(width: 1)
         }
     }
@@ -103,22 +103,8 @@ struct SettingsWindow: View {
 
 private struct SettingsGlassBackground: View {
     var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(.regularMaterial)
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.16),
-                            Color.white.opacity(0.07),
-                            Color.black.opacity(0.05)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        }
+        Rectangle()
+            .fill(Color.black)
     }
 }
 
@@ -186,6 +172,7 @@ private struct FloatingPanelSection: View {
     @AppStorage("floatingHotkeyModifiers") private var modifiers = 0
     @AppStorage("floatingPanelScale") private var scale = 1.0
     @AppStorage("overlayMode") private var overlayMode = "compact"
+    @AppStorage("notchExpandedLayoutMode") private var notchExpandedLayoutMode = NotchExpandedLayoutMode.adaptive.rawValue
     @State private var accessibilityEnabled = GlobalHotkeyManager.isAccessibilityEnabled
 
     var body: some View {
@@ -195,6 +182,11 @@ private struct FloatingPanelSection: View {
                 Picker("显示模式", selection: $overlayMode) {
                     Text("紧凑").tag("compact")
                     Text("分组").tag("grouped")
+                }
+                .pickerStyle(.segmented)
+                Picker("刘海展开布局", selection: $notchExpandedLayoutMode) {
+                    Text("自适应高度").tag(NotchExpandedLayoutMode.adaptive.rawValue)
+                    Text("分组切换").tag(NotchExpandedLayoutMode.sectioned.rawValue)
                 }
                 .pickerStyle(.segmented)
                 KeyRecorder(label: "快捷键", keyCode: $keyCode, modifiers: $modifiers)

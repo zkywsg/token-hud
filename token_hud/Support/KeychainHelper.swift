@@ -150,7 +150,9 @@ enum KeychainHelper {
             kSecReturnData:   true,
             kSecMatchLimit:   kSecMatchLimitOne,
         ]
-        if !allowUserInteraction {
+        if !KeychainAccessPolicy.allowsUserInteraction(
+            for: .secretRead(allowUserInteraction: allowUserInteraction)
+        ) {
             let context = LAContext()
             context.interactionNotAllowed = true
             query[kSecUseAuthenticationContext] = context
@@ -162,13 +164,18 @@ enum KeychainHelper {
     }
 
     private static func exists(account: String) -> Bool {
-        let query: [CFString: Any] = [
+        var query: [CFString: Any] = [
             kSecClass:        kSecClassGenericPassword,
             kSecAttrService:  service,
             kSecAttrAccount:  account,
             kSecReturnAttributes: true,
             kSecMatchLimit:   kSecMatchLimitOne,
         ]
+        if !KeychainAccessPolicy.allowsUserInteraction(for: .statusCheck) {
+            let context = LAContext()
+            context.interactionNotAllowed = true
+            query[kSecUseAuthenticationContext] = context
+        }
         var result: AnyObject?
         return SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess
     }

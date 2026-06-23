@@ -5,6 +5,7 @@ import Observation
 @Observable
 @MainActor
 final class WidgetStore {
+    static let widgetsDidChangeNotification = Notification.Name("WidgetStore.widgetsDidChangeNotification")
 
     var widgets: [WidgetConfig] {
         didSet { save() }
@@ -62,6 +63,7 @@ final class WidgetStore {
         if let d = try? JSONEncoder().encode(widgets) {
             UserDefaults.standard.set(d, forKey: Keys.v3)
         }
+        NotificationCenter.default.post(name: Self.widgetsDidChangeNotification, object: self)
     }
 
     static let defaultWidgets: [WidgetConfig] = [

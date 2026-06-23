@@ -16,7 +16,7 @@ struct NotchHostedSurfaceView: View {
         GeometryReader { geo in
             let layout = surfaceLayout(in: geo.size)
             let status = collapsedStatus
-            let adaptiveScale = adaptiveScale(for: layout.body.size)
+            let adaptiveScale = hostState.expandedContentScale
 
             ZStack(alignment: .topLeading) {
                 bodyPanel(layout.body, opacity: layout.contentOpacity, adaptiveScale: adaptiveScale, layout: layout)
@@ -44,11 +44,9 @@ struct NotchHostedSurfaceView: View {
 
         return ZStack {
             capShape
-                .fill(.thinMaterial)
+                .fill(Color.black)
             capShape
-                .fill(Color.black.opacity(0.90))
-            capShape
-                .stroke(Color.white.opacity(bodyHeight > 0.5 ? 0.06 : 0.10), lineWidth: 0.7)
+                .stroke(Color.white.opacity(bodyHeight > 0.5 ? 0.16 : 0.12), lineWidth: 0.7)
         }
         .frame(width: rect.width, height: rect.height)
         .offset(x: rect.minX, y: topY)
@@ -63,28 +61,70 @@ struct NotchHostedSurfaceView: View {
     ) -> some View {
         if rect.width > 1 {
             let topY = topOffset(for: rect, in: layout)
+            let earOpacity = CGFloat(NotchInfoEarPresentationPolicy.opacity(
+                contentOpacity: Double(layout.contentOpacity)
+            ))
+            let progressWidth = CGFloat(NotchInfoEarPresentationPolicy.progressWidth(
+                slotWidth: Double(rect.width)
+            ))
 
             if isLeading {
-                progressBar(fraction: status.leadingFraction)
-                    .frame(
-                        width: max(24, min(42, rect.width - 14)),
-                        height: 5
-                    )
-                    .frame(width: rect.width, height: rect.height, alignment: .center)
+                infoEarContainer(rect: rect, layout: layout) {
+                    progressBar(fraction: status.leadingFraction)
+                        .frame(width: progressWidth, height: 5)
+                }
                     .offset(x: rect.minX, y: topY)
-                    .opacity(1 - layout.contentOpacity)
+                    .opacity(earOpacity)
             } else {
-                Text(status.trailingText)
-                    .font(.system(size: 10.5, weight: .semibold, design: .rounded))
-                    .monospacedDigit()
-                    .foregroundColor(.white.opacity(0.9))
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.65)
-                    .frame(width: rect.width, height: rect.height, alignment: .center)
+                infoEarContainer(rect: rect, layout: layout) {
+                    if NotchInfoEarPresentationPolicy.showsText(
+                        slotWidth: Double(rect.width),
+                        text: status.trailingText
+                    ) {
+                        Text(status.trailingText)
+                            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
+                            .foregroundColor(.white.opacity(0.90))
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.78)
+                    } else {
+                        Capsule()
+                            .fill(Color.white.opacity(0.32))
+                            .frame(width: min(18, max(8, rect.width - 18)), height: 4)
+                    }
+                }
                     .offset(x: rect.minX, y: topY)
-                    .opacity(1 - layout.contentOpacity)
+                    .opacity(earOpacity)
             }
         }
+    }
+
+    private func infoEarContainer<Content: View>(
+        rect: CGRect,
+        layout: NotchHostedSurfaceLayout,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        let expandedAmount = CGFloat(layout.contentOpacity)
+        let horizontalInset = max(3, min(6, rect.width * 0.12))
+        let verticalInset: CGFloat = expandedAmount > 0.05 ? 5 : 4
+        let cornerRadius = max(6, (rect.height - verticalInset * 2) / 2)
+        let backgroundOpacity = max(0.04, 0.10 - 0.04 * expandedAmount)
+        let strokeOpacity = max(0.08, 0.14 - 0.04 * expandedAmount)
+
+        return ZStack {
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .fill(Color.white.opacity(backgroundOpacity))
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .stroke(Color.white.opacity(strokeOpacity), lineWidth: 0.7)
+            content()
+                .padding(.horizontal, 4)
+        }
+        .frame(
+            width: max(12, rect.width - horizontalInset * 2),
+            height: max(10, rect.height - verticalInset * 2),
+            alignment: .center
+        )
+        .frame(width: rect.width, height: rect.height, alignment: .center)
     }
 
     private func bodyPanel(
@@ -105,27 +145,34 @@ struct NotchHostedSurfaceView: View {
 
         return ZStack {
             panelShape
-                .fill(.regularMaterial)
+                .fill(Color.black)
             panelShape
-                .fill(Color.black.opacity(0.70))
-            panelShape
-                .stroke(Color.white.opacity(0.12 * opacity), lineWidth: 0.8)
-                .shadow(color: Color.black.opacity(0.20 * opacity), radius: 18, y: 10)
+                .stroke(Color.white.opacity(0.14 * opacity), lineWidth: 0.8)
+                .shadow(color: Color.black.opacity(0.30 * opacity), radius: 18, y: 10)
 
-            VStack {
-                if overlayMode == "grouped" {
-                    GroupedOverlayView(
-                        widgets: store.widgets,
-                        state: watcher.effectiveState
-                    )
-                } else {
-                    CompactOverlayContent()
+            if NotchHostedBodyPresentationPolicy.shouldRenderExpandedContent(
+                bodyHeight: Double(rect.height),
+                contentOpacity: Double(opacity)
+            ) {
+                Group {
+                    if hostState.expandedAllowsVerticalScrolling {
+                        ScrollView(.vertical, showsIndicators: false) {
+                            expandedContent
+                                .frame(maxWidth: .infinity, alignment: .topLeading)
+                        }
+                        .scrollClipDisabled(false)
+                    } else {
+                        expandedContent
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                    }
                 }
+                .padding(.horizontal, 12 * adaptiveScale)
+                .padding(.top, OverlayModelCardStyle.hostedBodyTopInset(scale: adaptiveScale))
+                .padding(.bottom, 8 * adaptiveScale)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                .opacity(opacity)
+                .scaleEffect(0.98 + 0.02 * opacity)
             }
-            .padding(.horizontal, 12 * adaptiveScale)
-            .padding(.vertical, 8 * adaptiveScale)
-            .opacity(opacity)
-            .scaleEffect(0.98 + 0.02 * opacity)
         }
         .frame(width: rect.width, height: rect.height)
         .clipped()
@@ -167,7 +214,8 @@ struct NotchHostedSurfaceView: View {
             return NotchGeometryCalculator.hostedSurfaceLayout(
                 screenFrame: screenFrame,
                 geometry: geometry,
-                expansionProgress: hostState.expansionProgress
+                expansionProgress: hostState.expansionProgress,
+                expandedBodyHeight: hostState.expandedBodyHeight
             )
         }
         let fallbackScreen = CGRect(origin: .zero, size: size)
@@ -175,21 +223,9 @@ struct NotchHostedSurfaceView: View {
         return NotchGeometryCalculator.hostedSurfaceLayout(
             screenFrame: fallbackScreen,
             geometry: fallbackGeometry,
-            expansionProgress: hostState.expansionProgress
+            expansionProgress: hostState.expansionProgress,
+            expandedBodyHeight: hostState.expandedBodyHeight
         )
-    }
-
-    private func adaptiveScale(for size: CGSize) -> CGFloat {
-        let baseHeight: CGFloat = 60
-        let idealHeight: CGFloat
-        if overlayMode == "grouped" {
-            let serviceCount = Set(store.widgets.map(\.service)).count
-            idealHeight = max(baseHeight, CGFloat(serviceCount) * 32 + 16)
-        } else {
-            idealHeight = baseHeight
-        }
-        guard size.height > 1 else { return 1 }
-        return (size.height / idealHeight).clamped(to: 0.5...3.0)
     }
 
     // MARK: - Status
@@ -203,5 +239,21 @@ struct NotchHostedSurfaceView: View {
                 trailing: NotchCollapsedSourceStore.source(from: collapsedTrailingSource)
             )
         )
+    }
+}
+
+private extension NotchHostedSurfaceView {
+    @ViewBuilder
+    var expandedContent: some View {
+        if hostState.expandedLayoutMode == .sectioned {
+            SectionedOverlayView(widgets: store.widgets, state: watcher.effectiveState)
+        } else if overlayMode == "grouped" {
+            GroupedOverlayView(
+                widgets: store.widgets,
+                state: watcher.effectiveState
+            )
+        } else {
+            CompactOverlayContent()
+        }
     }
 }

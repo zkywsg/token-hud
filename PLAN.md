@@ -2,6 +2,1388 @@
 
 这个文件跟踪当前项目正在进行的实现工作。保持内容小而可执行；可长期保留的决策沉淀到 `docs/`。
 
+## 当前重点：修复 hosted 浮窗启动残留与展开裁切（已实现，待手动体验验证）
+
+### 问题
+
+用户最新截图显示，app 一打开就进入异常的半展开/乱码状态：
+
+- hosted 浮窗启动后没有稳定处于 collapsed，仅显示出 expanded 内容残片。
+- 再次触摸刘海位置后，展开内容仍然被裁切，顶部和底部都有内容缺失。
+- 背后 settings 页面和上方 hosted surface 同时显示，说明不只是视觉卡片问题，而是 hosted 状态与窗口 frame/content layout 没有稳定同步。
+
+本轮系统化排查到的关键风险：
+
+- hosted overlay 的物理 window frame 一直使用 expanded frame，collapsed/expanded 主要靠 `hostState.expansionProgress` 控制视觉显示。
+- `restoreState()`、`refreshHostedGeometryAndFrame()`、`screenParametersChanged()`、`hostedLayoutInputsChanged()` 都可能重设 expanded frame；如果重设时 `mode` / `expansionProgress` / hit mask 没有同步，就会出现 collapsed 状态下 expanded 内容残留。
+- `windowDidResize(_:)` 在 hosted 模式下直接 `transitionTo(.detached)`，但 hosted frame 高度会随 `expandedBodyHeight` 改变，布局输入变化或系统 reflow 有可能误触发 detached/异常混合状态。
+- 当前 `NotchHostedSurfaceView.bodyPanel` 在 collapsed 时仍构造 expanded content，只靠 `rect.height`、`opacity`、`.clipped()`隐藏；如果 body rect 或 progress 在启动时不是严格 0，就会看到内容残片。
+- 之前连续围绕 card 宽度/高度做了多轮修补，说明需要先修正 hosted surface 的状态边界，再继续调视觉。
+
+### 本轮目标
+
+- app 启动/恢复 hosted 模式时必须稳定进入 collapsed：
+  - `mode == .collapsed`
+  - `expansionProgress == 0`
+  - 只显示 top cap / info ears，不显示 expanded body 内容残片。
+- 触摸刘海后展开必须按完整 body 高度显示内容；如果内容超出，则清晰地纵向滚动，而不是被不可见地裁切。
+- hosted window 的系统 resize/reflow 不应误触发 detached 或残留布局。
+- 不改 fetcher、Keychain、widget 数据模型和设置页面业务逻辑。
+
+### 实施步骤
+
+1. **补充状态边界测试**
+   - 优先在 `Sources/token_hudCore` 增加小策略，避免把 AppKit manager 逻辑写死在不可测试代码里。
+   - 覆盖：
+     - hosted restore 必须重置 progress 到 0。
+     - hosted system resize/reflow 不应被当成用户 detach。
+     - expanded body 内容高度不足时必须启用 scrolling 或增高，而不是裁切。
+
+2. **收紧 hosted restore / show 入口**
+   - 在 `restoreState()` 和 `toggle()` hosted 分支中集中调用一个 `enterHostedCollapsed(...)` helper。
+   - helper 负责：
+     - cancel timers / remove expanded-only monitors。
+     - `hostState.mode = .collapsed`
+     - `hostState.expansionProgress = 0`
+     - refresh geometry + set expanded surface frame。
+     - apply hosted style + install hover monitor。
+
+3. **隔离系统 resize 与用户 detach**
+   - 调整 `windowDidResize(_:)`：
+     - hosted 且 `isResettingHostedFrame == true` 时忽略。
+     - hosted window 被系统 reflow/布局输入变化触发时，reassert hosted frame，而不是直接 `transitionTo(.detached)`。
+     - 只有明确的用户拖拽/resize 行为才走 detach。
+
+4. **防止 collapsed 渲染 expanded content 残片**
+   - `NotchHostedSurfaceView.bodyPanel` 在 `opacity` 很低或 `rect.height` 接近 0 时不构造 expanded content。
+   - 继续保留 top cap/status slots。
+   - 这样即便 SwiftUI 初始 layout 有一帧不同步，也不会把 expanded cards 画出来。
+
+5. **修正展开高度兜底**
+   - 复查 `NotchExpandedLayoutPolicy` 的 card-row 估算与真实 grouped 内容。
+   - 如果 3 组 7 组件仍会超出，优先让 `expandedAllowsVerticalScrolling = true` 并确保 `ScrollView` 有稳定高度。
+   - 必要时把 adaptive 展开高度上限从过低的比例调整到更适合当前纯黑卡片布局，但保留屏幕上限。
+
+6. **记录与验证**
+   - 更新本 PLAN 的实现结果。
+   - 追加 `docs/work-log/2026-06-22-floating-hud-model-cards.md` 或新建 `2026-06-23-hosted-surface-state.md`，记录这次架构性根因。
+   - 自动验证：
+     - `swift test --filter NotchSurfacePolicy`
+     - `swift test --filter NotchExpandedLayoutPolicy`
+     - `swift test`
+     - `git diff --check`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动验证：
+     - 退出重开 app，不出现 expanded 内容残片。
+     - 鼠标触摸刘海后展开，内容完整显示或可滚动。
+     - 离开刘海区域后能稳定自动收起。
+     - settings 页面背后不再被异常浮窗遮挡成混合状态。
+
+### 验证
+
+- 这轮必须以状态边界为主，不能继续只调卡片尺寸。
+- 自动测试需要覆盖 restore/resize/scrolling 的核心策略；真实 app 截图仍是最终验收依据。
+
+### 风险
+
+- hosted surface 依赖 AppKit window frame + SwiftUI progress 双状态，改动要集中，不要分散打补丁。
+- 忽略 hosted resize 过宽可能掩盖真实用户 detach；需要用 `isResettingHostedFrame`、drag state 和 mode 明确区分。
+- 如果只隐藏 collapsed expanded content 而不修复状态机，可能掩盖根因；因此必须同步修 restore/resize 边界。
+
+### 本轮实现结果（2026-06-23）
+
+- 新增 `NotchHostedResizePolicy`：
+  - hosted frame reset 期间的 resize 直接忽略。
+  - hosted 非拖拽 resize/reflow 只 reassert canonical hosted frame。
+  - 只有 expanded 且正在拖拽时才允许 detach。
+- 新增 `NotchHostedBodyPresentationPolicy`：
+  - collapsed 或低透明度阶段不渲染 expanded content，避免启动时出现 card 残片。
+- `NotchHostPanelManager` 新增 `enterHostedCollapsed(...)`：
+  - `toggle()` hosted 分支和 `restoreState()` hosted 分支统一走同一个 collapsed 入口。
+  - 入口会取消 collapse timer、清理 expanded-only monitors、重置 drag 状态、刷新几何、设置 `mode = .collapsed` 和 `expansionProgress = 0`。
+- `windowDidResize(_:)` 改为使用 `NotchHostedResizePolicy`，不再把 hosted 的系统 resize/reflow 直接当成 detached。
+- `NotchHostedSurfaceView.bodyPanel` 只在 body 高度和 content opacity 达到阈值后构造 expanded content。
+- `NotchExpandedLayoutPolicy` adaptive 高度同时考虑 service card rows 和 widget content rows，避免 3 组 7 组件继续按两行卡片低估高度。
+
+### 验证结果
+
+- TDD RED：
+  - 新增 hosted resize/body presentation 策略测试先因缺少策略类型失败。
+- `swift test --filter NotchSurfacePolicy --filter NotchExpandedLayoutPolicy`：通过，35 个测试通过。
+- `swift test`：通过，176 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，`BUILD SUCCEEDED`。
+- `git diff --check`：通过。
+
+### 待手动验证
+
+- 退出重开 app 后 hosted 浮窗应只显示 collapsed top cap / info ears，不再出现 expanded card 残片。
+- 再触摸刘海展开时，3 组 7 组件应完整显示或可滚动，不应出现不可见裁切。
+- 离开刘海区域后应稳定收起。
+
+## 当前重点：修复 Model Cards 二次排版问题（已实现，待手动体验验证）
+
+### 问题
+
+用户最新截图显示，上一轮 Model Cards 修复仍没有达到预期：
+
+- MiMo 首张卡片顶部像被黑色 top cap 压住，服务名区域不完整。
+- DeepSeek 只有 1 个指标，却被拉成整条超宽大黑框，右侧出现大面积空白。
+- Codex Plus 卡片在下方被裁切，整体看起来仍像“整行黑盒堆叠”，不是预览中的精致卡片系统。
+
+本轮排查到的根因：
+
+- `GroupedOverlayView` 仍使用纵向 `VStack` 渲染每个服务，`OverlayModelCard` 在父容器里自然撑满整条面板宽度。
+- `OverlayMetricGrid` 只解决了 card 内 widget 的排列，没有解决“服务 card 本身”的自适应宽度和多列排列。
+- `NotchHostedSurfaceView.bodyPanel` 内容从 body 顶部直接开始，视觉上和上方 top cap 分隔不足，展开后首张卡容易显得被菜单栏黑色区域压住。
+- `FloatingPanelView.calculateAdaptiveScale` 仍按旧的 `serviceCount * 32 + 16` 估算 grouped 内容高度，脱离面板缩放时也可能把新 card 布局压得过小。
+
+### 本轮目标
+
+- grouped 浮窗改成“服务卡片网格”，而不是每个服务一张全宽横条卡。
+- 单指标服务 card 只占合理宽度，不再撑出大块空黑；多指标服务在 card 内继续用 metric grid。
+- hosted 刘海展开面板顶部增加合理内容避让/间距，让首张卡不会贴住或看起来被 top cap 吃掉。
+- detached 浮窗也使用同一套 grouped card 估算，避免缩放后再次出现文字/卡片比例失衡。
+- 不改数据模型、fetcher、Keychain、刷新逻辑、拖拽吸附状态机。
+
+### 实施步骤
+
+1. **锁定布局根因**
+   - 对照 `GroupedOverlayView`、`OverlayModelCardStyle`、`NotchHostedSurfaceView`、`FloatingPanelView` 当前实现。
+   - 保留上一轮 `NotchExpandedLayoutPolicy` 的高度兜底，不先回退。
+
+2. **增加服务级 card grid**
+   - 在 `OverlayModelCardStyle.swift` 增加服务卡片网格 helper，例如 `OverlayServiceCardGrid`。
+   - grouped 模式用 adaptive columns 排列服务 card：
+     - 每张服务 card 有合理 min/max width。
+     - 面板足够宽时 DeepSeek / MiMo 这类单指标服务可以并排。
+     - 面板较窄时自动退回单列。
+
+3. **收紧 card 和 tile 尺寸**
+   - 调整 card padding、metric tile min/max width、value/label 字号和 spacing。
+   - 目标是减少“大黑盒”感，同时保持长数值不溢出。
+
+4. **修复 hosted 顶部视觉遮挡**
+   - 在 `NotchHostedSurfaceView.bodyPanel` 给 expanded content 增加轻量 top inset 或分隔策略。
+   - 只调整内容内边距/布局，不破坏 top cap 和 body 的几何融合。
+
+5. **同步 detached panel 自适应缩放**
+   - `FloatingPanelView.calculateAdaptiveScale` 改用接近 card grid 的高度估算，而不是旧 row 模型。
+   - 防止脱离浮窗放大/缩小时继续把新布局压坏。
+
+6. **记录与验证**
+   - 更新本 PLAN 实现结果。
+   - 追加 `docs/work-log/2026-06-22-floating-hud-model-cards.md` 的 follow-up，记录这次真正的二次根因。
+   - 自动验证：
+     - `swift test --filter NotchExpandedLayoutPolicy`
+     - `swift test --filter NotchSurfacePolicy`
+     - `swift test`
+     - `git diff --check`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动验证：
+     - 真实 hosted 浮窗首张 card 不被顶部压住。
+     - DeepSeek 单指标 card 不再占满整行。
+     - 3 个服务、7 个组件时不出现明显裁切。
+     - detached panel 中 grouped card 视觉比例稳定。
+
+### 验证
+
+- 这次修复重点是 SwiftUI 真实布局，自动测试只能覆盖策略不回退；最终必须以真实 app 截图确认。
+- 如果可行，优先用现有本地 app 运行后的截图对比当前问题截图。
+
+### 风险
+
+- adaptive grid 在窄面板下仍会退回单列，这是合理降级；不能为了并排继续压缩字体。
+- top inset 过大可能让展开面板显得浪费高度，需要控制在小范围。
+- 现有工作树已有多轮未提交改动，本轮只改 overlay 布局、detached 缩放估算和相关文档，不回退既有改动。
+
+### 本轮实现结果（2026-06-22）
+
+- `GroupedOverlayView` 从服务 card 的纵向全宽堆叠，改为 `OverlayServiceCardGrid` adaptive card grid。
+- `OverlayModelCardStyle` 增加服务卡片 min/max width、hosted body top inset，并收紧 card/tile spacing。
+- `OverlayMetricGrid` 对单 widget 服务使用 full-width metric tile，多 widget 继续使用 adaptive grid，减少单指标服务卡右侧空黑。
+- `NotchHostedSurfaceView.bodyPanel` 顶部增加轻量内容 inset，降低首张 card 被 top cap 压住的视觉问题。
+- `NotchExpandedLayoutPolicy` adaptive 高度从“按服务数堆叠 card”改为“按 card rows”估算。
+- `FloatingPanelContentLayoutPolicy` 增加 grouped Model Cards 的 detached 自适应缩放估算，`FloatingPanelView` 不再使用旧的 `serviceCount * 32 + 16`。
+
+### 验证结果
+
+- TDD RED：
+  - `FloatingPanelContentLayoutPolicy` 新测试先因缺少 `adaptiveScale` API 失败。
+  - `NotchExpandedLayoutPolicy` 新期望锁定 3 个服务时不再按 3 张全宽 card 堆叠估算高度。
+- `swift test --filter NotchExpandedLayoutPolicy --filter FloatingPanelContentLayoutPolicy`：通过，7 个测试通过。
+- `swift test --filter NotchSurfacePolicy`：通过，25 个测试通过。
+- `swift test`：通过，171 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，`BUILD SUCCEEDED`。
+- `git diff --check`：通过。
+
+### 待手动验证
+
+- 真实 hosted 浮窗首张 card 不再被顶部黑色区域压住。
+- DeepSeek 这类单指标服务不再占满整行大黑框。
+- 3 个服务、7 个组件时不出现明显裁切。
+- detached panel 中 grouped card 缩放比例稳定。
+
+## 当前重点：修复 Model Cards 真实浮窗效果偏差（已实现，待手动体验验证）
+
+### 问题
+
+用户截图显示，当前真实浮窗明显没有达到 B 方案预览效果：
+
+- 展开浮窗中卡片内容被裁切，顶部/底部观感像被黑色面板吃掉。
+- 单个服务 card 过空、过高，内容没有形成预览中的紧凑指标网格。
+- 当前卡片只是把旧 `WidgetRenderer` 塞进新外壳，视觉仍像旧 HUD widget 的残留，而不是 Model Cards。
+
+按系统化排查后的根因：
+
+- `NotchExpandedLayoutPolicy` 仍使用旧 row 模式估算高度：`serviceCount * 32 + padding`。
+- 新 Model Cards 每个服务实际需要约 80-100pt，高度估算过低导致 body 高度不足，出现裁切/滚动区不自然。
+- `OverlayWidgetFlow` 实际仍是水平 `ScrollView + HStack`，没有实现 spec 里的 compact grid/wrap flow。
+- card body 直接渲染旧 `WidgetRenderer`，旧 widget 的尺寸和样式是为横向小 HUD 设计的，不适合卡片内部展示。
+
+### 本轮目标
+
+- 让 B 方案在真实浮窗里接近预览：紧凑、精致、按服务成卡片，不再出现大块空黑和明显裁切。
+- adaptive 展开高度按 Model Cards 估算，服务多时优先给足高度，超过屏幕上限再滚动。
+- grouped / sectioned card body 使用卡片专用 metric tile：
+  - 每个 widget 展示为紧凑指标块。
+  - value / label 层级明确。
+  - 多个 widget 在 card 内按网格/wrap 排列，而不是一条横向旧 widget 列。
+- 保留旧 `WidgetRenderer` 给 compact 模式和其它非 card 场景使用。
+- 不改 fetcher、Keychain、刷新支持平台、拖拽/吸附状态机。
+
+### 实施步骤
+
+1. **TDD 锁定高度根因**
+   - 修改 `Tests/token_hudCoreTests/NotchExpandedLayoutPolicyTests.swift`。
+   - 先新增失败测试：adaptive 模式在 3 个 service 时，body height 应足以容纳多张 Model Cards，不应再接近旧的 116pt。
+   - 运行 `swift test --filter NotchExpandedLayoutPolicy`，确认测试先失败。
+
+2. **修复 adaptive 展开高度策略**
+   - 修改 `Sources/token_hudCore/NotchExpandedLayoutPolicy.swift`。
+   - 引入 Model Cards 估算常量，例如：
+     - card base height
+     - card spacing
+     - vertical padding
+   - adaptive 模式用 card count 估算 `idealHeight`。
+   - 保持 `maxScreenHeightFraction` 上限和超限滚动逻辑。
+
+3. **新增 card 专用 metric tile**
+   - 在 overlay 层新增或扩展局部 helper，例如 `OverlayMetricTile` / `OverlayWidgetGrid`。
+   - tile 只负责 Model Cards 里的展示，避免污染通用 `WidgetRenderer`。
+   - 从 `WidgetConfig` + `StateFile` 计算 value / label / optional progress。
+   - 复用 `WidgetValueComputer` 的格式化逻辑；如 `WidgetRenderer` 里的格式化逻辑需要复用，提取轻量 helper，避免复制过多私有逻辑。
+
+4. **重做 grouped / sectioned card body**
+   - `GroupedOverlayView`：
+     - card body 改用 `OverlayWidgetGrid`。
+     - grid 根据 card 宽度自动排 2-3 列或 wrap。
+   - `SectionedOverlayView`：
+     - 使用同一 grid。
+   - `CompactOverlayContent`：
+     - 保持旧 `WidgetRenderer`，不变成 card。
+
+5. **收紧 card 尺寸和视觉**
+   - 减小 card padding / spacing 到更接近预览。
+   - header 和 body 间距减少。
+   - card 背景保持低对比，避免“黑色大空盒”。
+   - 刷新按钮保持小，不抢视觉中心。
+
+6. **记录与验证**
+   - 更新本 PLAN 的实现结果。
+   - 如修复涉及布局策略和跨 overlay helper，更新或新增 work-log。
+   - 自动验证：
+     - `swift test --filter NotchExpandedLayoutPolicy`
+     - `swift test --filter NotchSurfacePolicy`
+     - `swift test`
+     - `git diff --check`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动验证：
+     - 真实 app 中展开浮窗不再裁切卡片。
+     - grouped 三个服务时高度足够，视觉接近预览 B。
+     - 多 widget card 内排列紧凑，不是旧横向小 widget 列。
+     - detached panel 和 sectioned 模式视觉一致。
+
+### 验证
+
+- 必须先看到新增 `NotchExpandedLayoutPolicy` 测试失败，再实现策略修复。
+- 自动测试通过后仍需真实 app 截图确认，因为最终问题是视觉效果偏差。
+
+### 风险
+
+- 如果 card 高度估算过高，浮窗可能过大；需要用屏幕比例上限和滚动兜底。
+- 从 `WidgetRenderer` 抽取/复用格式化逻辑时要避免影响 Settings 预览和 compact HUD。
+- 卡片专用 metric tile 如果复制太多格式化逻辑，后续维护成本会变高；优先提取小 helper 或复用已有 core 计算。
+
+### 本轮实现结果（2026-06-22）
+
+- 新增 `adaptiveModeReservesEnoughHeightForModelCards()` 测试，先复现旧策略在 3 个 service 时只给 `116pt` 高度的问题。
+- `NotchExpandedLayoutPolicy` adaptive 模式改为按 Model Cards 估算展开高度：
+  - 每个 service 约一张 card。
+  - 保留屏幕高度比例上限。
+  - 超过上限时继续启用纵向滚动。
+- `OverlayModelCardStyle` 新增 card 内部专用 `OverlayMetricGrid` / `OverlayMetricTile`：
+  - card body 不再直接塞旧横向 `WidgetRenderer`。
+  - 指标以 value / label / optional progress 的紧凑 tile 展示。
+  - grid 使用 adaptive columns，让多个 widget 在卡片里自动排布。
+- `GroupedOverlayView` 和 `SectionedOverlayView` 的 card body 改用 `OverlayMetricGrid`。
+- `CompactOverlayContent` 仍保留旧 `WidgetRenderer`，不受 card tile 影响。
+
+### 验证结果
+
+- TDD RED：`swift test --filter NotchExpandedLayoutPolicy` 先失败，显示 3 个 service 时 `bodyHeight` 为 `116.0`，不满足 `>= 260`。
+- `swift test --filter NotchExpandedLayoutPolicy`：通过，5 个测试通过。
+- `swift test --filter NotchSurfacePolicy`：通过，25 个测试通过。
+- `swift test`：通过，170 个测试通过。
+- `git diff --check`：通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，`BUILD SUCCEEDED`。
+
+### 待手动验证
+
+- 真实 app 中 grouped 展开浮窗不再像截图那样裁切 card。
+- DeepSeek / Codex / MiMo 等 card 内部显示紧凑 metric tile，而不是旧横向 widget 列。
+- detached panel 与 sectioned 模式视觉一致。
+- 长服务名、长指标值、多 widget 情况下不重叠。
+
+## 当前重点：浮窗 Model Cards 视觉优化（已实现，待手动体验验证）
+
+### 问题
+
+用户在浮窗 UI 方案预览中选择了 B：Model Cards。当前浮窗仍然偏“服务名 + 横向 widget 列表”的密集排布：
+
+- 服务名、组件、刷新按钮在同一行里抢横向空间。
+- 模型/服务增多时，容易显得拥挤或迫使字体继续变小。
+- grouped 和 sectioned 两种展开布局的视觉语言还不够统一。
+- 纯黑方向已经确定，但浮窗内部层级还不够精致。
+
+本轮已确认设计文档：
+
+- `docs/superpowers/specs/2026-06-22-floating-hud-model-cards-design.md`
+
+详细实施计划：
+
+- `docs/superpowers/plans/2026-06-22-floating-hud-model-cards.md`
+
+### 本轮目标
+
+- 将 grouped 浮窗从 divider row 改为按服务/模型分组的 compact card。
+- sectioned 浮窗保留服务 tab，但当前服务内容使用同一套 card shell。
+- compact 浮窗保持紧凑，只同步 spacing 和视觉细节，不引入卡片。
+- 刷新按钮继续使用现有 `OverlayServiceRefreshButton`，只调整为更适合 card header 的小圆形控制。
+- 不修改数据模型、fetcher、Keychain、刘海几何、拖拽、吸附、展开/收起状态机。
+
+### 实施步骤
+
+1. **新增 overlay 局部样式单元**
+   - 新建 `token_hud/Overlay/OverlayModelCardStyle.swift`。
+   - 提供 card radius、padding、spacing、card shell、widget flow 等小型 helper。
+   - 只依赖 SwiftUI 和现有 overlay 环境值。
+
+2. **重做 grouped 展示**
+   - 修改 `GroupedOverlayView`。
+   - 移除服务之间的 divider row。
+   - 每个服务渲染为一个 `OverlayModelCard`。
+   - card header 显示服务名、组件数量、刷新按钮。
+   - card body 继续使用现有 `WidgetRenderer`，保留 widget 顺序。
+
+3. **统一 sectioned 展示**
+   - 修改 `SectionedOverlayView`。
+   - 保留服务 tab。
+   - 当前服务内容改用相同的 `OverlayModelCard`。
+   - tab 视觉收敛到纯黑 card 系统。
+
+4. **轻量对齐 compact 展示**
+   - 修改 `CompactOverlayContent`。
+   - 只调整 spacing，不把 compact 模式改成卡片。
+
+5. **记录与验证**
+   - 新增 `docs/work-log/2026-06-22-floating-hud-model-cards.md`。
+   - 更新本 PLAN 的实现结果。
+   - 跑自动测试和 app 编译。
+
+### 验证
+
+- `swift test --filter NotchSurfacePolicy`
+- `swift test`
+- `git diff --check`
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+
+手动验证：
+
+- grouped 展开浮窗按服务显示 card，文字稳定不乱缩。
+- detached 浮窗 grouped 模式也使用同一视觉语言。
+- sectioned 模式当前服务内容与 grouped card 风格一致。
+- compact 模式仍保持紧凑。
+- 长服务名、长指标值不重叠。
+- 刷新按钮仍可用且不会连续弹出 Keychain 授权框。
+
+### 风险
+
+- 卡片背景和描边如果太重，会从“精致分组”变成“卡片堆叠”；实现时要保持低对比。
+- card 化会增加垂直高度，需依赖现有动态高度/滚动策略，不通过继续压缩核心字体解决。
+- 当前工作树已有多轮未提交改动，本轮只改 overlay 视觉和文档，不回退既有修复。
+
+### 本轮实现结果（2026-06-22）
+
+- 新增 `OverlayModelCardStyle`、`OverlayModelCard`、`OverlayWidgetFlow`，作为浮窗 Model Cards 的局部视觉 helper。
+- `GroupedOverlayView` 从 divider row 改为 service/model cards。
+- `SectionedOverlayView` 使用同一套 card shell 和 widget flow。
+- `CompactOverlayContent` 只对齐 spacing，不引入卡片。
+- `OverlayServiceRefreshButton` 视觉上收敛为小型 card header control，刷新行为不变。
+- 已运行 `xcodegen generate`，让新增 helper 加入 app target。
+
+### 验证结果
+
+- `swift test --filter NotchSurfacePolicy`：通过，25 个测试通过。
+- `swift test`：通过，169 个测试通过。
+- `git diff --check`：通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，`BUILD SUCCEEDED`。
+
+### 待手动验证
+
+- grouped 展开浮窗按服务显示 card，文字稳定不乱缩。
+- detached 浮窗 grouped 模式也使用同一视觉语言。
+- sectioned 模式当前服务内容与 grouped card 风格一致。
+- compact 模式仍保持紧凑。
+- 长服务名、长指标值不重叠。
+- 刷新按钮仍可用且不会连续弹出 Keychain 授权框。
+
+## 当前重点：浮窗服务级刷新按钮（已实现，待手动体验验证）
+
+### 问题
+
+用户希望在浮窗上增加一个小刷新按钮，用于对当前查看的内容进行刷新。当前浮窗只能展示 `StateWatcher` 读到的 state 数据，手动刷新入口主要在 Settings 平台页：
+
+- `CodexFetcher` 支持刷新 Codex 本地/套餐数据。
+- `APIPlatformFetcher.fetchSingle(platform:allowUserInteraction:)` 支持刷新 DeepSeek、MiniMax、MiMo 等 API/控制台数据。
+- `StateWatcher.readNow()` 能在刷新落盘后重新读取 `state.json`。
+- 但 `NotchHostRootView` / `FloatingPanelView` / `NotchHostedSurfaceView` 当前没有注入 `CodexFetcher` 和 `APIPlatformFetcher`，overlay 内部没有刷新入口。
+
+本轮理解为：在浮窗的每个服务/分组行旁边增加一个小刷新按钮，点击后只刷新对应服务，而不是刷新全部。
+
+### 本轮目标
+
+- 在浮窗 grouped / sectioned 展示里，为每个可刷新的服务增加一个小的 icon-only refresh button。
+- 点击按钮后刷新对应服务：
+  - `codex`：调用 `CodexFetcher.fetch(allowUserInteraction: false)`。
+  - API 平台：调用 `APIPlatformFetcher.fetchSingle(platform:allowUserInteraction: false)`。
+  - 刷新完成后调用 `StateWatcher.readNow()`。
+- 默认走静默刷新，不在浮窗里直接触发 Keychain 授权弹窗。
+- 如果平台需要授权读取真实 secret，则不在浮窗连续弹窗；后续仍通过 Settings 的“授权刷新”入口处理。
+- 保持按钮小、克制，不破坏纯黑 Compact Pro 的浮窗视觉。
+
+### 实施步骤
+
+1. **把刷新依赖注入 overlay**
+   - 修改 `NotchHostPanelManager` 初始化参数，增加：
+     - `CodexFetcher`
+     - `APIPlatformFetcher`
+   - `AppDelegate` 创建 `NotchHostPanelManager` 时传入这两个对象。
+   - `makeWindow` 里给 `NotchHostRootView` 注入对应 environment。
+
+2. **新增浮窗刷新 action**
+   - 在 overlay SwiftUI 层新增小 helper：
+     - 根据 service id 判断刷新方式。
+     - 使用 `@State` 跟踪当前正在刷新的 service ids。
+     - 刷新中显示小 `ProgressView` 或旋转态图标。
+   - 不把刷新状态写入 core 数据模型。
+
+3. **在 grouped / sectioned 行加入按钮**
+   - `GroupedOverlayView`：
+     - 在服务名旁边或右侧加入 icon-only refresh button。
+     - 只占很小宽度，不挤压 widget 横向滚动区。
+   - `SectionedOverlayView`：
+     - 在当前 service 标题旁边加入 refresh button。
+   - `CompactOverlayContent`：
+     - 本轮先不加逐 widget 按钮，因为 compact 模式没有稳定服务行，直接加会显著拥挤。
+
+4. **刷新行为边界**
+   - 不支持刷新的服务不显示按钮，或按钮 disabled。
+   - `claude` 当前没有实现可安全静默刷新的 fetcher，本轮不显示刷新按钮。
+   - `openai`、`anthropic`、`gemini` 目前只是 API key 状态/unsupported usage，按钮可不显示，避免给用户错误预期。
+   - `deepseek`、`minimax`、`mimo`、`codex` 优先支持。
+
+5. **验证**
+   - 自动验证：
+     - `swift test`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+     - `git diff --check`
+   - 手动验证：
+     - grouped 浮窗中每个支持服务旁边有小刷新按钮。
+     - sectioned 模式当前服务标题旁有小刷新按钮。
+     - 点击 Codex / DeepSeek / MiniMax / MiMo 刷新按钮后，按钮有短暂 loading 状态，数据刷新后更新显示。
+     - 不因点击浮窗刷新按钮弹出 Keychain 连续授权框。
+
+### 验证
+
+- 自动测试主要保证现有 core 和 app target 编译不回退。
+- 刷新按钮的真实数据更新需要手动验证，因为涉及本地 auth、Keychain 和网络。
+
+### 风险
+
+- 浮窗空间很小，按钮如果太明显会破坏 HUD 的轻量感；本轮使用 icon-only 小按钮。
+- API 平台静默刷新如果遇到 Keychain 需要授权，会返回 needsAuthorization；浮窗不直接弹窗，用户可能需要去 Settings 授权刷新。
+- 当前工作树已有多轮未提交改动，本轮只叠加浮窗刷新入口，不回退视觉、Keychain 和刘海几何改动。
+
+### 本轮实现结果（2026-06-20）
+
+- `NotchHostPanelManager` 新增 `CodexFetcher` 和 `APIPlatformFetcher` 依赖，并通过 environment 注入浮窗根视图。
+- `AppDelegate` 创建浮窗管理器时传入现有 fetcher 实例，避免 overlay 内部重新创建数据刷新对象。
+- `GroupedOverlayView` 在每个支持刷新的服务名旁增加小型 icon-only 刷新按钮。
+- `SectionedOverlayView` 在当前服务标题旁增加相同的刷新按钮。
+- 新增 `OverlayServiceRefreshButton`：
+  - 支持 `codex`、`deepseek`、`minimax`、`mimo`。
+  - 刷新中显示小 loading 状态，避免重复点击并发刷新。
+  - 刷新完成后调用 `StateWatcher.readNow()`，让浮窗重新读取落盘后的状态。
+  - 使用 `allowUserInteraction: false` 静默刷新，避免从浮窗触发连续 Keychain 授权弹窗。
+- 暂不为 `claude`、`openai`、`anthropic`、`gemini` 显示按钮，避免给用户错误的“可直接刷新用量”预期。
+
+### 验证结果
+
+- `swift test --filter KeychainAccessPolicy`：通过，2 个测试通过。
+- `swift test --filter NotchSurfacePolicy`：通过，25 个测试通过。
+- `swift test`：通过，169 个测试通过。
+- `git diff --check`：通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，`BUILD SUCCEEDED`。
+
+### 待手动验证
+
+- grouped 浮窗中 Codex / DeepSeek / MiniMax / MiMo 服务名旁出现小刷新按钮。
+- sectioned 浮窗当前服务标题旁出现小刷新按钮。
+- 点击刷新后按钮有短暂 loading 状态，完成后浮窗数据能更新。
+- 点击浮窗刷新按钮不会连续弹出 Keychain 授权框；需要授权的平台仍通过 Settings 处理。
+
+## 当前重点：Keychain 授权弹窗降噪（已实现，待手动体验验证）
+
+### 问题
+
+用户反馈 Settings 小组件页总是弹出系统 Keychain 授权框：
+
+- 弹窗内容是 `token_hud` 想使用钥匙串 `com.tokenHud.sessionKey` 中的机密信息。
+- 截图出现在小组件页，说明即使当前没有主动刷新 Claude，也可能因为 UI 状态计算触发 Keychain 访问。
+- 历史记录 `docs/work-log/2026-06-06-settings-keychain-popup.md` 已确认过同类根因：SwiftUI 渲染或页面刷新路径里频繁访问 Keychain，会导致系统连续弹授权。
+
+本轮重新排查后，当前代码已经基本避免在 UI body 里读取 secret data，但 `KeychainHelper.hasClaudeSessionKey()` / `hasAPIKey(...)` / `hasMiMoConsoleCookie()` / `hasCodexAdminKey()` 的存在性查询仍然没有显式禁止用户交互。对于旧签名或 ACL 需要确认的 Keychain item，哪怕只是状态检查，也可能触发系统授权弹窗。
+
+更细的调用链：
+
+- `SettingsWindow` 的小组件页会挂载 `WidgetListEditor()`。
+- `WidgetListEditor.task` 会调用 `reloadCredentialSnapshot()`。
+- `reloadCredentialSnapshot()` 会调用：
+  - `KeychainHelper.hasClaudeSessionKey()`
+  - `KeychainHelper.hasAPIKey(for:)`
+  - `KeychainHelper.hasMiMoConsoleCookie()`
+  - `KeychainHelper.hasCodexAdminKey()`
+- 平台页 `PlatformListView.task` 也有一套相同的 `reloadCredentialSnapshot()`。
+- 当前 `has...` 最终进入 `KeychainHelper.exists(account:)`，这个查询没有设置 `LAContext.interactionNotAllowed = true`。
+
+为什么会“拒绝后还连续弹”：
+
+- 每一次 `SecItemCopyMatching` 都是一次独立的 Keychain 访问请求。
+- 用户点“拒绝”只是拒绝当前这一次访问，不会让 app 后续所有访问自动静默失败。
+- 小组件页和平台页会在页面创建、切换、保存凭据后重新生成快照；如果一次快照里多个 `has...` 或多次页面重建都触发 Keychain 交互，就会表现为连续弹窗。
+- 开发环境里 app 频繁重编译后，Keychain item 的 ACL/代码签名信任关系也可能不稳定；理论上“始终允许”能减少弹窗，但不应该要求用户靠它解决普通 UI 浏览问题。
+
+### 本轮目标
+
+- 让“是否已配置”的 Keychain 状态检查静默执行，不弹系统授权框。
+- Settings 小组件页、平台页、推荐组件刷新快照时，不因为检查 Claude session key 或其它凭据存在性而弹窗。
+- 保留用户主动操作时的授权能力：
+  - 手动保存凭据。
+  - 用户主动刷新需要真实 API key/cookie 的平台。
+  - 用户主动提取 Claude session key。
+- 不改变 Keychain service/account 名称，不迁移或删除用户已有凭据。
+
+### 实施步骤
+
+1. **修复 Keychain 存在性查询**
+   - 修改 `KeychainHelper.exists(account:)`：
+     - 使用 `LAContext` 并设置 `interactionNotAllowed = true`。
+     - 设置 `kSecUseAuthenticationContext`，禁止 `SecItemCopyMatching` 弹出授权 UI。
+     - 对 `errSecInteractionNotAllowed` 做降级处理，避免因为旧 ACL 项直接弹窗。
+
+2. **收紧调用语义**
+   - 保持 `hasClaudeSessionKey()` 等 `has...` API 作为静默状态检查入口。
+   - 保持 `load(... allowUserInteraction:)` 的语义：
+     - UI 快照/预览使用 `allowUserInteraction: false`。
+     - 用户主动刷新网络数据时才可传 `true`。
+
+3. **复核残留读取路径**
+   - 确认 `WidgetListEditor.reloadCredentialSnapshot()` 只调用静默 `has...`。
+   - 确认 `PlatformListView.reloadCredentialSnapshot()` 只调用静默 `has...`。
+   - 保留 `SessionKeyExtractor.loadFromKeychain()` 的非交互读取，不把它放入频繁渲染路径。
+
+4. **验证**
+   - 静态检查：
+     - `rg "KeychainHelper\\.load\\(" token_hud`
+     - `rg "hasClaudeSessionKey|hasAPIKey|hasMiMoConsoleCookie|hasCodexAdminKey" token_hud`
+   - 自动验证：
+     - `swift test`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+     - `git diff --check`
+   - 手动验证：
+     - 打开 Settings 小组件页不再弹 Claude session key 授权框。
+     - 切换 Settings 页面、重复进入小组件页不连续弹窗。
+     - 手动刷新需要真实密钥的平台时，仍能在必要时触发授权。
+
+### 验证
+
+- 自动测试覆盖编译和核心逻辑不回退。
+- 这个问题的最终判断依赖 macOS Keychain 真机行为，需要用户在真实 app 中验证弹窗频率。
+
+### 风险
+
+- 对 `errSecInteractionNotAllowed` 的降级如果处理过于保守，UI 可能把已有旧凭据显示为未配置；如果处理过于宽松，可能把需要授权但无法读取的旧凭据显示为已配置。
+- 本轮优先目标是“不在普通 UI 浏览时弹窗”；旧 Keychain item 第一次主动读取真实 secret 时，macOS 仍可能弹一次，这是系统权限模型的一部分。
+- 当前工作树已有多轮未提交改动，本轮只修改 Keychain 静默查询相关逻辑，不回退视觉和刘海窗口改动。
+
+### 本轮实现结果（2026-06-20）
+
+- 新增 `KeychainAccessPolicy`：
+  - `.statusCheck` 永远不允许用户交互。
+  - `.secretRead(allowUserInteraction:)` 严格遵循调用方传入的授权意图。
+- 新增 `KeychainAccessPolicyTests`：
+  - 覆盖状态检查不允许弹窗。
+  - 覆盖真实 secret 读取只在显式允许时才可交互。
+- `KeychainHelper.load(account:allowUserInteraction:)`：
+  - 改为通过 `KeychainAccessPolicy` 判断是否设置非交互 `LAContext`。
+- `KeychainHelper.exists(account:)`：
+  - 改为 `var query`，并在状态检查中设置 `LAContext.interactionNotAllowed = true`。
+  - 所有 `hasClaudeSessionKey()` / `hasAPIKey(...)` / `hasMiMoConsoleCookie()` / `hasCodexAdminKey()` 都走非交互查询。
+- 保留用户主动读取 secret 的能力：
+  - `allowUserInteraction: true` 的刷新/读取路径仍可触发系统授权。
+  - 普通 UI 快照和推荐组件状态检查不应再触发授权框。
+- 已沉淀 work-log：
+  - `docs/work-log/2026-06-20-keychain-status-check-silent.md`
+
+### 验证结果
+
+- TDD RED：`swift test --filter KeychainAccessPolicy` 先因缺少 `KeychainAccessPolicy` 失败，符合预期。
+- `swift test --filter KeychainAccessPolicy`：通过，2 个测试通过。
+- `swift test`：通过，169 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+- 静态扫描已确认：
+  - Settings 小组件页和平台页的 credential snapshot 使用 `has...` 状态检查。
+  - 当前挂载的 `SettingsWindow` 未使用旧 `PlatformRowView` / `ServiceConfigView`。
+
+### 待手动验证
+
+- 打开 Settings 小组件页不再连续弹出 Claude session key Keychain 授权框。
+- 点击“拒绝”后，页面重建或切换 Settings tab 不再连续重复弹。
+- 用户主动授权刷新需要真实 key/cookie 的平台时，系统仍能按需弹授权。
+
+## 当前重点：Pure Black Compact Pro 视觉系统（已实现，待手动体验验证）
+
+### 问题
+
+用户在纯黑方向预览中选择了 C：Compact Pro。上一版 Dynamic Island 磨砂方案仍然存在几个问题：
+
+- 用户已明确希望 UI 方向改为纯黑，不再使用透明或磨砂背板。
+- 顶部 HUD、Settings 小组件页、当前效果区的视觉语言还不够统一，部分区域有蓝灰、半透明、纯黑大块混用的问题。
+- 当前效果区和推荐区的信息密度、圆角、字重、描边层级不够精致，容易显得粗糙。
+- 当模型或组件数量变多时，需要保持高度可变，但字体层级不能被压得越来越小。
+
+### 本轮目标
+
+- 按 C 方向建立纯黑 Compact Pro 基础版：
+  - 主背板使用纯黑或接近纯黑实色。
+  - 不再用透明、磨砂或渐变作为主要面板质感。
+  - 用更准确的字重、字号、间距、hairline 和状态色建立精致感。
+- 统一顶部 hosted HUD、Settings 小组件页、推荐组件、当前效果区的视觉语言。
+- 收敛圆角和卡片层级，减少卡片套卡片、大块空黑和视觉割裂。
+- 保持现有数据模型、拖拽、吸附、hover、动态高度、分组和排序功能不变。
+- 为后续主题色、背景色、风格扩展保留空间，但本轮不做完整主题系统。
+
+### 实施步骤
+
+1. **沉淀纯黑视觉规则**
+   - 在 SwiftUI 层使用局部 helper 或常量统一：
+     - 纯黑/近黑实色背景。
+     - hairline 描边透明度。
+     - 主/次/弱文字透明度。
+     - 8-10pt 紧凑卡片圆角。
+   - 移除本轮涉及面板里的 `.thinMaterial`、`.regularMaterial`、`.ultraThinMaterial` 主背景用法。
+
+2. **重做 hosted 顶部 HUD 视觉**
+   - 调整 `NotchHostedSurfaceView`：
+     - top cap 和 body 改为纯黑实色体系。
+     - 保留刘海融合轮廓，但减少大面积空黑和粗糙边界。
+     - 左右状态区继续保留有用信息，但不再使用磨砂胶囊贴片感。
+     - 固定核心字号层级，避免展开高度变化时文字继续被压小。
+
+3. **统一 Settings 小组件页**
+   - 调整 `WidgetListEditor`：
+     - 推荐组件、当前效果、已添加组件、添加组件区域改为纯黑 Compact Pro 样式。
+     - 当前效果继续按模型分组，优化组标题、数量、组件 chip 和删除按钮的层级。
+     - 收敛圆角、描边和内边距，减少嵌套卡片感。
+   - 调整 `SettingsWindow`：
+     - 侧边栏和详情区从磨砂/蓝灰转为纯黑或近黑实色。
+     - 保持选中态清晰，但减少大面积高透明色块。
+
+4. **处理溢出和重复操作风险**
+   - 复核服务名、模型名、组件名、按钮文案、数量文案的截断和换行。
+   - 确保窄窗口和组件增多时不会横向撑破。
+   - 不改窗口几何和动画策略，只确保视觉层不会因高度变化造成文字异常缩放。
+
+5. **验证**
+   - 自动验证：
+     - `swift test --filter NotchSurfacePolicy`
+     - `swift test --filter NotchGeometryCalculator`
+     - `swift test`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+     - `git diff --check`
+   - 手动验证：
+     - 刘海收起、展开、再次展开后仍贴合且排版稳定。
+     - Settings 小组件页整体为纯黑 Compact Pro 风格。
+     - 当前效果区长文本、模型多、组件多时不溢出。
+     - 窄窗口下按钮、标题和 chip 不重叠。
+
+### 验证
+
+- 自动测试主要保证核心策略和 app 编译不回退。
+- 视觉结果必须通过真实 app 手动验证，重点看纯黑是否足够精致、字体是否稳定、当前效果区是否清爽。
+
+### 风险
+
+- 纯黑方案如果只改颜色，可能会显得过平；必须同步调整字重、间距、描边和信息层级。
+- 紧凑布局如果压得过猛，可能牺牲可读性；核心数字和状态仍需留足最小空间。
+- 当前工作树已有多轮未提交改动，本轮只叠加视觉系统改动，不回退既有几何、拖拽、高度和权限弹窗相关修复。
+
+### 本轮实现结果（2026-06-20）
+
+- `NotchHostedSurfaceView`：
+  - top cap 和 expanded body 主背景改为 `Color.black` 实色。
+  - 移除主面板 `.thinMaterial`、`.regularMaterial` 和渐变高光。
+  - 左右信息耳朵保留低调可见状态，但改为纯黑体系下的轻描边/轻底色。
+- `FloatingPanelView`：
+  - 独立浮窗外壳改为纯黑实色，避免从刘海拖出后与 Compact Pro 方向割裂。
+- `WidgetListEditor`：
+  - 新增局部 `CompactBlackTheme` 和 `compactBlackPanel`，统一小组件页近黑面板、inset 背景、hairline。
+  - 推荐组件、刘海收起态配置、当前效果、组件 chip、已添加列表、添加预设卡片改为纯黑 Compact Pro 视觉。
+  - 当前效果区继续按模型/服务分组，并保留删除按钮；列表区从 bordered list 改为黑色 plain list。
+- `SettingsWindow`：
+  - 主窗口、详情区和侧边栏改为纯黑/近黑实色。
+  - 移除 Settings 主背景 `.regularMaterial` 和渐变。
+  - 侧边栏选中态改为更克制的低透明白色块，保留左侧 accent 指示条。
+- 已沉淀设计记录：
+  - `docs/superpowers/specs/2026-06-20-pure-black-compact-pro-design.md`
+
+### 验证结果
+
+- `swift test --filter NotchSurfacePolicy`：通过，25 个测试通过。
+- `swift test --filter NotchGeometryCalculator`：通过，53 个测试通过。
+- `swift test`：通过，167 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+- `git diff --check`：通过。
+
+### 待手动验证
+
+- 真实 app 中顶部 HUD 收起、展开、再次展开后是否仍贴合刘海且纯黑质感稳定。
+- Settings 小组件页整体是否足够简洁精致，当前效果区是否比上一版更统一。
+- 模型/组件变多、窗口缩窄时是否无文字溢出、按钮重叠或排版拥挤。
+
+## 当前重点：Dynamic Island 一体化视觉系统（已被 Pure Black Compact Pro 方向取代，保留记录）
+
+### 问题
+
+用户在预览中选择了 B：Dynamic Island 一体化。当前真实 UI 的主要问题是视觉语言不统一：
+
+- 顶部刘海浮窗仍偏“黑色矩形面板”，左右信息耳朵像额外贴上的胶囊。
+- 设置页主体是蓝灰磨砂，当前效果预览又是纯黑大块，和顶部浮窗割裂。
+- 推荐组件、当前效果、侧边栏、顶部 HUD 的圆角、描边、透明度和字重层级不一致。
+- 分割线和卡片边界偏硬，整体不够精致。
+
+### 本轮目标
+
+- 按 B 方向建立统一的 Dynamic Island 一体化视觉：
+  - 顶部刘海浮窗更像一个连续岛体。
+  - 左右状态区融入 top cap，不再像独立小胶囊。
+  - body 和 top cap 使用同一套深色半透明磨砂质感。
+  - 设置页、小组件推荐区、当前效果区同步使用更圆润、半透明、低边框的岛状语言。
+- 减少大面积纯黑和硬分割线。
+- 保持现有信息密度、拖拽、hover、动态高度、分组切换和数据模型不变。
+
+### 实施步骤
+
+1. **沉淀共享视觉参数**
+   - 在 SwiftUI 层增加轻量视觉 helper 或局部常量，统一：
+     - 深色磨砂底色透明度。
+     - 描边透明度。
+     - 主/次/弱文字透明度。
+     - 岛状圆角和卡片圆角。
+   - 不新增外部依赖，不做全局主题大重构。
+
+2. **重做 hosted 顶部岛体视觉**
+   - 调整 `NotchHostedSurfaceView`：
+     - top cap 和 body 更像连续岛体，减少纯黑矩形感。
+     - 左右状态槽去掉“贴片”感，改成嵌入式状态区。
+     - 弱化横向硬分割线，用更轻的 hairline 或间距表达行组。
+     - 保留现有动态高度、顶部锚定和信息耳朵降级策略。
+
+3. **统一 Settings 小组件页**
+   - 调整小组件页面相关视图：
+     - 推荐组件卡片、当前效果预览和外层面板使用同一套磨砂岛状样式。
+     - 当前效果不再是纯黑大块，改为与 HUD 一致的半透明深色预览区。
+     - 减少嵌套卡片边界，统一按钮和 header action 的圆角、背景和文字层级。
+   - 保持 Settings 结构和功能不变。
+
+4. **处理溢出和一致性**
+   - 复核小组件页长文本、服务名、计数文案、按钮文案的截断/换行。
+   - 保证窄窗口下不会横向撑破。
+   - 避免卡片套卡片视觉过重。
+
+5. **验证**
+   - 自动验证：
+     - `swift test --filter NotchSurfacePolicy`
+     - `swift test --filter NotchGeometryCalculator`
+     - `swift test`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+     - `git diff --check`
+   - 手动验证：
+     - 刘海收起、展开、再次展开视觉连续。
+     - 展开态 top cap/body 像一个岛体，不再像黑色矩形。
+     - Settings 小组件页推荐区和当前效果区风格统一。
+     - 缩窄 Settings window 后无文字重叠或横向溢出。
+
+### 验证
+
+- 自动测试主要保证核心策略和 build 不回退。
+- 视觉结果必须通过真实 app 手动验证，尤其是透明磨砂在 macOS 背景下的表现。
+
+### 风险
+
+- 如果 top cap 过圆或过浅，可能削弱和物理刘海的融合感。
+- 如果 Settings 视觉一次性改太多，可能影响其它页面一致性；本轮优先聚焦小组件页和当前效果区。
+- 当前工作树已有多轮未提交改动，本轮只叠加视觉统一改动，不回退已有几何、拖拽和高度策略修复。
+
+### 本轮实现结果（2026-06-19）
+
+- `NotchHostedSurfaceView`：
+  - top cap 和 body 使用更接近的深色磨砂覆盖、高光和描边。
+  - 展开态左右状态槽降低贴片感，信息更像嵌在 top cap 内部。
+  - body 阴影和高光调整为更连续的岛体视觉。
+- `WidgetListEditor`：
+  - 新增局部 `islandPanel` 样式 helper，统一小组件页主要面板。
+  - 推荐组件、刘海收起态配置、当前效果预览、已添加/添加区域改为更圆润的半透明磨砂样式。
+  - 当前效果预览从纯黑块改为深色磨砂岛状预览区。
+  - 推荐 chip、预设卡片和 preview item 统一 14pt 圆角和轻描边。
+- `SettingsWindow`：
+  - 轻调背景、分隔线、侧边栏选中态圆角和透明度，使 Settings 与小组件页视觉更一致。
+- 已沉淀 work-log：
+  - `docs/work-log/2026-06-19-dynamic-island-visual-system.md`
+
+### 验证结果
+
+- `swift test --filter NotchSurfacePolicy`：通过，25 个测试通过。
+- `swift test`：通过，167 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+- `git diff --check`：通过。
+
+### 待手动验证
+
+- 展开态 HUD 是否像连续岛体，而不是黑色矩形和小胶囊的拼接。
+- Settings 小组件页推荐区、当前效果区、刘海收起态配置区风格是否统一。
+- 缩窄 Settings window 后是否没有文本溢出或按钮拥挤。
+
+## 当前重点：刘海展开态信息耳朵优化（已实现，待手动体验验证）
+
+### 问题
+
+用户反馈：浮窗从刘海放大后，刘海左右两端位置是纯黑状态，看起来很空、很丑。此前展开态为了突出正文内容，会让左右 `statusSlot` 随 `contentOpacity` 淡出，结果展开完成后顶部两端只剩黑色 top cap，没有信息层次。
+
+本轮已通过视觉讨论确认选择方案 A：在展开态保留左右“信息耳朵”，用有用的状态信息和半透明磨砂质感填充两端，而不是放纯装饰。
+
+### 本轮目标
+
+- 展开态刘海左右两端不再是纯黑空区。
+- 左右两端复用现有刘海收起态状态来源，保持信息连续：
+  - 左侧优先显示主额度进度。
+  - 右侧优先显示百分比、剩余量或到期状态文本。
+- 状态槽在展开态仍可见，但比收起态更克制，避免抢正文内容。
+- 视觉上使用半透明磨砂胶囊、轻描边和内高光，减少纯黑面积。
+- 不改 hosted window frame、hover 区域、拖拽脱离、展开高度策略、Settings 数据结构。
+
+### 实施步骤
+
+1. **补充可测试的小策略**
+   - 在 core 中增加展开态信息耳朵的可见度/降级策略，例如根据 `contentOpacity`、slot 宽度和是否有状态文本计算：
+     - 展开态最低可见透明度。
+     - 是否显示辅助文本。
+     - 进度条最小宽度。
+   - 用 Swift Testing 覆盖“展开态不完全淡出”和“窄宽度降级”的规则。
+
+2. **优化 `NotchHostedSurfaceView` 顶部渲染**
+   - 调整 `topCap` 背景，降低纯黑压迫感，保留刘海融合需要的暗色底。
+   - 将 `statusSlot` 从只在收起态可见改为展开态也保持低调可见。
+   - 给左右状态槽增加半透明磨砂底、轻描边和内高光。
+   - 保持收起态视觉紧凑，不回退成整条菜单栏状态条。
+
+3. **处理文本和空状态**
+   - 右侧文本使用固定行数和合理 `minimumScaleFactor`，但不无限缩小。
+   - 无有效状态时使用低透明占位或隐藏内部文本，避免留下突兀黑块。
+   - 窄宽度优先保留核心数字/进度，不显示额外说明文字。
+
+4. **验证**
+   - `swift test --filter NotchSurfacePolicy`
+   - 新增策略测试对应 filter。
+   - `swift test`
+   - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - `git diff --check`
+
+### 验证
+
+- 自动测试锁住展开态信息耳朵不会完全淡出，以及窄宽度降级行为。
+- 真机手动验证：
+  - 收起 → 展开 → 收起 → 再展开，左右信息耳朵始终贴合刘海两侧。
+  - 展开态顶部左右不再出现纯黑空区。
+  - 模型/组件变多时，正文布局不被左右耳朵影响。
+  - 无数据、长文本、窄屏时没有溢出或异常缩放。
+
+### 风险
+
+- 如果状态槽视觉太强，可能和展开正文争抢注意力，需要通过透明度和尺寸控制。
+- 如果 `topCap` 颜色变浅过多，可能削弱和物理刘海的融合感。
+- 当前工作树已有多轮未提交改动，本轮只修改与 hosted 顶部视觉相关的文件，不回退既有几何和窗口管理修复。
+
+### 本轮实现结果（2026-06-19）
+
+- 新增 `NotchInfoEarPresentationPolicy`：
+  - 展开态 `contentOpacity == 1` 时，左右信息耳朵仍保持最低可见度。
+  - 收起态保持满透明度，不改变原来的紧凑状态。
+  - 窄 slot 自动隐藏右侧文本并使用低调占位。
+  - 进度条宽度有最小值和最大值，避免溢出或过长。
+- `NotchHostedSurfaceView` 顶部视觉调整：
+  - 展开态 top cap 降低纯黑覆盖，增加轻微高光和更清晰的边线。
+  - 左右 `statusSlot` 不再随正文淡入完全消失。
+  - 左右状态槽增加半透明磨砂胶囊底、细描边和内高光。
+  - 左侧继续显示额度进度条，右侧继续显示现有收起态配置出的状态文本。
+- 本轮不改变 hosted window frame、hover 命中、拖拽脱离、Settings 配置和 state 数据模型。
+
+### 验证结果
+
+- TDD RED：`swift test --filter NotchSurfacePolicy/infoEars` 先因缺少 `NotchInfoEarPresentationPolicy` 失败，符合预期。
+- `swift test --filter NotchSurfacePolicy`：通过，25 个测试通过。
+- `swift test`：通过，167 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- 展开态顶部左右不再出现纯黑空区。
+- 收起 → 展开 → 收起 → 再展开，左右信息耳朵仍贴合刘海两侧。
+- 右侧状态文本较长或数据缺失时，没有明显溢出或异常缩放。
+
+## 当前重点：第二次展开后刘海对齐漂移修复（已实现，待手动体验验证）
+
+### 问题
+
+用户反馈上一轮仍未修复：第一次浮窗缩小后，再重新放大，会出现“不在刘海两端”的视觉状态。
+
+本轮重新分析后，问题更像是 **hosted 刘海 surface 的 frame / 交互状态在 collapse → expand 或 detached resize → snap → expand 之间被污染**，而不是单纯的内容顶部对齐：
+
+- 上一轮只修了 `FloatingPanelView` 内容对齐；它影响 detached 自由浮窗内部内容，但不能保证 hosted 刘海 surface 第二次展开时仍贴合刘海两端。
+- 历史 work-log `2026-06-01-notch-fusion-smooth.md` 里明确记录过：hosted surface 曾因 AppKit 原生拖动/窗口重排导致 frame 漂移，最终策略是 hosted 状态保持 canonical expanded frame。
+- 当前代码在 `animateToExpanded()` 又把 `overlayWindow.isMovableByWindowBackground` 设为 `true`，这会让 hosted expanded window 重新具备被 AppKit 原生移动的能力。
+- 如果 hosted window 在收起/再次展开期间被移动、被 detached 缩放尺寸影响，或实际 window size 与 `hostState.frames.expanded` 不一致，`NotchHostedSurfaceView` 的局部布局就可能按“期望尺寸”绘制到“实际脏尺寸”里，出现顶部/两端不贴合刘海的状态。
+
+### 本轮目标
+
+- 不管经历多少次 `expanded → collapsed → expanded`，hosted surface 都从 canonical `frames.expanded` 开始绘制。
+- detached 自由浮窗被缩小/拉大后，再吸附回刘海并重新展开，不把 detached 的尺寸、位置或 scale 污染到 hosted surface。
+- hosted expanded/collapsed 两种模式都不允许 AppKit 原生 background dragging 直接移动 overlay window。
+- 保留“从 expanded 拖出变 detached”的能力，但这条路径必须显式切换到 detached window，不能让 hosted window 自己漂移。
+- 不再继续调整内容字体大小、Settings 布局模式或 widget 数据模型。
+
+### 实施步骤
+
+1. **增加可测试策略**
+   - 在 `NotchSurfacePolicy` 或新增小策略里定义 hosted window 的拖动/移动规则：
+     - `.collapsed` 和 `.expanded`：不允许 `isMovableByWindowBackground`。
+     - `.detached`：允许 `isMovableByWindowBackground`。
+   - 用 Swift Testing 先写失败测试，锁住“hosted 不可被 AppKit 背景拖动”的规则。
+
+2. **统一 hosted frame 重置**
+   - 检查并调整以下入口，确保每次进入 hosted collapsed/expanded 前都刷新 geometry，并把 overlay window 强制设回 `frames.expanded`：
+     - `snapToCollapsed()`
+     - `animateToCollapsed()`
+     - `animateToExpanded()`
+     - `restoreState()`
+     - `screenParametersChanged()`
+     - `hostedLayoutInputsChanged()`
+   - `reassertHostedFrame(...)` 不只依赖“看起来接近”就跳过；对状态切换入口优先强制 set frame，避免第二次展开沿用脏 frame。
+
+3. **修正 expanded 拖出 detached 的方式**
+   - 移除 hosted expanded 的 AppKit 原生 background dragging。
+   - 如果需要保持拖出能力，在 expanded body 的 mouse down / drag 路径里显式切到 detached：
+     - detached 初始 frame 使用当前 hosted body 的屏幕 rect。
+     - 后续拖动由 detached window 或手动 drag monitor 接管。
+   - 这一步只处理“拖出变自由浮窗”，不改变 hover 展开/收起动画。
+
+4. **补充诊断**
+   - 在 snap/collapse/expand 入口打印 requested `frames.expanded` 和 actual `overlay.frame`。
+   - 如果 actual 与 canonical 不一致，立即记录并重置，方便真机验证第二次展开是否还会漂。
+
+5. **验证**
+   - 自动验证：
+     - 新增 hosted movement policy 测试。
+     - `swift test --filter NotchSurfacePolicy`
+     - `swift test --filter NotchGeometryCalculator`
+     - `swift test`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+     - `git diff --check`
+   - 手动验证：
+     - hover 展开 → 移开收起 → 再 hover 展开，重复多次，面板仍贴在刘海两端。
+     - detached 自由浮窗缩小后吸附回刘海，再展开，尺寸不会污染 hosted surface。
+     - 从 expanded body 拖出后仍能进入 detached，且拖出瞬间不出现透明大窗口漂移。
+
+### 验证
+
+- 自动测试覆盖 hosted window 不可被 AppKit 背景拖动这一关键规则。
+- 真机手动验证仍是必要的，因为 `NSPanel` 实际 frame、SkyLight delegation、鼠标事件时序无法完全由 core tests 模拟。
+
+### 本轮实现结果（2026-06-19）
+
+- 新增 `NotchWindowMovementPolicy`：
+  - hosted `.collapsed` / `.expanded` 均不允许 AppKit background dragging。
+  - `.detached` 保持可 background dragging。
+- `NotchHostPanelManager` 所有 window movement 状态统一走策略，不再在 expanded hosted 状态把 overlay window 设为可原生拖动。
+- `transitionTo(.detached)` 显式把 source mode 传给 `switchToDetached(from:)`：
+  - 避免 mode 先变成 `.detached` 后，`detachedTargetFrame()` 再判断 `hostState.isExpanded` 失效。
+  - expanded body 拖出时不再回落到缩小后的旧 `savedDetachedFrame`。
+- 新增 `NotchGeometryCalculator.hostedBodyDetachedFrame(...)`：
+  - detached 初始 frame 从 canonical hosted body rect 计算。
+  - 测试覆盖自定义 body height 下的 body screen rect。
+- expanded body 拖出改为显式 drag monitor：
+  - mouse down 只记录起点。
+  - 拖动超过阈值才切到 detached。
+  - detached window 按鼠标 delta 跟随，不让 hosted overlay 自己漂移。
+- 状态切换时 `reassertHostedFrame(..., force: true)`，避免第二次展开沿用脏 frame。
+- 已沉淀 work-log：
+  - `docs/work-log/2026-06-19-notch-reexpand-frame-drift.md`
+
+### 验证结果
+
+- TDD RED：`swift test --filter NotchSurfacePolicy` 先因缺少 `NotchWindowMovementPolicy` 失败，符合预期。
+- TDD RED：`swift test --filter hostedBodyDetachedFrameUsesCanonicalBodyRect` 先因缺少 `hostedBodyDetachedFrame(...)` 失败，符合预期。
+- `swift test --filter NotchSurfacePolicy`：通过，21 个测试通过。
+- `swift test --filter hostedBodyDetachedFrameUsesCanonicalBodyRect`：通过，1 个测试通过。
+- `swift test --filter NotchGeometryCalculator`：通过，53 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+- `git diff --check`：通过。
+
+### 待手动验证
+
+- hover 展开 → 移开收起 → 再 hover 展开，重复多次，面板仍贴在刘海两端。
+- detached 自由浮窗缩小后吸附回刘海，再展开，尺寸不会污染 hosted surface。
+- 从 expanded body 拖出后仍能进入 detached，且拖出瞬间不出现透明大窗口漂移。
+
+### 风险
+
+- 禁用 hosted background dragging 后，如果显式 detached drag 接管不完整，可能会短暂影响“从展开面板拖出”的手感。
+- 如果实际根因是 SkyLight delegation 或系统级窗口重排，可能需要继续扩大诊断日志，而不是只改 SwiftUI 布局。
+- 当前工作树里已有上一轮多文件未提交改动，本轮会只叠加必要修复，不回退已有修改。
+
+## 当前重点：自由浮窗缩放后内容保持顶部布局（已实现，待手动体验验证）
+
+### 问题
+
+用户反馈上一轮仍未修复：浮窗在放大/缩小后仍可能从图一变成图二。
+
+重新分析截图后，上一轮定位有误：
+
+- 图中右下角有 resize grip，说明截图里的窗口是 **detached 自由浮窗**，渲染路径是 `FloatingPanelView`。
+- 上一轮修复的是 hosted 刘海路径 `NotchHostedSurfaceView`，所以不会影响这张截图里的自由浮窗。
+- `FloatingPanelView` 当前明确把内容居中：
+  - `ZStack(alignment: .bottomTrailing)` 只负责让 resize grip 在右下角。
+  - `overlayContent.frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)` 会把内容放到面板中间。
+  - `scaleEffect(scale, anchor: .center)` 会继续以中心点放大/缩小。
+- 当用户把自由浮窗高度拉大后，背景跟着变高，内容仍按中心布局，因此顶部出现图二那种大块空黑区域。
+
+### 本轮目标
+
+- 自由浮窗无论被用户拖大、缩小或通过手势缩放，都保持图一那种视觉状态。
+- 内容垂直方向固定从顶部开始排布，不再因为窗口高度变化而居中下沉。
+- 保持 resize grip 在右下角。
+- 保持已有紧凑/分组显示模式和手势缩放能力。
+- 不改变刘海 hosted surface 的几何和展开高度策略。
+
+### 实施步骤
+
+1. 修改 `token_hud/Overlay/FloatingPanelView.swift`：
+   - 将 `overlayContent` 的 frame 对齐从 `.center` 改为顶部对齐。
+   - 将 `scaleEffect` anchor 从 `.center` 改成顶部锚点，避免缩放时内容从中心向上下扩散。
+   - 横向优先保持现有居中观感，避免内容贴到左边。
+2. 复核 `calculateAdaptiveScale(for:)`：
+   - 如果高度变大仍导致字体随窗口高度明显变大，再把自由浮窗的 adaptive scale 从“按高度缩放”改成更稳定的策略。
+   - 第一轮先只改锚点，避免一次性改变字体大小逻辑。
+3. 验证：
+   - `swift test --filter NotchExpandedLayoutPolicy`
+   - `swift test --filter NotchGeometryCalculator`
+   - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - `git diff --check`
+
+### 验证
+
+- 自动验证确保相关 core 和 app target 不回退。
+- 手动验证自由浮窗：
+  - 拉高窗口后，内容仍停在顶部，不出现图二顶部空黑条。
+  - 缩小窗口后，内容不会被中心缩放推偏。
+  - resize grip 仍在右下角可用。
+
+### 本轮实现结果（2026-06-18）
+
+- 新增 `FloatingPanelContentLayoutPolicy`，用 core 测试锁定 detached 自由浮窗内容顶部锚定策略。
+- `FloatingPanelView` 不再把内容 `.center` 垂直居中，而是按策略使用 `.top` 垂直对齐。
+- `FloatingPanelView` 的 `scaleEffect` 不再使用 `.center` 锚点，而是从 `.top` 锚点缩放，避免手势缩放时内容从中线向上下扩散。
+- 保持横向居中、resize grip 右下角、紧凑/分组显示模式和现有 adaptive scale 计算不变。
+
+### 验证结果
+
+- TDD RED：`swift test --filter FloatingPanelContentLayoutPolicy` 先因缺少策略类型失败，符合预期。
+- `swift test --filter FloatingPanelContentLayoutPolicy`：通过，1 个测试通过。
+- `swift test --filter PanelResizeCalculator`：通过，2 个测试通过。
+- `swift test --filter NotchExpandedLayoutPolicy`：通过，4 个测试通过。
+- `swift test --filter NotchGeometryCalculator`：通过，52 个测试通过。
+- `swift test`：通过，160 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+- `git diff --check`：通过。
+
+### 风险
+
+- 这是 SwiftUI 视图对齐问题，自动测试难以直接覆盖，需要真实窗口手动截图验证。
+- 如果用户还希望“窗口高度也自动回到内容高度”，那是另一类行为：需要限制/重算 detached frame，而不只是内容锚点。
+
+## 当前重点：刘海展开浮窗内容顶部锚定（已实现，待手动体验验证）
+
+### 问题
+
+用户反馈动态高度展开后出现两种视觉状态：
+
+- 期望：像图一，内容贴近刘海下方，从顶部自然展开。
+- 当前异常：像图二，浮窗高度变大后顶部出现大块空黑区域，内容被挤到中间偏下。
+
+根因定位：
+
+- `NotchHostedSurfaceView.bodyPanel(...)` 使用 `ZStack` 默认居中布局。
+- 上一轮加入动态 `expandedBodyHeight` 后，body 高度可能大于内容实际高度。
+- 当 body 变高时，内容仍按 ZStack 中心对齐，导致面板顶部留出空白黑区。
+
+### 本轮目标
+
+- 无论浮窗高度如何自适应变化，内容都保持图一那种顶部锚定状态。
+- body 高度仍可增长，字体仍固定，不回退到缩放字体。
+- 不改变 Settings 新增的“自适应高度 / 分组切换”选项。
+- 不改变 state.json、widget 模型或刘海窗口 frame 策略。
+
+### 实施步骤
+
+1. 调整 `NotchHostedSurfaceView.bodyPanel(...)`：
+   - 将内容容器从默认居中改为 `.topLeading` 锚定。
+   - 滚动模式和非滚动模式都保持顶部开始排布。
+   - 保留现有 padding、opacity 和轻微 scale 动画。
+2. 检查 `SectionedOverlayView` 和 `GroupedOverlayView`：
+   - 确保自身不会强制垂直居中。
+   - 长内容继续使用滚动承载。
+3. 验证：
+   - `swift test --filter NotchGeometryCalculator`
+   - `swift test --filter NotchExpandedLayoutPolicy`
+   - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - `git diff --check`
+
+### 验证
+
+- 自动验证确保 core 几何和 app 编译不回退。
+- 手动验证需要在真实 app 里打开刘海浮窗，拖动/切换设置后确认内容始终贴近顶部。
+
+### 本轮实现结果（2026-06-18）
+
+- `NotchHostedSurfaceView.bodyPanel(...)` 中的展开内容容器改为 `.topLeading` 锚定。
+- 非滚动内容会填满 body 并从左上角开始排布。
+- 滚动内容保持顶部开始排布，不再因 body 高度变大而垂直居中。
+- 保留原有 padding、opacity 和轻微 scale 动画。
+
+### 验证结果
+
+- `swift test --filter NotchGeometryCalculator`：通过，52 个测试通过。
+- `swift test --filter NotchExpandedLayoutPolicy`：通过，4 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+- `git diff --check`：通过。
+
+### 待手动验证
+
+- 默认自适应高度下，放大或高度增长后内容仍贴近图一顶部位置。
+- 切到“分组切换”后，内容也从顶部开始排布。
+- 高度达到上限并滚动时，滚动内容初始位置在顶部。
+
+### 风险
+
+- 这是 SwiftUI 视图对齐修复，缺少稳定的单元测试覆盖，需要依赖 build 和手动截图验证。
+- 如果 body 高度极大，顶部锚定后底部会留空；这是预期，优先满足“内容从刘海下方展开”的视觉模型。
+
+## 当前重点：刘海浮窗展开高度自适应与分组切换模式（已实现，待手动体验验证）
+
+### 问题
+
+用户希望优化浮窗从刘海展开的效果：
+
+- 当前展开高度固定，模型/服务变多时，内容会通过 `adaptiveScale` 越缩越小。
+- 字体随内容数量缩小后，视觉质量下降，也不利于快速扫读。
+- 用户已确认要同时支持视觉方案 B 和 C：
+  - **B：高度自适应 + 固定字体**，作为默认模式。
+  - **C：分组切换 + 中等高度**，在 Settings 可选。
+
+本轮已阅读：
+
+- `PLAN.md`
+- `docs/work-log/2026-06-04-notch-fusion-rebuild.md`
+- `docs/work-log/2026-06-04-notch-compact-pills.md`
+- `docs/work-log/2026-06-17-app-health-pass.md`
+- `token_hud/Overlay/NotchHostedSurfaceView.swift`
+- `token_hud/Overlay/GroupedOverlayView.swift`
+- `token_hud/Overlay/CompactOverlayContent.swift`
+- `token_hud/Overlay/NotchHostState.swift`
+- `Sources/token_hudCore/NotchGeometryCalculator.swift`
+- `Settings/SettingsWindow.swift`
+
+根因定位：
+
+- `NotchGeometryCalculator.expandedHeight` 当前固定为 `110`。
+- `NotchHostedSurfaceView.adaptiveScale(for:)` 在 grouped 模式下用 `actualHeight / idealHeight` 得出缩放比例。
+- 当服务/模型增多时，`idealHeight` 增大但窗口高度不变，scale 会下降，最终导致字体和组件一起变小。
+
+### 本轮目标
+
+- 默认改成 **高度自适应 + 固定字体**：
+  - 展开 body 高度根据当前显示内容数量增长。
+  - 字体尺寸保持稳定，不再因为模型/服务变多而继续缩小。
+  - 高度有上限，超过上限后 body 内部滚动，避免遮挡过多屏幕。
+- 增加 **分组切换 + 中等高度** 可选模式：
+  - Settings 中可选择刘海展开布局模式。
+  - 模式 C 保持中等高度，通过服务/分组切换减少同屏内容。
+  - 默认值为 B。
+- 保留现有 LiuHai hosted 架构：
+  - 顶部 cap / notch 锚点不动。
+  - `expansionProgress` 继续驱动展开动画。
+  - 不回退到 window resize 动画交叉淡入方案。
+- 不改变 state.json schema、不改变 widget 数据模型。
+
+### 方案取舍
+
+- **采用 B 作为默认**：
+  - 优点：最符合“快速瞄一眼”和固定字体的诉求，配置模型多时可读性最好。
+  - 缺点：展开后高度会变大，需要上限和滚动保护。
+- **同时加入 C 作为设置项**：
+  - 优点：用户可以选择更克制的浮窗高度，适合平台/模型很多的情况。
+  - 缺点：增加轻量交互状态，需要处理当前分组不存在或 widget 变化后的回退。
+- **不采用 A**：
+  - A 继续依赖缩放/滚动，不能解决“字体越来越小”的核心问题。
+
+### 实施步骤
+
+1. **新增可测试的高度策略**
+   - 在 `Sources/token_hudCore` 增加或扩展纯逻辑策略，输入：
+     - overlay 展开布局模式：adaptive / sectioned。
+     - 当前 widget 数量、服务数量、屏幕高度、菜单栏高度。
+   - 输出：
+     - expanded body 高度。
+     - 是否需要内部滚动。
+     - 固定内容 scale。
+   - 测试覆盖：
+     - 默认 adaptive 模式随服务数量增加而增高。
+     - adaptive 模式高度不超过屏幕上限。
+     - adaptive 模式内容 scale 不再低于固定字体阈值。
+     - sectioned 模式保持中等高度。
+
+2. **让 hosted surface 使用动态 expanded frame**
+   - 调整 `NotchGeometryCalculator.notchFrames(...)` 或新增重载，让 expanded height 可以由内容策略传入。
+   - `NotchHostPanelManager.computeFrames(...)` 根据 `WidgetStore` 当前 widgets 和 Settings 模式计算目标高度。
+   - widget 配置变化或设置模式变化时，重新计算 hosted frame，并在展开态平滑 reassert 到新 expanded frame。
+   - 保持 collapsed frame 和 hover top cap 行为不变。
+
+3. **固定字体与内部滚动**
+   - 修改 `NotchHostedSurfaceView.adaptiveScale(for:)`：
+     - adaptive 默认不再把 grouped 内容压到很小，scale 下限提高到接近 `1.0`。
+     - 内容超出可用 body 高度时，用内部纵向滚动或按模式 C 切换分组承载。
+   - `GroupedOverlayView` 保持服务行字体稳定，长 label 截断，不因行数增加缩小。
+   - `CompactOverlayContent` 保持横向滚动，不参与高度压缩。
+
+4. **实现分组切换模式 C**
+   - 新增 `notchExpandedLayoutMode` AppStorage，默认 `adaptive`。
+   - sectioned 模式下，在展开 body 顶部显示轻量分组切换控件：
+     - 当前服务/分组选中态。
+     - 只渲染选中服务的 widgets。
+     - 如果当前选中服务被删除，自动回退到第一个可用服务。
+   - 控件高度计入 body 固定中等高度，不让字体缩小。
+
+5. **Settings 增加选项**
+   - 在 `SettingsWindow` 的浮动面板设置里增加“刘海展开布局”选择：
+     - 自适应高度（默认）
+     - 分组切换
+   - 文案保持简洁，不写大段说明。
+   - 继续保留现有“显示模式：紧凑/分组”，避免改变浮动自由面板行为。
+
+6. **验证**
+   - 自动验证：
+     - 新增策略测试。
+     - `swift test --filter NotchGeometryCalculator`
+     - `swift test --filter Widget`
+     - `swift test`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动验证：
+     - 2 个服务、5 个服务、10 个服务时展开高度逐步变高，字体不继续缩小。
+     - 高度到上限后内部滚动可用。
+     - Settings 切到分组切换后，浮窗保持中等高度，并能切换服务。
+     - hover 展开/收起动画仍从刘海向下生长，不跳位。
+
+### 验证
+
+- 新策略有纯逻辑测试覆盖，避免后续再次把高度写死。
+- build 通过，确认新增文件进入 Xcode target。
+- 真实 macOS 手动验证动画和 hover，因为窗口层行为无法完全靠 core tests 覆盖。
+
+### 本轮实现结果（2026-06-17）
+
+- 新增 `NotchExpandedLayoutPolicy`：
+  - `adaptive` 默认模式按服务数量增长 body 高度，content scale 固定为 `1`。
+  - `sectioned` 模式保持中等高度，给分组切换模式使用。
+  - 高度超过屏幕上限后启用内部滚动。
+- `NotchGeometryCalculator` 支持传入自定义 `expandedBodyHeight`：
+  - `notchFrames(...)`、`hostedSurfaceLayout(...)` 旧调用保持默认值。
+  - 新测试覆盖 custom body height 的 expanded frame 和 hosted layout。
+- `NotchHostPanelManager` 接入动态高度：
+  - 根据当前 widgets、服务数量和 `notchExpandedLayoutMode` 计算 hosted expanded frame。
+  - 监听 WidgetStore 和 UserDefaults 变化，设置或小组件变化时刷新 hosted frame。
+  - hit mask、hover expanded surface、detach target 统一使用动态高度。
+- `NotchHostedSurfaceView` 固定 hosted 内容 scale：
+  - 默认 adaptive 不再因为服务/模型变多压缩字体。
+  - 超出高度上限后内部纵向滚动。
+  - sectioned 模式渲染 `SectionedOverlayView`。
+- Settings 增加“刘海展开布局”：
+  - 默认“自适应高度”。
+  - 可切换为“分组切换”。
+- 已沉淀 work-log：
+  - `docs/work-log/2026-06-17-notch-adaptive-expanded-layout.md`
+
+### 验证结果
+
+- `swift test --filter NotchExpandedLayoutPolicy`：通过，4 个测试通过。
+- `swift test --filter NotchGeometryCalculator`：通过，52 个测试通过。
+- `swift test`：通过，159 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+- `git diff --check`：通过。
+
+### 待手动验证
+
+- 2、5、10 个服务时，默认 adaptive 展开高度随内容增加，字体不继续变小。
+- 切到 Settings 的“分组切换”后，刘海展开保持中等高度，并能切换服务。
+- hover 展开/收起仍从刘海向下生长，不跳位。
+- 高度达到上限时，body 内部滚动可用。
+
+### 风险
+
+- hosted window 当前假设 frame 等于 expanded frame；动态高度后必须保证 `reassertHostedFrame` 和 hover body hitbox 同步使用新 frame。
+- Settings 的 `@AppStorage` 改动会即时影响 overlay，需要避免设置切换时出现突然跳位。
+- 分组切换模式新增交互，但 HUD 目标仍是快速扫读，控件必须轻量，不能把浮窗做成复杂面板。
+- 当前 `Xcode 运行时 LLDB attach failed 修复` 计划仍待确认；如果本轮需要 Xcode 真机调试，建议先执行该配置修复，否则命令行 build 可以继续验证。
+
 ## 当前重点：Xcode 运行时 LLDB attach failed 修复（待确认）
 
 ### 问题

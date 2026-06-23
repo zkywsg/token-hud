@@ -9,6 +9,8 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     private var overlayWindow: NSPanel?
     private let stateWatcher: StateWatcher
     private let widgetStore: WidgetStore
+    private let codexFetcher: CodexFetcher
+    private let apiPlatformFetcher: APIPlatformFetcher
     let hostState = NotchHostState()
 
     private var globalMouseMonitor: Any?
@@ -17,7 +19,11 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     private var collapseTimer: DispatchWorkItem?
     private var mouseUpMonitor: Any?
     private var mouseDownMonitor: Any?
+    private var hostedDragMonitor: Any?
     private var isDragging = false
+    private var hasDetachedHostedDrag = false
+    private var hostedDragStartLocation = CGPoint.zero
+    private var hostedDragStartFrame = CGRect.zero
     private var isResettingHostedFrame = false
     private var savedDetachedFrame: CGRect?
     private var targetDisplayID: CGDirectDisplayID?
@@ -39,9 +45,16 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     private static let detachedStyleMask: NSWindow.StyleMask = [.borderless, .resizable, .nonactivatingPanel]
     private static let hostedTransitionAnimation = Animation.spring(response: 0.32, dampingFraction: 0.82)
 
-    init(stateWatcher: StateWatcher, widgetStore: WidgetStore) {
+    init(
+        stateWatcher: StateWatcher,
+        widgetStore: WidgetStore,
+        codexFetcher: CodexFetcher,
+        apiPlatformFetcher: APIPlatformFetcher
+    ) {
         self.stateWatcher = stateWatcher
         self.widgetStore = widgetStore
+        self.codexFetcher = codexFetcher
+        self.apiPlatformFetcher = apiPlatformFetcher
         super.init()
     }
 
@@ -58,6 +71,18 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             selector: #selector(screenParametersChanged),
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(hostedLayoutInputsChanged),
+            name: UserDefaults.didChangeNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(hostedLayoutInputsChanged),
+            name: WidgetStore.widgetsDidChangeNotification,
+            object: widgetStore
         )
     }
 
@@ -80,13 +105,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             if hostState.isDetached {
                 detachedWindow?.orderFrontRegardless()
             } else {
-                hostState.mode = .collapsed
-                hostState.expansionProgress = 0
-                if let frames = hostState.frames {
-                    overlayWindow?.setFrame(frames.expanded, display: false)
-                }
-                prepareOverlayForDisplay(label: "toggle hosted")
-                installMouseMoveMonitors()
+                enterHostedCollapsed(label: "toggle hosted", display: false, persistState: false)
             }
         }
     }
@@ -123,7 +142,9 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         panel.hasShadow = false
         panel.ignoresMouseEvents = false
         panel.acceptsMouseMovedEvents = true
-        panel.isMovableByWindowBackground = role == .detached
+        panel.isMovableByWindowBackground = NotchWindowMovementPolicy.isMovableByWindowBackground(
+            mode: role == .detached ? .detached : .collapsed
+        )
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
         panel.hidesOnDeactivate = false
         panel.isFloatingPanel = true
@@ -138,6 +159,8 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
                 .environment(stateWatcher)
                 .environment(widgetStore)
                 .environment(hostState)
+                .environment(codexFetcher)
+                .environment(apiPlatformFetcher)
         )
         let hosting = NSHostingView(rootView: rootView)
         let containerView = NotchTrackingContainerView(frame: NSRect(origin: .zero, size: defaultRect.size))
@@ -230,7 +253,11 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     }
 
     private func computeFrames(for screen: NSScreen, geometry: NotchGeometry) -> NotchFrames {
-        NotchGeometryCalculator.notchFrames(screenFrame: screen.frame, geometry: geometry)
+        NotchGeometryCalculator.notchFrames(
+            screenFrame: screen.frame,
+            geometry: geometry,
+            expandedBodyHeight: expandedLayoutMetrics(for: screen, geometry: geometry).bodyHeight
+        )
     }
 
     private func preferredScreen(preferredWindow: NSWindow? = nil) -> NSScreen? {
@@ -279,10 +306,32 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     }
 
     private func applyGeometry(_ geo: NotchGeometry, frames: NotchFrames, screen: NSScreen) {
+        let expandedLayoutMetrics = expandedLayoutMetrics(for: screen, geometry: geo)
         hostState.geometry = geo
         hostState.frames = frames
         hostState.screenFrame = screen.frame
         hostState.gapWidth = geo.hasNotch ? geo.notchGapWidth : 0
+        hostState.expandedBodyHeight = expandedLayoutMetrics.bodyHeight
+        hostState.expandedLayoutMode = expandedLayoutMode
+        hostState.expandedAllowsVerticalScrolling = expandedLayoutMetrics.allowsVerticalScrolling
+        hostState.expandedContentScale = expandedLayoutMetrics.contentScale
+    }
+
+    private var expandedLayoutMode: NotchExpandedLayoutMode {
+        NotchExpandedLayoutMode(
+            rawStorageValue: UserDefaults.standard.string(forKey: Self.expandedLayoutModeKey) ?? ""
+        )
+    }
+
+    private func expandedLayoutMetrics(for screen: NSScreen, geometry: NotchGeometry) -> NotchExpandedLayoutMetrics {
+        let serviceCount = Set(widgetStore.widgets.map(\.service)).count
+        return NotchExpandedLayoutPolicy.layout(
+            mode: expandedLayoutMode,
+            widgetCount: widgetStore.widgets.count,
+            serviceCount: serviceCount,
+            screenHeight: screen.frame.height,
+            menuBarHeight: geometry.menuBarHeight
+        )
     }
 
     private func logNotchDiagnostics(
@@ -350,7 +399,8 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         let layout = NotchGeometryCalculator.hostedSurfaceLayout(
             screenFrame: hostState.screenFrame,
             geometry: geometry,
-            expansionProgress: hostState.expansionProgress
+            expansionProgress: hostState.expansionProgress,
+            expandedBodyHeight: hostState.expandedBodyHeight
         )
 
         // Collapsed: the whole top cap is the interactive target. It is
@@ -429,8 +479,12 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         if cleanup.removesMouseUpMonitor {
             removeMouseUpMonitor()
         }
+        if event == .hide || event == .teardown {
+            removeHostedDragMonitor()
+        }
         if cleanup.resetsDraggingState {
             isDragging = false
+            hasDetachedHostedDrag = false
         }
     }
 
@@ -515,7 +569,8 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         let layout = NotchGeometryCalculator.hostedSurfaceLayout(
             screenFrame: hostState.screenFrame,
             geometry: geo,
-            expansionProgress: hostState.expansionProgress
+            expansionProgress: hostState.expansionProgress,
+            expandedBodyHeight: hostState.expandedBodyHeight
         )
         let surfaceRegion = layout.topCap.union(layout.body)
         guard !surfaceRegion.isEmpty else { return false }
@@ -545,18 +600,19 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             animateToCollapsed()
         case (_, .expanded):
             animateToExpanded()
-        case (_, .detached):
-            switchToDetached()
+        case (let sourceMode, .detached):
+            switchToDetached(from: sourceMode)
         }
     }
 
     private func animateToCollapsed() {
         guard let win = overlayWindow else { return }
         cancelCollapseTimer()
+        refreshHostedGeometryAndFrame(display: false, reason: "collapse geometry refresh")
         detachedWindow?.orderOut(nil)
-        reassertHostedFrame(reason: "animate collapsed")
+        reassertHostedFrame(reason: "animate collapsed", force: true)
         prepareOverlayForDisplay(label: "animate collapsed")
-        win.isMovableByWindowBackground = false
+        win.isMovableByWindowBackground = NotchWindowMovementPolicy.isMovableByWindowBackground(mode: .collapsed)
         win.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .collapsed)
         removeMouseDownMonitor()
 
@@ -567,16 +623,48 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         saveState()
     }
 
+    private func enterHostedCollapsed(
+        label: String,
+        display: Bool,
+        persistState: Bool
+    ) {
+        cancelCollapseTimer()
+        removeMouseDownMonitor()
+        removeMouseUpMonitor()
+        removeHostedDragMonitor()
+        isDragging = false
+        hasDetachedHostedDrag = false
+
+        guard let screen = preferredScreen(preferredWindow: overlayWindow ?? detachedWindow) else { return }
+        refreshGeometry(for: screen)
+        guard let frames = hostState.frames, let win = overlayWindow else { return }
+
+        detachedWindow?.orderOut(nil)
+        applyHostedStyle()
+        hostState.mode = .collapsed
+        hostState.expansionProgress = 0
+        isResettingHostedFrame = true
+        win.setFrame(frames.expanded, display: display)
+        isResettingHostedFrame = false
+        prepareOverlayForDisplay(label: label)
+        win.isMovableByWindowBackground = NotchWindowMovementPolicy.isMovableByWindowBackground(mode: .collapsed)
+        win.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .collapsed)
+        installMouseMoveMonitors()
+        if persistState {
+            saveState()
+        }
+    }
+
     private func animateToExpanded(collapseAfterFeedback: Bool = false) {
         guard let win = overlayWindow else { return }
         cancelCollapseTimer()
+        refreshHostedGeometryAndFrame(display: true, reason: "expand geometry refresh")
         detachedWindow?.orderOut(nil)
-        reassertHostedFrame(reason: "animate expanded")
+        reassertHostedFrame(reason: "animate expanded", force: true)
         prepareOverlayForDisplay(label: "animate expanded")
-        // Expanded surface is draggable; once the user drags more than a
-        // few pixels the windowDidMove handler immediately detaches and
-        // hands the rest of the drag to the detached window.
-        win.isMovableByWindowBackground = true
+        // Hosted surfaces stay pinned to the canonical frame. Dragging the
+        // expanded body is handled explicitly and switches to detached.
+        win.isMovableByWindowBackground = NotchWindowMovementPolicy.isMovableByWindowBackground(mode: .expanded)
         win.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .expanded)
         installMouseDownMonitorIfNeeded()
 
@@ -592,27 +680,27 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     /// Force the hosted overlay back to the canonical expanded frame.
     /// Used after any external factor (Spaces, SkyLight, system reposition,
     /// or a stray drag) may have shifted it.
-    private func reassertHostedFrame(reason: String) {
+    private func reassertHostedFrame(reason: String, force: Bool = false) {
         guard let win = overlayWindow, let frames = hostState.frames else { return }
-        if win.frame.isClose(to: frames.expanded) { return }
+        if !force && win.frame.isClose(to: frames.expanded) { return }
         isResettingHostedFrame = true
         win.setFrame(frames.expanded, display: true)
         isResettingHostedFrame = false
         logNotchDiagnostics("reassert hosted frame: \(reason)", requestedFrame: frames.expanded, actualFrame: win.frame)
     }
 
-    private func switchToDetached() {
+    private func switchToDetached(from sourceMode: NotchHostMode) {
         guard let win = detachedWindow else { return }
         applyLifecycleCleanup(for: .switchToDetached)
         applyDetachedStyle()
-        win.isMovableByWindowBackground = true
+        win.isMovableByWindowBackground = NotchWindowMovementPolicy.isMovableByWindowBackground(mode: .detached)
         win.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .detached)
 
         // Detach target: if we currently see an expanded body, hand the
         // detached window the body's actual screen rect (plus any drag
         // offset the user already applied). Otherwise fall back to the
         // saved frame, then to a default below the notch.
-        let target = detachedTargetFrame()
+        let target = detachedTargetFrame(sourceMode: sourceMode)
         win.setFrame(target, display: true)
         win.orderFrontRegardless()
         overlayWindow?.orderOut(nil)
@@ -622,7 +710,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         saveState()
     }
 
-    private func detachedTargetFrame() -> CGRect {
+    private func detachedTargetFrame(sourceMode: NotchHostMode) -> CGRect {
         guard let overlay = overlayWindow, let frames = hostState.frames else {
             return savedDetachedFrame ?? CGRect(x: 200, y: 200, width: 300, height: 60)
         }
@@ -632,23 +720,9 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         // We do NOT persist this size — it's transient. Saved frame is
         // updated only when the detached drag ends.
         if isDragging,
-           let geometry = hostState.geometry,
-           hostState.isExpanded {
-            let layout = NotchGeometryCalculator.hostedSurfaceLayout(
-                screenFrame: hostState.screenFrame,
-                geometry: geometry,
-                expansionProgress: 1
-            )
-            let bodySize = CGSize(
-                width: max(PanelResizeCalculator.minimumSize.width, layout.body.width),
-                height: max(PanelResizeCalculator.minimumSize.height, layout.body.height)
-            )
-            return CGRect(
-                x: overlay.frame.minX + layout.body.minX,
-                y: overlay.frame.minY + layout.body.minY,
-                width: bodySize.width,
-                height: bodySize.height
-            )
+           sourceMode == .expanded,
+           let target = hostedBodyDetachedFrame(surfaceFrame: overlay.frame) {
+            return target
         }
 
         if let saved = savedDetachedFrame {
@@ -663,6 +737,17 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         )
     }
 
+    private func hostedBodyDetachedFrame(surfaceFrame: CGRect) -> CGRect? {
+        guard let geometry = hostState.geometry else { return nil }
+        return NotchGeometryCalculator.hostedBodyDetachedFrame(
+            surfaceFrame: surfaceFrame,
+            screenFrame: hostState.screenFrame,
+            geometry: geometry,
+            expandedBodyHeight: hostState.expandedBodyHeight,
+            minimumSize: PanelResizeCalculator.minimumSize
+        )
+    }
+
     private func snapToCollapsed() {
         guard let win = detachedWindow, let frames = hostState.frames else { return }
         transitionGate.advance()
@@ -672,7 +757,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         hostState.mode = .collapsed
         hostState.expansionProgress = 0
         prepareOverlayForDisplay(label: "snap to collapsed")
-        overlayWindow?.isMovableByWindowBackground = false
+        overlayWindow?.isMovableByWindowBackground = NotchWindowMovementPolicy.isMovableByWindowBackground(mode: .collapsed)
         overlayWindow?.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .collapsed)
         win.orderOut(nil)
         installMouseMoveMonitors()
@@ -728,8 +813,18 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     func windowDidResize(_ notification: Notification) {
         guard !isAnimating else { return }
         if hostState.isHosted {
-            // Resize while hosted should not happen (style mask prevents it)
-            transitionTo(.detached)
+            switch NotchHostedResizePolicy.action(
+                mode: hostState.mode,
+                isResettingHostedFrame: isResettingHostedFrame,
+                isDragging: isDragging
+            ) {
+            case .ignore:
+                return
+            case .reassertHostedFrame:
+                reassertHostedFrame(reason: "windowDidResize", force: true)
+            case .detach:
+                transitionTo(.detached)
+            }
         } else {
             saveDetachedFrame()
         }
@@ -744,14 +839,17 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 self.removeMouseUpMonitor()
+                self.removeHostedDragMonitor()
                 let wasDragging = self.isDragging
+                let detachedFromHostedDrag = self.hasDetachedHostedDrag
                 self.isDragging = false
+                self.hasDetachedHostedDrag = false
                 if self.hostState.isHosted {
                     // Drag finished without crossing the detach distance —
                     // any small offset gets snapped back to the canonical
                     // frame.
-                    self.reassertHostedFrame(reason: "hosted drag end")
-                } else if wasDragging || self.hostState.isDetached {
+                    self.reassertHostedFrame(reason: "hosted drag end", force: true)
+                } else if wasDragging || detachedFromHostedDrag || self.hostState.isDetached {
                     self.evaluateSnap()
                 }
             }
@@ -775,7 +873,17 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             Task { @MainActor [weak self] in
                 guard let self else { return }
                 guard event.windowNumber == self.overlayWindow?.windowNumber else { return }
+                guard self.hostState.isExpanded else { return }
+                guard self.isPointInExpandedBody(event.locationInWindow) else { return }
+                guard let bodyFrame = self.hostedBodyDetachedFrame(surfaceFrame: self.overlayWindow?.frame ?? .zero) else {
+                    return
+                }
                 self.isDragging = true
+                self.hasDetachedHostedDrag = false
+                self.hostedDragStartLocation = self.overlayWindow?.convertPoint(toScreen: event.locationInWindow)
+                    ?? NSEvent.mouseLocation
+                self.hostedDragStartFrame = bodyFrame
+                self.installHostedDragMonitorIfNeeded()
                 self.installMouseUpMonitorIfNeeded()
             }
             return event
@@ -787,6 +895,58 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             NSEvent.removeMonitor(monitor)
             mouseDownMonitor = nil
         }
+    }
+
+    private func installHostedDragMonitorIfNeeded() {
+        guard hostedDragMonitor == nil else { return }
+
+        hostedDragMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDragged) { [weak self] event in
+            Task { @MainActor [weak self] in
+                self?.handleHostedDrag(event)
+            }
+            return event
+        }
+    }
+
+    private func removeHostedDragMonitor() {
+        if let monitor = hostedDragMonitor {
+            NSEvent.removeMonitor(monitor)
+            hostedDragMonitor = nil
+        }
+    }
+
+    private func handleHostedDrag(_ event: NSEvent) {
+        guard isDragging else { return }
+
+        let currentLocation = NSEvent.mouseLocation
+        let delta = CGSize(
+            width: currentLocation.x - hostedDragStartLocation.x,
+            height: currentLocation.y - hostedDragStartLocation.y
+        )
+        let shouldDetach = hasDetachedHostedDrag ||
+            max(abs(delta.width), abs(delta.height)) >= Self.dragDetachDistance
+        guard shouldDetach else { return }
+
+        if !hasDetachedHostedDrag {
+            transitionTo(.detached)
+            hasDetachedHostedDrag = true
+        }
+
+        guard hostState.isDetached, let win = detachedWindow else { return }
+        let frame = hostedDragStartFrame.offsetBy(dx: delta.width, dy: delta.height)
+        win.setFrame(frame, display: true)
+        savedDetachedFrame = frame
+    }
+
+    private func isPointInExpandedBody(_ point: CGPoint) -> Bool {
+        guard let geometry = hostState.geometry, hostState.isExpanded else { return false }
+        let layout = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: hostState.screenFrame,
+            geometry: geometry,
+            expansionProgress: 1,
+            expandedBodyHeight: hostState.expandedBodyHeight
+        )
+        return layout.body.contains(point)
     }
 
     private func evaluateSnap() {
@@ -821,7 +981,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             guard let win = overlayWindow else { return }
             // Surface frame is always expanded; visual state is driven by progress.
             prepareOverlayForDisplay(label: "screen change hosted")
-            win.isMovableByWindowBackground = hostState.isExpanded
+            win.isMovableByWindowBackground = NotchWindowMovementPolicy.isMovableByWindowBackground(mode: hostState.mode)
             win.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: hostState.mode)
             logNotchDiagnostics(
                 "screen change hosted requested",
@@ -834,11 +994,26 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         }
     }
 
+    @objc private func hostedLayoutInputsChanged() {
+        refreshHostedGeometryAndFrame(display: true, reason: "layout inputs changed")
+    }
+
+    private func refreshHostedGeometryAndFrame(display: Bool, reason: String) {
+        guard let screen = preferredScreen(preferredWindow: overlayWindow ?? detachedWindow) else { return }
+        refreshGeometry(for: screen)
+        guard hostState.isHosted, let frames = hostState.frames, let win = overlayWindow else { return }
+        isResettingHostedFrame = true
+        win.setFrame(frames.expanded, display: display)
+        isResettingHostedFrame = false
+        logNotchDiagnostics(reason, requestedFrame: frames.expanded, actualFrame: win.frame)
+    }
+
     // MARK: - State Persistence
 
     private static let modeKey = "notchHostMode"
     private static let detachedFrameKey = "notchHostDetachedFrame"
     private static let savedFreeFrameKey = "notchHostSavedFreeFrame"
+    private static let expandedLayoutModeKey = "notchExpandedLayoutMode"
 
     private func saveDetachedFrame() {
         guard let win = detachedWindow, hostState.isDetached else { return }
@@ -930,28 +1105,14 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
 
         switch restoreMode {
         case .hostedCollapsed:
-            detachedWindow?.orderOut(nil)
-            hostState.mode = .collapsed
-            hostState.expansionProgress = 0
-            setFrameWithDiagnostics(
-                frames.expanded,
-                display: false,
-                label: "restore hosted surface",
-                screen: screen,
-                geometry: geo
-            )
-            applyHostedStyle()
-            overlayWindow?.isMovableByWindowBackground = false
-            overlayWindow?.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .collapsed)
-            prepareOverlayForDisplay(label: "restore hosted")
-            installMouseMoveMonitors()
+            enterHostedCollapsed(label: "restore hosted", display: false, persistState: false)
         case .detached(let saved):
             savedDetachedFrame = saved
             hostState.mode = .detached
             hostState.expansionProgress = 1
             setFrameWithDiagnostics(saved, display: true, label: "restore detached saved", screen: screen, geometry: geo)
             applyDetachedStyle()
-            detachedWindow?.isMovableByWindowBackground = true
+            detachedWindow?.isMovableByWindowBackground = NotchWindowMovementPolicy.isMovableByWindowBackground(mode: .detached)
             overlayWindow?.orderOut(nil)
             detachedWindow?.orderFrontRegardless()
         }

@@ -109,7 +109,8 @@ enum NotchGeometryCalculator {
 
     static func notchFrames(
         screenFrame: CGRect,
-        geometry: NotchGeometry
+        geometry: NotchGeometry,
+        expandedBodyHeight: CGFloat = expandedHeight
     ) -> NotchFrames {
         let notchCenterX = geometry.hasNotch
             ? (geometry.notchGapMinX + geometry.notchGapMaxX) / 2
@@ -135,9 +136,9 @@ enum NotchGeometryCalculator {
             x: (notchCenterX - expandedWidth / 2).clamped(
                 to: screenFrame.minX...(screenFrame.maxX - expandedWidth)
             ),
-            y: hostTopY - geometry.menuBarHeight - expandedHeight,
+            y: hostTopY - geometry.menuBarHeight - expandedBodyHeight,
             width: expandedWidth,
-            height: geometry.menuBarHeight + expandedHeight
+            height: geometry.menuBarHeight + expandedBodyHeight
         )
 
         let snapZone = CGRect(
@@ -263,10 +264,15 @@ enum NotchGeometryCalculator {
     static func hostedSurfaceLayout(
         screenFrame: CGRect,
         geometry: NotchGeometry,
-        expansionProgress: CGFloat
+        expansionProgress: CGFloat,
+        expandedBodyHeight: CGFloat = expandedHeight
     ) -> NotchHostedSurfaceLayout {
         let progress = expansionProgress.clamped(to: 0...1)
-        let frames = notchFrames(screenFrame: screenFrame, geometry: geometry)
+        let frames = notchFrames(
+            screenFrame: screenFrame,
+            geometry: geometry,
+            expandedBodyHeight: expandedBodyHeight
+        )
         let surfaceSize = frames.expanded.size
         let menuBarHeight = geometry.menuBarHeight
 
@@ -285,7 +291,7 @@ enum NotchGeometryCalculator {
         )
         let collapsedTopCapWidth = min(surfaceSize.width, gapWidth + collapsedStatusWidth * 2)
 
-        let bodyHeight = expandedHeight * progress
+        let bodyHeight = expandedBodyHeight * progress
         let bodyMaxWidth = min(surfaceSize.width, expandedBodyMaxWidth)
         let bodyMinWidth = min(bodyMaxWidth, max(collapsedTopCapWidth, 120))
         let bodyWidth = interpolate(from: bodyMinWidth, to: bodyMaxWidth, progress: progress)
@@ -334,6 +340,27 @@ enum NotchGeometryCalculator {
             body: body,
             contentOpacity: contentOpacity(for: progress),
             surfaceSize: surfaceSize
+        )
+    }
+
+    static func hostedBodyDetachedFrame(
+        surfaceFrame: CGRect,
+        screenFrame: CGRect,
+        geometry: NotchGeometry,
+        expandedBodyHeight: CGFloat = expandedHeight,
+        minimumSize: CGSize
+    ) -> CGRect {
+        let layout = hostedSurfaceLayout(
+            screenFrame: screenFrame,
+            geometry: geometry,
+            expansionProgress: 1,
+            expandedBodyHeight: expandedBodyHeight
+        )
+        return CGRect(
+            x: surfaceFrame.minX + layout.body.minX,
+            y: surfaceFrame.minY + layout.body.minY,
+            width: max(minimumSize.width, layout.body.width),
+            height: max(minimumSize.height, layout.body.height)
         )
     }
 }

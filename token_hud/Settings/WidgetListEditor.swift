@@ -148,6 +148,46 @@ private func styleIcon(_ style: WidgetStyle) -> String {
     }
 }
 
+private enum CompactBlackTheme {
+    static let surface = Color.black
+    static let elevated = Color(red: 0.025, green: 0.026, blue: 0.028)
+    static let inset = Color(red: 0.045, green: 0.046, blue: 0.050)
+    static let hairline = Color.white.opacity(0.12)
+    static let hairlineSoft = Color.white.opacity(0.08)
+}
+
+private struct CompactBlackPanelStyle: ViewModifier {
+    let cornerRadius: CGFloat
+    let fill: Color
+    let strokeOpacity: Double
+
+    func body(content: Content) -> some View {
+        content
+            .background(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(fill)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .stroke(Color.white.opacity(strokeOpacity), lineWidth: 0.8)
+            )
+    }
+}
+
+private extension View {
+    func compactBlackPanel(
+        cornerRadius: CGFloat = 10,
+        fill: Color = CompactBlackTheme.elevated,
+        strokeOpacity: Double = 0.12
+    ) -> some View {
+        modifier(CompactBlackPanelStyle(
+            cornerRadius: cornerRadius,
+            fill: fill,
+            strokeOpacity: strokeOpacity
+        ))
+    }
+}
+
 // MARK: - Main Editor
 
 struct WidgetListEditor: View {
@@ -354,11 +394,11 @@ private struct ConfiguredWidgetRecommendationPanel: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 54)
-                    .background(Color.secondary.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .background(CompactBlackTheme.inset)
+                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.secondary.opacity(0.12), lineWidth: 0.5)
+                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                            .stroke(CompactBlackTheme.hairlineSoft, lineWidth: 0.7)
                     )
             } else {
                 ScrollView(.horizontal, showsIndicators: false) {
@@ -376,12 +416,7 @@ private struct ConfiguredWidgetRecommendationPanel: View {
             }
         }
         .padding(10)
-        .background(Color.secondary.opacity(0.055))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.10), lineWidth: 0.8)
-        )
+        .compactBlackPanel()
     }
 }
 
@@ -431,11 +466,13 @@ private struct RecommendationChip: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(width: 205, alignment: .leading)
-        .background(isAdded ? Color.secondary.opacity(0.06) : Color.accentColor.opacity(0.07))
-        .clipShape(RoundedRectangle(cornerRadius: 7))
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(isAdded ? CompactBlackTheme.inset : Color.accentColor.opacity(0.12))
+        )
         .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(isAdded ? Color.secondary.opacity(0.10) : Color.accentColor.opacity(0.14), lineWidth: 0.6)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(isAdded ? CompactBlackTheme.hairlineSoft : Color.accentColor.opacity(0.24), lineWidth: 0.7)
         )
     }
 }
@@ -486,12 +523,7 @@ private struct NotchCollapsedSettingsPanel: View {
             }
         }
         .padding(10)
-        .background(Color.secondary.opacity(0.055))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.10), lineWidth: 0.8)
-        )
+        .compactBlackPanel()
     }
 
     private var compactPreview: some View {
@@ -513,8 +545,12 @@ private struct NotchCollapsedSettingsPanel: View {
         }
         .padding(.horizontal, 10)
         .padding(.vertical, 6)
-        .background(Color.black.opacity(0.92))
+        .background(CompactBlackTheme.surface)
         .clipShape(Capsule())
+        .overlay(
+            Capsule()
+                .stroke(CompactBlackTheme.hairline, lineWidth: 0.7)
+        )
     }
 
     private func sourcePicker(title: String, selection: Binding<String>) -> some View {
@@ -577,13 +613,11 @@ private struct WidgetPreviewPanel: View {
             }
 
             ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(red: 0.015, green: 0.017, blue: 0.02).opacity(0.96))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(Color.white.opacity(0.10), lineWidth: 0.8)
-                    )
-                    .shadow(color: Color.black.opacity(0.16), radius: 14, y: 8)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(CompactBlackTheme.surface)
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .stroke(CompactBlackTheme.hairline, lineWidth: 0.8)
+                    .shadow(color: Color.black.opacity(0.22), radius: 14, y: 8)
 
                 if widgets.isEmpty {
                     VStack(spacing: 6) {
@@ -614,6 +648,7 @@ private struct WidgetPreviewPanel: View {
                 }
             }
             .frame(height: widgets.isEmpty ? 118 : 224)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .environment(\.panelAdaptiveScale, 1.15)
         }
     }
@@ -703,11 +738,11 @@ private struct WidgetPreviewItem: View {
             .padding(.top, 3)
             .padding(.trailing, 3)
         }
-        .background(Color.white.opacity(0.055))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .background(CompactBlackTheme.inset)
+        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
         .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.white.opacity(0.10), lineWidth: 0.7)
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(CompactBlackTheme.hairlineSoft, lineWidth: 0.7)
         )
     }
 }
@@ -774,12 +809,7 @@ private struct WidgetManagementPanel: View {
             }
         }
         .padding(10)
-        .background(Color.secondary.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.10), lineWidth: 0.8)
-        )
+        .compactBlackPanel(fill: CompactBlackTheme.elevated, strokeOpacity: 0.10)
     }
 }
 
@@ -806,11 +836,11 @@ private struct ActiveWidgetsPanel: View {
                     .font(.caption)
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 150)
-                    .background(Color.secondary.opacity(0.05))
+                    .background(CompactBlackTheme.inset)
                     .clipShape(RoundedRectangle(cornerRadius: 8))
                     .overlay(
                         RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.secondary.opacity(0.18), style: StrokeStyle(lineWidth: 1, dash: [4]))
+                            .stroke(Color.white.opacity(0.14), style: StrokeStyle(lineWidth: 1, dash: [4]))
                     )
                     .onDrop(of: [.text], delegate: WidgetListDropDelegate(
                         widgets: $widgets,
@@ -822,12 +852,21 @@ private struct ActiveWidgetsPanel: View {
                         WidgetRow(widget: widget) {
                             widgets.removeAll { $0.id == widget.id }
                         }
+                        .listRowBackground(CompactBlackTheme.inset)
+                        .listRowSeparatorTint(Color.white.opacity(0.08))
                     }
                     .onMove { from, to in
                         widgets.move(fromOffsets: from, toOffset: to)
                     }
                 }
-                .listStyle(.bordered)
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(CompactBlackTheme.inset)
+                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .stroke(CompactBlackTheme.hairlineSoft, lineWidth: 0.7)
+                )
                 .frame(minHeight: 180)
                 .onDrop(of: [.text], delegate: WidgetListDropDelegate(
                     widgets: $widgets,
@@ -956,11 +995,11 @@ private struct PresetCard: View {
             }
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
-            .background(Color.secondary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .background(CompactBlackTheme.inset)
+            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.14), lineWidth: 0.5)
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .stroke(CompactBlackTheme.hairlineSoft, lineWidth: 0.7)
             )
         }
         .buttonStyle(.plain)

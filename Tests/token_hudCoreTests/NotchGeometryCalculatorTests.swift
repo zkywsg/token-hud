@@ -199,6 +199,20 @@ struct NotchGeometryCalculatorTests {
         #expect(frames.expanded.height == safeAreaTop + NotchGeometryCalculator.expandedHeight)
     }
 
+    @Test func expandedOverlayFrameUsesCustomBodyHeight() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let frames = NotchGeometryCalculator.notchFrames(
+            screenFrame: screen,
+            geometry: geo,
+            expandedBodyHeight: 180
+        )
+        #expect(frames.expanded.height == safeAreaTop + 180)
+        #expect(frames.expanded.maxY == screen.maxY)
+    }
+
     @Test func expandedMinYIsBelowCollapsed() {
         let geo = NotchGeometryCalculator.notchGeometry(
             screenFrame: screen, safeAreaInsetTop: safeAreaTop,
@@ -443,6 +457,53 @@ struct NotchGeometryCalculatorTests {
             screenFrame: screen, geometry: geo, expansionProgress: 0
         )
         #expect(layout.surfaceSize == frames.expanded.size)
+    }
+
+    @Test func hostedSurfaceLayoutUsesCustomBodyHeight() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let layout = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen,
+            geometry: geo,
+            expansionProgress: 1,
+            expandedBodyHeight: 180
+        )
+
+        #expect(layout.body.height == 180)
+        #expect(layout.surfaceSize.height == safeAreaTop + 180)
+    }
+
+    @Test func hostedBodyDetachedFrameUsesCanonicalBodyRect() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let frames = NotchGeometryCalculator.notchFrames(
+            screenFrame: screen,
+            geometry: geo,
+            expandedBodyHeight: 180
+        )
+        let layout = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen,
+            geometry: geo,
+            expansionProgress: 1,
+            expandedBodyHeight: 180
+        )
+
+        let detached = NotchGeometryCalculator.hostedBodyDetachedFrame(
+            surfaceFrame: frames.expanded,
+            screenFrame: screen,
+            geometry: geo,
+            expandedBodyHeight: 180,
+            minimumSize: CGSize(width: 120, height: 40)
+        )
+
+        #expect(detached.minX == frames.expanded.minX + layout.body.minX)
+        #expect(detached.minY == frames.expanded.minY + layout.body.minY)
+        #expect(detached.width == layout.body.width)
+        #expect(detached.height == layout.body.height)
     }
 
     @Test func hostedSurfaceLayoutTopCapAndGapCoverMenuBarRow() {
