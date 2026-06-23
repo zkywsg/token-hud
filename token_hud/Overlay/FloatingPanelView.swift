@@ -70,7 +70,8 @@ struct FloatingPanelView: View {
         FloatingPanelContentLayoutPolicy.adaptiveScale(
             panelHeight: size.height,
             overlayMode: overlayMode,
-            serviceCount: Set(store.widgets.map(\.service)).count
+            serviceCount: Set(store.widgets.map(\.service)).count,
+            widgetCount: store.widgets.count
         )
     }
 

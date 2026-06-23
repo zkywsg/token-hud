@@ -40,6 +40,8 @@ struct NotchExpandedLayoutPolicyTests {
     }
 
     @Test func adaptiveModeEstimatesModelCardsByRows() {
+        // 3 services, 5 widgets → 1 column, each card ≈ ceil(5/3)=2 widget rows
+        // card = 32 + 2*52 = 136, total = 3*136 + 2*8 + 20 = 444
         let layout = NotchExpandedLayoutPolicy.layout(
             mode: .adaptive,
             widgetCount: 5,
@@ -48,13 +50,15 @@ struct NotchExpandedLayoutPolicyTests {
             menuBarHeight: 32
         )
 
-        #expect(layout.bodyHeight >= 180)
-        #expect(layout.bodyHeight < 240)
+        #expect(layout.bodyHeight >= 260)
+        #expect(layout.bodyHeight < 500)
         #expect(!layout.allowsVerticalScrolling)
         #expect(layout.contentScale == 1)
     }
 
     @Test func adaptiveModeAccountsForSevenWidgetGroupedCards() {
+        // 3 services, 7 widgets → 1 column, each card ≈ ceil(7/3)=3 widget rows
+        // card = 32 + 3*52 = 188, total = 3*188 + 2*8 + 20 = 500
         let layout = NotchExpandedLayoutPolicy.layout(
             mode: .adaptive,
             widgetCount: 7,
