@@ -91,7 +91,7 @@ struct OverlayModelCard<Accessory: View, Content: View>: View {
         )
         .overlay(
             RoundedRectangle(cornerRadius: OverlayModelCardStyle.cardCornerRadius(scale: scale), style: .continuous)
-                .stroke(Color.white.opacity(0.085), lineWidth: 0.7)
+                .stroke(Color.white.opacity(0.085), lineWidth: max(0.5, 0.6 * scale))
         )
     }
 }
@@ -180,7 +180,7 @@ private struct OverlayMetricTile: View {
                     .monospacedDigit()
                     .foregroundColor(.white.opacity(0.94))
                     .lineLimit(1)
-                    .minimumScaleFactor(0.64)
+                    .minimumScaleFactor(0.78)
 
                 Spacer(minLength: 0)
             }

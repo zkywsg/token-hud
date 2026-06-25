@@ -21,8 +21,8 @@ struct NotchHostedSurfaceView: View {
             ZStack(alignment: .topLeading) {
                 bodyPanel(layout.body, opacity: layout.contentOpacity, adaptiveScale: adaptiveScale, layout: layout)
                 topCap(layout.topCap, bodyHeight: layout.body.height, layout: layout)
-                statusSlot(layout.leftStatusSlot, isLeading: true, status: status, layout: layout)
-                statusSlot(layout.rightStatusSlot, isLeading: false, status: status, layout: layout)
+                statusSlot(layout.leftStatusSlot, isLeading: true, status: status, scale: adaptiveScale, layout: layout)
+                statusSlot(layout.rightStatusSlot, isLeading: false, status: status, scale: adaptiveScale, layout: layout)
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .environment(\.panelAdaptiveScale, adaptiveScale)
@@ -57,6 +57,7 @@ struct NotchHostedSurfaceView: View {
         _ rect: CGRect,
         isLeading: Bool,
         status: NotchCollapsedStatusDisplay,
+        scale: CGFloat,
         layout: NotchHostedSurfaceLayout
     ) -> some View {
         if rect.width > 1 {
@@ -82,15 +83,16 @@ struct NotchHostedSurfaceView: View {
                         text: status.trailingText
                     ) {
                         Text(status.trailingText)
-                            .font(.system(size: 10.5, weight: .semibold, design: .rounded))
+                            .font(.system(size: 10.5 * scale, weight: .semibold, design: .rounded))
                             .monospacedDigit()
                             .foregroundColor(.white.opacity(0.90))
                             .lineLimit(1)
                             .minimumScaleFactor(0.78)
+                            .truncationMode(.tail)
                     } else {
                         Capsule()
                             .fill(Color.white.opacity(0.32))
-                            .frame(width: min(18, max(8, rect.width - 18)), height: 4)
+                            .frame(width: min(18, max(8, rect.width - 18)), height: 5)
                     }
                 }
                     .offset(x: rect.minX, y: topY)
@@ -166,9 +168,11 @@ struct NotchHostedSurfaceView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                     }
                 }
+                .animation(.easeInOut(duration: 0.2), value: overlayMode)
+                .animation(.easeInOut(duration: 0.2), value: hostState.expandedLayoutMode)
                 .padding(.horizontal, 12 * adaptiveScale)
                 .padding(.top, OverlayModelCardStyle.hostedBodyTopInset(scale: adaptiveScale))
-                .padding(.bottom, 8 * adaptiveScale)
+                .padding(.bottom, max(8, 8 * adaptiveScale))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
                 .opacity(opacity)
                 .scaleEffect(0.98 + 0.02 * opacity)
@@ -247,13 +251,16 @@ private extension NotchHostedSurfaceView {
     var expandedContent: some View {
         if hostState.expandedLayoutMode == .sectioned {
             SectionedOverlayView(widgets: store.widgets, state: watcher.effectiveState)
+                .transition(.opacity)
         } else if overlayMode == "grouped" {
             GroupedOverlayView(
                 widgets: store.widgets,
                 state: watcher.effectiveState
             )
+            .transition(.opacity)
         } else {
             CompactOverlayContent()
+                .transition(.opacity)
         }
     }
 }

@@ -62,13 +62,13 @@ struct OverlayServiceRefreshButton: View {
                     if isRefreshing {
                         ProgressView()
                             .controlSize(.mini)
-                            .scaleEffect(max(0.65, 0.78 * scale))
+                            .scaleEffect(max(0.78, 0.78 * scale))
                     } else {
                         Image(systemName: "arrow.clockwise")
-                            .font(.system(size: 8.5 * scale, weight: .semibold))
+                            .font(.system(size: max(8.5, 8.5 * scale), weight: .semibold))
                     }
                 }
-                .frame(width: 18 * scale, height: 18 * scale)
+                .frame(width: max(18, 18 * scale), height: max(18, 18 * scale))
                 .foregroundStyle(.white.opacity(isRefreshing ? 0.45 : 0.50))
                 .background(
                     Circle()

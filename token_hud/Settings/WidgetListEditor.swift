@@ -648,6 +648,7 @@ private struct WidgetPreviewPanel: View {
                 }
             }
             .frame(height: widgets.isEmpty ? 118 : 224)
+            .animation(.easeInOut(duration: 0.25), value: widgets.isEmpty)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .environment(\.panelAdaptiveScale, 1.15)
         }
@@ -730,13 +731,14 @@ private struct WidgetPreviewItem: View {
                 Image(systemName: "xmark.circle.fill")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(.white.opacity(0.48))
-                    .frame(width: 20, height: 20)
+                    .frame(width: 16, height: 16)
+                    .padding(6)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("移除")
-            .padding(.top, 3)
-            .padding(.trailing, 3)
+            .padding(.top, 2)
+            .padding(.trailing, 2)
         }
         .background(CompactBlackTheme.inset)
         .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
@@ -910,7 +912,9 @@ private struct WidgetRow: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 10, weight: .semibold))
                     .foregroundColor(.secondary)
-                    .frame(width: 22, height: 22)
+                    .frame(width: 16, height: 16)
+                    .padding(6)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help("移除")

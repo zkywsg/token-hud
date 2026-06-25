@@ -526,7 +526,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
 
     // MARK: - Collapse Timer
 
-    private func scheduleCollapse(after delay: TimeInterval = 0.15, onlyIfMouseOutside: Bool = false) {
+    private func scheduleCollapse(after delay: TimeInterval = 0.25, onlyIfMouseOutside: Bool = false) {
         cancelCollapseTimer(invalidateGeneration: false)
         let token = transitionGate.advance()
         let work = DispatchWorkItem { [weak self] in
@@ -588,6 +588,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
 
     private func transitionTo(_ newMode: NotchHostMode) {
         guard hostState.mode != newMode, !isAnimating else { return }
+        isAnimating = true
 
         transitionGate.advance()
         let oldMode = hostState.mode
@@ -603,6 +604,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         case (let sourceMode, .detached):
             switchToDetached(from: sourceMode)
         }
+        isAnimating = false
     }
 
     private func animateToCollapsed() {
@@ -755,8 +757,10 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         // Surface frame is always the expanded rect; collapse is visual.
         overlayWindow?.setFrame(frames.expanded, display: false)
         hostState.mode = .collapsed
-        hostState.expansionProgress = 0
         prepareOverlayForDisplay(label: "snap to collapsed")
+        withAnimation(Self.hostedTransitionAnimation) {
+            hostState.expansionProgress = 0
+        }
         overlayWindow?.isMovableByWindowBackground = NotchWindowMovementPolicy.isMovableByWindowBackground(mode: .collapsed)
         overlayWindow?.ignoresMouseEvents = NotchMouseEventPolicy.shouldIgnoreWindowMouseEvents(mode: .collapsed)
         win.orderOut(nil)

@@ -4,9 +4,10 @@ import SwiftUI
 struct FloatingPanelView: View {
     @Environment(StateWatcher.self) private var watcher
     @Environment(WidgetStore.self) private var store
-    @AppStorage("floatingPanelScale") private var scale = 1.0
+    @AppStorage("floatingPanelScale") private var persistedScale = 1.0
     @AppStorage("overlayMode") private var overlayMode = "compact"
     @State private var gestureStartScale: CGFloat = 1.0
+    @State private var gestureScale: CGFloat = 1.0
 
     var body: some View {
         GeometryReader { geometry in
@@ -26,23 +27,24 @@ struct FloatingPanelView: View {
                         alignment: alignment(for: FloatingPanelContentLayoutPolicy.layout().verticalPlacement)
                     )
                     .scaleEffect(
-                        scale,
+                        gestureScale,
                         anchor: unitPoint(for: FloatingPanelContentLayoutPolicy.layout().scaleAnchor)
                     )
                     .gesture(
                         MagnificationGesture()
                             .onChanged { value in
-                                scale = (gestureStartScale * value)
+                                gestureScale = (gestureStartScale * value)
                                     .clamped(to: 0.5...3.0)
                             }
                             .onEnded { _ in
-                                gestureStartScale = scale
+                                gestureStartScale = gestureScale
+                                persistedScale = gestureScale
                             }
                     )
 
                 PanelResizeGrip()
-                    .frame(width: 20 * adaptiveScale, height: 20 * adaptiveScale)
-                    .padding(4 * adaptiveScale)
+                    .frame(width: max(16, 20 * adaptiveScale), height: max(16, 20 * adaptiveScale))
+                    .padding(max(3, 4 * adaptiveScale))
             }
             .frame(
                 minWidth: PanelResizeCalculator.minimumSize.width,
@@ -51,7 +53,10 @@ struct FloatingPanelView: View {
             .contentShape(Rectangle())
             .environment(\.panelAdaptiveScale, adaptiveScale)
         }
-        .onAppear { gestureStartScale = scale }
+        .onAppear {
+            gestureScale = persistedScale
+            gestureStartScale = persistedScale
+        }
     }
 
     @ViewBuilder

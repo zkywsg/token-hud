@@ -25,7 +25,7 @@ struct SectionedOverlayView: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8 * scale) {
+        VStack(alignment: .leading, spacing: max(8, 8 * scale)) {
             serviceTabs
 
             if let activeService {
@@ -38,18 +38,20 @@ struct SectionedOverlayView: View {
 
     private var serviceTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 6 * scale) {
+            HStack(spacing: max(6, 6 * scale)) {
                 ForEach(orderedServices, id: \.self) { serviceID in
                     let isSelected = activeService == serviceID
                     Button {
-                        selectedService = serviceID
+                        withAnimation(.easeInOut(duration: 0.2)) {
+                            selectedService = serviceID
+                        }
                     } label: {
                         Text(serviceLabel(for: serviceID))
                             .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
                             .lineLimit(1)
                             .truncationMode(.tail)
-                            .padding(.horizontal, 8 * scale)
-                            .padding(.vertical, 4 * scale)
+                            .padding(.horizontal, max(8, 8 * scale))
+                            .padding(.vertical, max(4, 4 * scale))
                             .foregroundColor(.white.opacity(isSelected ? 0.90 : 0.48))
                             .background(
                                 Capsule()

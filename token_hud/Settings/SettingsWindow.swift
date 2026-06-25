@@ -93,7 +93,8 @@ struct SettingsWindow: View {
             ScrollView {
                 GeneralSettingsView()
                     .environment(appFilterStore)
-                    .padding()
+                    .padding(.horizontal)
+                    .padding(.top, 4)
             }
             .scrollContentBackground(.hidden)
             .contentMargins(.top, chromeTopInset, for: .scrollContent)
@@ -350,8 +351,7 @@ private struct KeyRecorder: View {
     }
 
     private func startRecording() {
-        stopRecording()
-        isRecording = true
+        removeMonitor()
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .flagsChanged]) { event in
             if event.type == .keyDown {
                 let cleanMods = event.modifierFlags.intersection([.command, .option, .control, .shift])
@@ -368,6 +368,10 @@ private struct KeyRecorder: View {
 
     private func stopRecording() {
         isRecording = false
+        removeMonitor()
+    }
+
+    private func removeMonitor() {
         if let m = monitor {
             NSEvent.removeMonitor(m)
             monitor = nil
