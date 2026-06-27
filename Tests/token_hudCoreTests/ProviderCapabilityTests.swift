@@ -124,8 +124,9 @@ struct ProviderCapabilityTests {
     @Test func mimoCredentialSnapshotDistinguishesTokenPlanKeyAPIKeyAndConsoleCookie() {
         let tokenPlan = ProviderCredentialSnapshot(
             claudeSessionKey: nil,
-            apiKeys: ["mimo": "tp-secret-token-plan"],
-            mimoConsoleCookie: nil
+            apiKeys: [:],
+            mimoConsoleCookie: nil,
+            mimoTokenPlanKey: "tp-secret-token-plan"
         )
         let payAsYouGo = ProviderCredentialSnapshot(
             claudeSessionKey: nil,
@@ -138,7 +139,7 @@ struct ProviderCapabilityTests {
             mimoConsoleCookie: "session=abcdef1234567890"
         )
 
-        #expect(tokenPlan.miMoAPIKeyRole == .tokenPlanKey)
+        #expect(tokenPlan.hasMiMoTokenPlanKey)
         #expect(tokenPlan.hasMiMoTokenPlanCredential)
         #expect(payAsYouGo.miMoAPIKeyRole == .payAsYouGoAPIKey)
         #expect(!payAsYouGo.hasMiMoTokenPlanCredential)

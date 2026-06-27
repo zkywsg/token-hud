@@ -107,6 +107,28 @@ enum KeychainHelper {
         try delete(account: "mimoConsoleCookie")
     }
 
+    // MARK: - MiMo Token Plan key
+
+    static func saveMiMoTokenPlanKey(_ value: String) throws {
+        try save(value, account: "mimoTokenPlanKey")
+    }
+
+    static func loadMiMoTokenPlanKey() -> String? {
+        load(account: "mimoTokenPlanKey")
+    }
+
+    static func loadMiMoTokenPlanKey(allowUserInteraction: Bool) -> String? {
+        load(account: "mimoTokenPlanKey", allowUserInteraction: allowUserInteraction)
+    }
+
+    static func hasMiMoTokenPlanKey() -> Bool {
+        exists(account: "mimoTokenPlanKey")
+    }
+
+    static func deleteMiMoTokenPlanKey() throws {
+        try delete(account: "mimoTokenPlanKey")
+    }
+
     // MARK: - Delete
 
     static func deleteClaudeSessionKey() throws {

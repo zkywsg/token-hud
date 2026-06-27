@@ -9,12 +9,12 @@ struct WidgetRecommendationTests {
             apiKeys: [
                 "codex": "ignored",
                 "deepseek": "sk-deepseek",
-                "mimo": "tp-mimo",
                 "openai": "sk-openai",
                 "gemini": "AIza",
                 "anthropic": "sk-ant"
             ],
-            mimoConsoleCookie: nil
+            mimoConsoleCookie: nil,
+            mimoTokenPlanKey: "tp-mimo"
         )
 
         let recommendations = WidgetRecommendationEngine.recommendations(for: snapshot)

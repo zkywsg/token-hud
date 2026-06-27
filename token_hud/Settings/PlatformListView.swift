@@ -182,6 +182,15 @@ struct PlatformListView: View {
     }
 
     private func reloadCredentialSnapshot() {
+        // 迁移：旧 mimoAPIKey 中的 tp- key → mimoTokenPlanKey
+        if !KeychainHelper.hasMiMoTokenPlanKey(),
+           let existingKey = KeychainHelper.loadAPIKey(for: "mimo"),
+           existingKey.trimmingCharacters(in: .whitespacesAndNewlines).lowercased().hasPrefix("tp-") {
+            try? KeychainHelper.saveMiMoTokenPlanKey(existingKey)
+            try? KeychainHelper.deleteAPIKey(for: "mimo")
+            MiMoAPIKeyRoleStore.clear()
+        }
+
         var apiKeys: [String: String] = [:]
         for provider in ProviderCapability.all {
             switch provider.credentialKind {
@@ -199,7 +208,8 @@ struct PlatformListView: View {
             claudeSessionKey: KeychainHelper.hasClaudeSessionKey() ? "saved" : nil,
             apiKeys: apiKeys,
             mimoConsoleCookie: KeychainHelper.hasMiMoConsoleCookie() ? "saved" : nil,
-            codexAdminKey: KeychainHelper.hasCodexAdminKey() ? "saved" : nil
+            codexAdminKey: KeychainHelper.hasCodexAdminKey() ? "saved" : nil,
+            mimoTokenPlanKey: KeychainHelper.hasMiMoTokenPlanKey() ? "saved" : nil
         )
         revision += 1
     }
@@ -454,6 +464,7 @@ private struct PlatformCredentialPanel: View {
     let onChanged: () -> Void
 
     @State private var apiKeyInput = ""
+    @State private var tokenPlanKeyInput = ""
     @State private var cookieInput = ""
     @State private var codexAdminKeyInput = ""
     @State private var claudeInput = ""
@@ -567,7 +578,54 @@ private struct PlatformCredentialPanel: View {
 
     private var mimoCredentialContent: some View {
         VStack(alignment: .leading, spacing: 12) {
-            apiKeyContent(platformID: provider.id)
+            // Token Plan Key
+            VStack(alignment: .leading, spacing: 6) {
+                StoredSecretRow(
+                    label: "Token Plan Key",
+                    maskedValue: credentialSnapshot.maskedMiMoTokenPlanKey
+                )
+                HStack {
+                    SecureField("tp-…", text: $tokenPlanKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                    Button("保存") {
+                        let value = tokenPlanKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !value.isEmpty else { return }
+                        try? KeychainHelper.saveMiMoTokenPlanKey(value)
+                        tokenPlanKeyInput = ""
+                        onChanged()
+                    }
+                    .disabled(tokenPlanKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                Text("Token Plan `tp-` key，用于套餐服务。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            // API Key
+            VStack(alignment: .leading, spacing: 6) {
+                StoredSecretRow(
+                    label: "API Key（按量付费）",
+                    maskedValue: credentialSnapshot.maskedAPIKey(for: "mimo")
+                )
+                HStack {
+                    SecureField("sk-…", text: $apiKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                    Button("保存") {
+                        let value = apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !value.isEmpty else { return }
+                        try? KeychainHelper.saveAPIKey(value, for: "mimo")
+                        apiKeyInput = ""
+                        onChanged()
+                    }
+                    .disabled(apiKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                Text("按量付费 `sk-` key，暂无余额/用量查询接口。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
             mimoCredentialSummary
             Divider()
             Button {
@@ -590,26 +648,28 @@ private struct PlatformCredentialPanel: View {
 
     private var mimoCredentialSummary: some View {
         VStack(alignment: .leading, spacing: 6) {
-            switch credentialSnapshot.miMoAPIKeyRole {
-            case .tokenPlanKey:
-                Label("Token Plan Key 已配置，可用于套餐服务。", systemImage: "checkmark.circle")
+            if credentialSnapshot.hasMiMoTokenPlanKey {
+                Label("Token Plan Key 已配置。", systemImage: "checkmark.circle")
                     .foregroundStyle(.green)
-            case .payAsYouGoAPIKey:
-                Label("按量 API Key 已配置，仅用于调用验证。", systemImage: "info.circle")
-                    .foregroundStyle(.secondary)
-            case .unknownAPIKey:
-                Label("API Key 已配置，但无法判断是否为 Token Plan Key。", systemImage: "questionmark.circle")
-                    .foregroundStyle(.secondary)
-            case nil:
-                Label("未配置 MiMO API Key。", systemImage: "key")
-                    .foregroundStyle(.secondary)
             }
-
+            if let role = credentialSnapshot.miMoAPIKeyRole {
+                switch role {
+                case .payAsYouGoAPIKey:
+                    Label("按量 API Key 已配置，仅用于调用验证。", systemImage: "info.circle")
+                        .foregroundStyle(.secondary)
+                case .unknownAPIKey:
+                    Label("API Key 已配置，类型未知。", systemImage: "questionmark.circle")
+                        .foregroundStyle(.secondary)
+                case .tokenPlanKey:
+                    // 旧迁移残留，理论上不会再出现
+                    EmptyView()
+                }
+            }
             if credentialSnapshot.maskedMiMoConsoleCookie != nil {
-                Label("Console Cookie 已配置，可查询控制台 Token Plan。", systemImage: "checkmark.circle")
+                Label("Console Cookie 已配置，可查询 Token Plan 用量。", systemImage: "checkmark.circle")
                     .foregroundStyle(.green)
-            } else if !credentialSnapshot.hasMiMoTokenPlanCredential {
-                Label("未配置套餐查询凭据；推荐使用 Token Plan Key 或连接控制台。", systemImage: "exclamationmark.triangle")
+            } else if !credentialSnapshot.hasMiMoTokenPlanCredential && credentialSnapshot.miMoAPIKeyRole == nil {
+                Label("推荐连接控制台以查询 Token Plan 用量。", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(.orange)
             }
         }
@@ -818,7 +878,7 @@ private struct PlatformCredentialPanel: View {
         case "deepseek":  return "sk-…"
         case "anthropic": return "sk-ant-…"
         case "minimax":   return "Token Plan key 或 Open Platform key"
-        case "mimo":      return "tp-… 或 sk-…"
+        case "mimo":      return "sk-…"
         default:          return "API key"
         }
     }
@@ -830,7 +890,7 @@ private struct PlatformCredentialPanel: View {
         case "deepseek":  return "DeepSeek API key 可用于官方余额接口。"
         case "anthropic": return "Anthropic 普通 API key 可验证调用能力；费用报告需要 Console 权限。"
         case "minimax":   return "MiniMax Token Plan key 可查询 remains；普通 Open Platform key 只能验证调用，公开 API 暂不能查余额。"
-        case "mimo":      return "MiMo `tp-` Token Plan key 用于套餐服务；`sk-` 按量 key 只验证调用能力。"
+        case "mimo":      return "MiMo `tp-` key 用于套餐服务；`sk-` key 仅验证调用能力。用量查询需连接控制台 Cookie。"
         default:          return "输入平台 API key。"
         }
     }

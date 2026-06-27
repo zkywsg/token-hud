@@ -632,7 +632,10 @@ final class APIPlatformFetcher {
 
     private nonisolated func hasCredential(for platform: String) -> Bool {
         if KeychainHelper.hasAPIKey(for: platform) { return true }
-        if platform == "mimo", KeychainHelper.hasMiMoConsoleCookie() { return true }
+        if platform == "mimo" {
+            if KeychainHelper.hasMiMoConsoleCookie() { return true }
+            if KeychainHelper.hasMiMoTokenPlanKey() { return true }
+        }
         return false
     }
 
@@ -907,20 +910,31 @@ final class APIPlatformFetcher {
     /// Xiaomi MiMo API (api.xiaomimimo.com, OpenAI-compatible).
     /// Calls GET /v1/models to verify the key; no public balance endpoint is known.
     private nonisolated func fetchMiMo(allowUserInteraction: Bool) async -> Service? {
+        // 1. Cookie 优先
         if let cookie = KeychainHelper.loadMiMoConsoleCookie(allowUserInteraction: allowUserInteraction) {
             if let service = await fetchMiMoTokenPlan(cookie: cookie) {
                 return service
             }
         }
 
-        guard let apiKey = KeychainHelper.loadAPIKey(
+        // 2. Token Plan key
+        if let tpKey = KeychainHelper.loadMiMoTokenPlanKey(allowUserInteraction: allowUserInteraction) {
+            return await fetchMiMoWithAPIKey(tpKey, keyRole: .tokenPlanKey, allowUserInteraction: allowUserInteraction)
+        }
+
+        // 3. 普通 API key（sk- 或 unknown）
+        if let apiKey = KeychainHelper.loadAPIKey(
             for: "mimo",
             allowUserInteraction: allowUserInteraction
-        ) else {
-            print("[MiMo] no API key or console cookie in Keychain")
-            return nil
+        ) {
+            return await fetchMiMoWithAPIKey(apiKey, keyRole: miMoAPIKeyRole(for: apiKey), allowUserInteraction: allowUserInteraction)
         }
-        let apiKeyRole = miMoAPIKeyRole(for: apiKey)
+
+        print("[MiMo] no API key, Token Plan key, or console cookie in Keychain")
+        return nil
+    }
+
+    private nonisolated func fetchMiMoWithAPIKey(_ apiKey: String, keyRole: MiMoAPIKeyRole, allowUserInteraction: Bool) async -> Service? {
         var request = URLRequest(url: URL(string: "https://api.xiaomimimo.com/v1/models")!)
         request.setValue(apiKey, forHTTPHeaderField: "api-key")
         request.timeoutInterval = 15
@@ -934,7 +948,6 @@ final class APIPlatformFetcher {
             }
 
             print("[MiMo] GET /v1/models → status \(httpResponse.statusCode)")
-            print("[MiMo] response headers: \(httpResponse.allHeaderFields)")
 
             if httpResponse.statusCode == 401 {
                 print("[MiMo] 401 — invalid API key")
@@ -945,9 +958,9 @@ final class APIPlatformFetcher {
                 return Service(label: "MiMo", quotas: [], currentSession: nil, error: "Request failed (\(httpResponse.statusCode))")
             }
 
-            switch apiKeyRole {
+            switch keyRole {
             case .payAsYouGoAPIKey:
-                print("[MiMo] pay-as-you-go key is valid, but Token Plan usage requires tp key or console cookie")
+                print("[MiMo] pay-as-you-go key is valid, but no usage query API available")
                 return Service(
                     label: "MiMo",
                     quotas: [],

@@ -352,7 +352,8 @@ struct WidgetListEditor: View {
             claudeSessionKey: KeychainHelper.hasClaudeSessionKey() ? "saved" : nil,
             apiKeys: apiKeys,
             mimoConsoleCookie: KeychainHelper.hasMiMoConsoleCookie() ? "saved" : nil,
-            codexAdminKey: KeychainHelper.hasCodexAdminKey() ? "saved" : nil
+            codexAdminKey: KeychainHelper.hasCodexAdminKey() ? "saved" : nil,
+            mimoTokenPlanKey: KeychainHelper.hasMiMoTokenPlanKey() ? "saved" : nil
         )
     }
 }

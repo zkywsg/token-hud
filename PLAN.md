@@ -2,7 +2,74 @@
 
 这个文件跟踪当前项目正在进行的实现工作。保持内容小而可执行；可长期保留的决策沉淀到 `docs/`。
 
-## 当前重点：修复 hosted 浮窗启动残留与展开裁切（已实现，待手动体验验证）
+## 当前重点：MiMo 凭据输入拆分 — API Key 与 Token Plan Key（待实现）
+
+### 问题
+
+当前 MiMo 的 API Key 和 Token Plan Key 共用同一个输入框和 Keychain 账户（`mimoAPIKey`）。用户输入 `tp-` 或 `sk-` 开头的 key 后，代码通过前缀自动判断类型。这有几个问题：
+
+- 用户无法同时配置两种 key（一个按量、一个套餐）。
+- 输入框标签写着「Token Plan / API Key」，语义不清。
+- `tp-` key 和 `sk-` key 的用途完全不同，混在一起容易误操作。
+
+### 本轮目标
+
+- 将 MiMo 的 Token Plan Key 和 API Key（按量付费）拆分为两个独立输入框。
+- Keychain 存储拆分：`mimoTokenPlanKey` 和 `mimoAPIKey`。
+- 自动迁移：如果旧 `mimoAPIKey` 中存的是 `tp-` 开头的 key，自动迁移到新账户。
+- fetcher 逻辑不变：cookie 优先 → token plan key → API key 验证。
+- 不改其它平台、不改 state.json schema、不改 widget 模型。
+
+### 实施步骤
+
+1. **KeychainHelper 增加 Token Plan Key 存储**
+   - 新增 `saveMiMoTokenPlanKey(_:)` / `loadMiMoTokenPlanKey(allowUserInteraction:)` / `hasMiMoTokenPlanKey()` / `deleteMiMoTokenPlanKey()`。
+   - Keychain account 为 `"mimoTokenPlanKey"`，与现有 `"mimoAPIKey"` 分开。
+
+2. **ProviderCredentialSnapshot 拆分字段**
+   - 新增 `mimoTokenPlanKey: String?` 字段。
+   - `miMoAPIKeyRole` 改为只看 `apiKeys["mimo"]`（现在只可能是 `sk-` 或 unknown）。
+   - 新增 `hasMiMoTokenPlanKey: Bool`（检查 `mimoTokenPlanKey != nil`）。
+   - `hasMiMoTokenPlanCredential` 改为检查 `mimoConsoleCookie != nil || mimoTokenPlanKey != nil`。
+   - `maskedMiMoTokenPlanKey` 计算属性。
+   - `status(for:)` 的 `.apiKeyAndConsoleCookie` 分支同步更新。
+
+3. **APIPlatformFetcher.fetchMiMo() 调整加载顺序**
+   - cookie 优先（不变）。
+   - 新增：尝试 `KeychainHelper.loadMiMoTokenPlanKey(allowUserInteraction:)`，有则用 `tp-` key 路径。
+   - 最后：尝试 `KeychainHelper.loadAPIKey(for: "mimo", allowUserInteraction:)`，走旧 API key 验证路径。
+   - fetchAll 和 hasCredential 同步更新。
+
+4. **PlatformListView UI 拆分**
+   - `mimoCredentialContent` 中 `apiKeyContent(platformID:)` 替换为两个独立区域：
+     - Token Plan Key 输入框（标签「Token Plan Key」，placeholder `tp-…`）。
+     - API Key 输入框（标签「API Key」，placeholder `sk-…`）。
+   - 各自保存到对应的 Keychain 账户。
+   - `mimoCredentialSummary` 同步更新显示逻辑。
+   - 旧 `MiMoAPIKeyRoleStore` 可以简化或移除（角色不再需要猜测）。
+
+5. **自动迁移**
+   - 首次加载 credential snapshot 时，如果 `mimoAPIKey` 是 `tp-` 开头且 `mimoTokenPlanKey` 为空，自动迁移到新账户并清空旧账户。
+   - 迁移逻辑放在 snapshot 构建处或 AppDelegate 启动时。
+
+6. **验证**
+   - `swift test`
+   - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动验证：
+     - Settings 平台页 MiMo 区域显示两个独立输入框。
+     - 保存 `tp-` key 后能正确显示和查询。
+     - 保存 `sk-` key 后能正确显示和验证。
+     - 旧的 `tp-` key 自动迁移，不丢失。
+
+### 风险
+
+- 迁移逻辑如果出错，可能让用户需要重新输入 key；迁移前应先检查旧值是否已迁移。
+- `ProviderCredentialSnapshot` 加字段后，所有构造调用处都需要更新（`.empty`、Settings 里的构建）。
+- 如果用户同时配了 cookie 和 tp- key，fetcher 仍走 cookie 优先；拆分后不影响优先级。
+
+---
+
+## 已完成：修复 hosted 浮窗启动残留与展开裁切（已实现，待手动体验验证）
 
 ### 问题
 

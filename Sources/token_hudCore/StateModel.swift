@@ -415,17 +415,20 @@ public struct ProviderCredentialSnapshot: Sendable, Equatable {
     public let apiKeys: [String: String]
     public let mimoConsoleCookie: String?
     public let codexAdminKey: String?
+    public let mimoTokenPlanKey: String?
 
     public init(
         claudeSessionKey: String?,
         apiKeys: [String: String],
         mimoConsoleCookie: String?,
-        codexAdminKey: String? = nil
+        codexAdminKey: String? = nil,
+        mimoTokenPlanKey: String? = nil
     ) {
         self.claudeSessionKey = claudeSessionKey
         self.apiKeys = apiKeys
         self.mimoConsoleCookie = mimoConsoleCookie
         self.codexAdminKey = codexAdminKey
+        self.mimoTokenPlanKey = mimoTokenPlanKey
     }
 
     public static let empty = ProviderCredentialSnapshot(
@@ -465,8 +468,16 @@ public struct ProviderCredentialSnapshot: Sendable, Equatable {
         return .unknownAPIKey
     }
 
+    public var hasMiMoTokenPlanKey: Bool {
+        mimoTokenPlanKey != nil
+    }
+
+    public var maskedMiMoTokenPlanKey: String? {
+        mimoTokenPlanKey.map(Self.masked)
+    }
+
     public var hasMiMoTokenPlanCredential: Bool {
-        mimoConsoleCookie != nil || miMoAPIKeyRole == .tokenPlanKey
+        mimoConsoleCookie != nil || mimoTokenPlanKey != nil
     }
 
     public func status(for provider: ProviderCapability) -> ProviderCredentialSnapshotStatus {
@@ -476,7 +487,7 @@ public struct ProviderCredentialSnapshot: Sendable, Equatable {
         case .apiKey:
             return apiKeys[provider.id] == nil ? .notConfigured : .configured
         case .apiKeyAndConsoleCookie:
-            return (apiKeys[provider.id] != nil || mimoConsoleCookie != nil) ? .configured : .notConfigured
+            return (apiKeys[provider.id] != nil || mimoConsoleCookie != nil || mimoTokenPlanKey != nil) ? .configured : .notConfigured
         case .codexLocalAuth:
             return .notConfigured
         }
