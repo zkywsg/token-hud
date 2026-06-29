@@ -199,9 +199,7 @@ struct NotchHostedSurfaceView: View {
     }
 
     private func progressColor(for fraction: Double) -> Color {
-        if fraction >= 0.85 { return Color(red: 1.0, green: 0.27, blue: 0.32) }
-        if fraction >= 0.65 { return Color(red: 1.0, green: 0.84, blue: 0.10) }
-        return Color(red: 0.25, green: 0.86, blue: 0.48)
+        ProgressColorScheme.color(for: fraction)
     }
 
     // MARK: - Layout helpers

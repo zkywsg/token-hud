@@ -45,12 +45,9 @@ struct BarWidget: View {
     }
 
     private var barColor: Color {
-        // fraction is usage; bar width = 1 - fraction. Color by actual usage.
+        // fraction = remaining (0 = fully used, 1 = nothing used).
+        // Color by usage: low remaining → high usage → red.
         let usage = 1 - fraction
-        switch usage {
-        case 0..<0.5:   return Color(red: 0.30, green: 0.86, blue: 0.55)
-        case 0..<0.8:   return Color(red: 1.0, green: 0.76, blue: 0.20)
-        default:         return Color(red: 1.0, green: 0.28, blue: 0.34)
-        }
+        return ProgressColorScheme.color(for: usage)
     }
 }

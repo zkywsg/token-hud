@@ -243,216 +243,24 @@ private struct OverlayMetricTile: View {
     }
 
     private var progressColor: Color {
-        let usage = progressFraction.clamped(to: 0...1)
-        if usage >= 0.85 { return Color(red: 1.0, green: 0.27, blue: 0.32) }
-        if usage >= 0.65 { return Color(red: 1.0, green: 0.78, blue: 0.22) }
-        return Color(red: 0.26, green: 0.82, blue: 0.50)
+        ProgressColorScheme.color(for: progressFraction)
     }
 
     private var formattedValue: String {
-        guard let svc = service else { return "-" }
-        switch config.metric {
-        case .remainingTime:
-            if config.service == "mimo" {
-                return WidgetValueComputer.formattedMiMoTokenPlanExpiry(service)
-            }
-            guard let q = quotaFor(type: .time) ?? creditQuota() else { return "-" }
-            if config.service == "codex" {
-                return WidgetValueComputer.codexRateLimitDisplay(q).value
-            }
-            if q.type == .time {
-                return WidgetValueComputer.formattedRemaining(quota: q)
-            }
-            guard let resetsAt = q.resetsAt else { return "-" }
-            return WidgetValueComputer.countdownString(to: resetsAt) ?? "-"
-        case .tokensRemaining:
-            guard let q = quotaFor(type: .tokens) else { return "-" }
-            return WidgetValueComputer.formattedRemaining(quota: q)
-        case .balance:
-            guard let q = quotaFor(type: .money) else { return "-" }
-            return WidgetValueComputer.formattedRemaining(quota: q)
-        case .sessionTokens:
-            return WidgetValueComputer.formattedSessionTokens(svc.currentSession)
-        case .usagePercent:
-            guard let q = quotaFor(type: .tokens) ?? creditQuota() else { return "-" }
-            return String(format: "%.0f%%", WidgetValueComputer.usageFraction(for: q) * 100)
-        case .resetCountdown:
-            if config.service == "mimo" {
-                return WidgetValueComputer.formattedMiMoTokenPlanExpiry(service)
-            }
-            guard let q = quotaFor(type: .time) ?? creditQuota(),
-                  let reset = q.resetsAt
-            else { return "-" }
-            let formatter = ISO8601DateFormatter()
-            guard let date = formatter.date(from: reset) else { return reset }
-            let displayFormatter = DateFormatter()
-            displayFormatter.dateFormat = "MM/dd HH:mm"
-            return displayFormatter.string(from: date)
-        case .inputTokens:
-            return WidgetValueComputer.formattedInputTokens(svc.currentSession)
-        case .outputTokens:
-            return WidgetValueComputer.formattedOutputTokens(svc.currentSession)
-        case .dailyTokens:
-            guard let q = quotaFor(type: .dailyTokens) else { return "-" }
-            return WidgetValueComputer.formattedRemaining(quota: q)
-        case .monthlyTokens:
-            guard let q = quotaFor(type: .monthlyTokens) else { return "-" }
-            return WidgetValueComputer.formattedRemaining(quota: q)
-        case .costSpent:
-            return WidgetValueComputer.formattedCostSpent(svc.currentSession)
-        case .dailyRequests:
-            guard let q = quotaFor(type: .dailyRequests) else { return "-" }
-            return WidgetValueComputer.formattedRemaining(quota: q)
-        case .monthlyRequests:
-            guard let q = quotaFor(type: .monthlyRequests) else { return "-" }
-            return WidgetValueComputer.formattedRemaining(quota: q)
-        case .sessionDuration:
-            guard let session = svc.currentSession else { return "-" }
-            return WidgetValueComputer.sessionDuration(from: session)
-        case .tokensPerMinute:
-            guard let session = svc.currentSession else { return "-" }
-            return WidgetValueComputer.tokensPerMinute(from: session)
-        case .inputOutputRatio:
-            guard let session = svc.currentSession else { return "-" }
-            return WidgetValueComputer.inputOutputRatio(from: session)
-        case .costPerRequest:
-            guard let session = svc.currentSession else { return "-" }
-            return WidgetValueComputer.costPerRequest(from: session)
-        case .rateLimitStatus:
-            let fractions = svc.quotas.compactMap { quota -> Double? in
-                guard let total = quota.total, total > 0 else { return nil }
-                return quota.used / total
-            }
-            guard let maxFraction = fractions.max() else { return "-" }
-            return String(format: "%.0f%%", maxFraction * 100)
-        case .creditsRemaining:
-            guard let q = creditQuota() else { return "-" }
-            return WidgetValueComputer.formattedCredits(WidgetValueComputer.remainingValue(for: q))
-        case .creditsUsed:
-            guard let q = creditQuota() else { return "-" }
-            return WidgetValueComputer.formattedCredits(q.used)
-        case .sessionCredits:
-            return WidgetValueComputer.formattedCredits(svc.currentSession?.tokens)
-        case .subscriptionStatus:
-            if config.service == "codex" {
-                return WidgetValueComputer.codexSubscriptionStatus(svc)
-            }
-            if svc.error != nil { return "异常" }
-            return svc.currentSession == nil && svc.quotas.isEmpty ? "未连接" : "已订阅"
-        case .planName:
-            return service?.label ?? config.service
-        }
+        WidgetMetricComputer.formattedValue(
+            metric: config.metric, service: service, configService: config.service,
+            quotaFor: { [self] in quotaFor(type: $0) },
+            creditQuota: { [self] in creditQuota() }
+        )
     }
 
     private var fraction: Double {
-        guard let svc = service else { return 0 }
-        switch config.metric {
-        case .remainingTime:
-            guard let q = quotaFor(type: .time) ?? creditQuota() else { return 0 }
-            if q.type == .time { return quotaFraction(type: .time) }
-            guard let resetsAt = q.resetsAt,
-                  let date = ISO8601DateFormatter().date(from: resetsAt)
-            else { return 0 }
-            return max(0, min(1, date.timeIntervalSinceNow / 2_592_000))
-        case .tokensRemaining:
-            return quotaFraction(type: .tokens)
-        case .balance:
-            return quotaFraction(type: .money)
-        case .usagePercent:
-            guard let q = quotaFor(type: .tokens) ?? creditQuota() else { return 0 }
-            return WidgetValueComputer.usageFraction(for: q)
-        case .sessionTokens:
-            guard let session = svc.currentSession,
-                  let tokens = session.tokens,
-                  let quota = svc.quotas.first(where: { $0.type == .tokens }),
-                  let total = quota.total,
-                  total > 0
-            else { return 0 }
-            return tokens / total
-        case .resetCountdown:
-            guard let q = quotaFor(type: .time) ?? creditQuota(),
-                  let resetsAt = q.resetsAt,
-                  let date = ISO8601DateFormatter().date(from: resetsAt)
-            else { return 0 }
-            let remaining = date.timeIntervalSinceNow
-            let maxSeconds = q.type == .time ? max(q.total ?? 0, 1) : 2_592_000.0
-            return max(0, min(1, remaining / maxSeconds))
-        case .inputTokens:
-            guard let value = svc.currentSession?.inputTokens,
-                  let quota = svc.quotas.first(where: { $0.type == .tokens }),
-                  let total = quota.total,
-                  total > 0
-            else { return 0 }
-            return value / total
-        case .outputTokens:
-            guard let value = svc.currentSession?.outputTokens,
-                  let quota = svc.quotas.first(where: { $0.type == .tokens }),
-                  let total = quota.total,
-                  total > 0
-            else { return 0 }
-            return value / total
-        case .dailyTokens:
-            return quotaFraction(type: .dailyTokens)
-        case .monthlyTokens:
-            return quotaFraction(type: .monthlyTokens)
-        case .costSpent:
-            guard let value = svc.currentSession?.costSpent,
-                  let quota = svc.quotas.first(where: { $0.type == .money }),
-                  let total = quota.total,
-                  total > 0
-            else { return 0 }
-            return value / total
-        case .dailyRequests:
-            return quotaFraction(type: .dailyRequests)
-        case .monthlyRequests:
-            return quotaFraction(type: .monthlyRequests)
-        case .sessionDuration:
-            guard let session = svc.currentSession else { return 0 }
-            return min(1, WidgetValueComputer.sessionDurationSeconds(from: session) / 28800)
-        case .tokensPerMinute:
-            guard let session = svc.currentSession,
-                  let tokens = session.tokens,
-                  WidgetValueComputer.sessionDurationSeconds(from: session) > 60
-            else { return 0 }
-            let rate = tokens / (WidgetValueComputer.sessionDurationSeconds(from: session) / 60)
-            return min(1, rate / 200)
-        case .inputOutputRatio:
-            guard let input = svc.currentSession?.inputTokens,
-                  let output = svc.currentSession?.outputTokens,
-                  (input + output) > 0
-            else { return 0 }
-            return input / (input + output)
-        case .costPerRequest:
-            guard let cost = svc.currentSession?.costSpent,
-                  let quota = svc.quotas.first(where: { $0.type == .money }),
-                  let total = quota.total,
-                  total > 0
-            else { return 0 }
-            return cost / total
-        case .rateLimitStatus:
-            let fractions = svc.quotas.compactMap { quota -> Double? in
-                guard let total = quota.total, total > 0 else { return nil }
-                return quota.used / total
-            }
-            return fractions.max() ?? 0
-        case .creditsRemaining:
-            guard let q = creditQuota() else { return 0 }
-            return WidgetValueComputer.usageFraction(for: q)
-        case .creditsUsed:
-            guard let q = creditQuota() else { return 0 }
-            return 1 - WidgetValueComputer.usageFraction(for: q)
-        case .sessionCredits:
-            guard let sessionCredits = svc.currentSession?.tokens,
-                  let q = creditQuota(),
-                  let total = q.total,
-                  total > 0
-            else { return 0 }
-            return sessionCredits / total
-        case .subscriptionStatus:
-            return svc.error == nil ? 1 : 0
-        case .planName:
-            return 0
-        }
+        WidgetMetricComputer.fraction(
+            metric: config.metric, service: service,
+            quotaFor: { [self] in quotaFor(type: $0) },
+            creditQuota: { [self] in creditQuota() },
+            quotaFraction: { [self] in quotaFraction(type: $0) }
+        )
     }
 
     private var metricTitle: String {

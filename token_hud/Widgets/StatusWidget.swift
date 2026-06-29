@@ -7,9 +7,7 @@ struct StatusWidget: View {
     @Environment(\.panelAdaptiveScale) private var scale
 
     private var color: Color {
-        if fraction >= 0.8 { return Color(red: 1.0, green: 0.28, blue: 0.34) }
-        if fraction >= 0.5 { return Color(red: 1.0, green: 0.76, blue: 0.20) }
-        return Color(red: 0.30, green: 0.86, blue: 0.55)
+        ProgressColorScheme.color(for: fraction)
     }
 
     private var statusText: String {

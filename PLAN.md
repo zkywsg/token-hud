@@ -2,6 +2,128 @@
 
 这个文件跟踪当前项目正在进行的实现工作。保持内容小而可执行；可长期保留的决策沉淀到 `docs/`。
 
+## 当前重点：UI 一致性清理 — 进度颜色统一、死代码移除、格式化逻辑去重（待实现）
+
+### 问题
+
+UI 审查发现三类高优先级问题：
+
+1. **进度颜色阈值和 RGB 值不一致** — 6 处独立定义红/黄/绿颜色，阈值和 RGB 均有漂移：
+   - `OverlayModelCardStyle.swift`（0.85/0.65）：`(1.0,0.27,0.32)` / `(1.0,0.78,0.22)` / `(0.26,0.82,0.50)`
+   - `NotchHostedSurfaceView.swift`（0.85/0.65）：`(1.0,0.27,0.32)` / `(1.0,0.84,0.10)` / `(0.25,0.86,0.48)`
+   - `WidgetListEditor.swift`（0.85/0.65）：`(1.0,0.28,0.34)` / `(1.0,0.76,0.20)` / `(0.30,0.86,0.55)`
+   - `BarWidget.swift`（0.8/0.5）：`(1.0,0.28,0.34)` / `(1.0,0.76,0.20)` / `(0.30,0.86,0.55)`
+   - `StatusWidget.swift`（0.8/0.5）：同 BarWidget
+   - `RingWidget.swift`：直接用 `.green/.yellow/.red` 系统色
+
+2. **`PlatformRowView.swift`（1184 行）是死代码** — 该文件包含 `PlatformRowView`、`APIKeyGroupView`、`APIPlatformRow`、`MiMoConsoleConnectorSheet`、`MetricsDetailView` 等，全部没有外部引用，已被 `PlatformListView.swift` 完全取代。
+
+3. **`formattedValue` / `fraction` 逻辑重复** — `OverlayMetricTile`（OverlayModelCardStyle.swift:252-425）和 `WidgetRenderer`（WidgetRenderer.swift:163-161 + 65-160）有几乎完全相同的 `formattedValue`（22 个 case）和 `fraction`（22 个 case）计算逻辑，以及 `quotaFor` / `creditQuota` / `quotaFraction` 辅助函数。新增 metric 时必须两处同步更新，维护风险高。
+
+### 本轮目标
+
+- 统一所有进度条/环形图/状态指示器的红/黄/绿阈值和 RGB 值。
+- 删除 `PlatformRowView.swift` 死代码。
+- 将 `formattedValue` 和 `fraction` 合并到 `token_hudCore` 的共享函数中，消除跨文件重复。
+- 不改数据模型、fetcher、Keychain、刘海窗口状态机、Settings 功能逻辑。
+
+### 实施步骤
+
+1. **新增共享颜色 token**
+   - 在 `Sources/token_hudCore` 新增 `ProgressColorScheme.swift`。
+   - 定义 `public enum ProgressColorScheme`，提供：
+     - `static func color(for usage: Double) -> Color`：统一阈值 0.85 红 / 0.65 黄 / 其它绿。
+     - 三个固定的 `Color` 常量：`.red`、`.yellow`、`.green`。
+   - 阈值选择 0.85/0.65（当前大多数文件使用此值），RGB 选一组统一值。
+   - 添加 Swift Testing 测试覆盖阈值边界。
+
+2. **替换所有内联进度颜色**
+   - `OverlayModelCardStyle.swift` `progressColor` → 调用 `ProgressColorScheme.color(for:)`。
+   - `NotchHostedSurfaceView.swift` `progressColor(for:)` → 同上。
+   - `WidgetListEditor.swift` `progressColor(for:)` → 同上。
+   - `BarWidget.swift` `barColor` → 同上（注意 BarWidget 的 fraction 是 remaining，需反转）。
+   - `StatusWidget.swift` `color` → 同上。
+   - `RingWidget.swift` `ringColor` → 同上（从系统色改为统一 RGB 色）。
+
+3. **提取共享 `formattedValue` 和 `fraction` 到 core**
+   - 在 `Sources/token_hudCore/WidgetValueComputer.swift` 新增：
+     - `public static func formattedMetricValue(metric: WidgetMetric, service: Service?, configService: String) -> String`
+     - `public static func metricFraction(metric: WidgetMetric, service: Service?) -> Double`
+   - 内部复用已有的 `formattedRemaining`、`usageFraction`、`formattedCredits` 等。
+   - `OverlayMetricTile.formattedValue` / `fraction` 改为调用共享函数。
+   - `WidgetRenderer.formattedValue` / `fraction` 改为调用共享函数。
+   - `OverlayMetricTile` 和 `WidgetRenderer` 保留各自的 `quotaFor` / `creditQuota` / `quotaFraction` 私有辅助（因为它们依赖各自的 `state` 和 `config`），但核心 switch-case 逻辑只在一处。
+   - 统一空值返回：`"-"`（当前 OverlayMetricTile 用 `"-"`，WidgetRenderer 用 `"—"`），统一为 `"-"`。
+   - 添加 Swift Testing 测试覆盖主要 metric 的格式化输出和 fraction 计算。
+
+4. **删除 `PlatformRowView.swift`**
+   - 确认零外部引用（已确认）。
+   - 删除 `token_hud/Settings/PlatformRowView.swift`。
+   - 运行 `xcodegen generate` 同步 `.xcodeproj`（如果 xcodegen 失败则手动从 pbxproj 移除）。
+
+5. **验证**
+   - 自动验证：
+     - `swift test --filter ProgressColorScheme`
+     - `swift test --filter WidgetValueComputer`
+     - `swift test`
+     - `git diff --check`
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动验证：
+     - 浮窗 grouped/sectioned 模式进度条颜色一致。
+     - Settings 预览区进度条颜色一致。
+     - 刘海收起态进度条颜色一致。
+     - BarWidget / RingWidget / StatusWidget 颜色与卡片内 tile 一致。
+     - 所有 metric 数值显示不变（formattedValue 输出等价）。
+
+### 验证
+
+- 新增 `ProgressColorScheme` 和 `WidgetValueComputer` 扩展的单元测试确保阈值和格式化不回退。
+- 全量 `swift test` 确保 core 逻辑不回退。
+- app build 确保删除死代码和重构后编译通过。
+
+### 风险
+
+- `formattedValue` 提取到 core 后，OverlayMetricTile 和 WidgetRenderer 的私有 `quotaFor` / `creditQuota` 仍保留在各自文件中；共享函数需要接收 `Service?` 参数而非直接访问私有 state。
+- BarWidget 的 fraction 语义是 remaining（bar width = 1 - fraction），颜色需要反转后调用共享函数；实现时要注意语义差异。
+- RingWidget 当前用系统 `.green/.yellow/.red`，改为自定义 RGB 后视觉会有轻微变化；这是预期的一致化。
+- 删除 `PlatformRowView.swift` 前已确认零引用，风险极低。
+
+### 本轮实现结果（2026-06-28）
+
+- 新增 `ProgressColorScheme`（`token_hud/Overlay/ProgressColorScheme.swift`）：
+  - 统一阈值 0.85 红 / 0.65 黄 / 其它绿。
+  - 统一 RGB：红 `(1.0,0.28,0.34)`、黄 `(1.0,0.78,0.22)`、绿 `(0.28,0.84,0.52)`。
+  - 提供 `color(for:)` 静态方法。
+- 替换 6 处内联进度颜色为 `ProgressColorScheme.color(for:)`：
+  - `OverlayModelCardStyle.swift` `progressColor`
+  - `NotchHostedSurfaceView.swift` `progressColor(for:)`
+  - `WidgetListEditor.swift` `progressColor(for:)`
+  - `BarWidget.swift` `barColor`（usage = 1 - fraction 反转后调用）
+  - `StatusWidget.swift` `color`（阈值从 0.8/0.5 统一到 0.85/0.65）
+  - `RingWidget.swift` `ringColor`（从系统色改为统一 RGB）
+- 新增 `WidgetMetricComputer`（`token_hud/Widgets/WidgetMetricComputer.swift`）：
+  - `formattedValue(metric:service:configService:quotaFor:creditQuota:)`：22 个 case 的格式化逻辑。
+  - `fraction(metric:service:quotaFor:creditQuota:quotaFraction:)`：22 个 case 的 usage fraction 计算。
+- `WidgetRenderer` 和 `OverlayMetricTile` 的 `formattedValue` / `fraction` 改为调用 `WidgetMetricComputer`，消除跨文件重复。
+- 删除 `PlatformRowView.swift`（1184 行死代码）。
+- `CodexAuthStatus` 枚举迁移到 `PlatformListView.swift`（唯一使用处）。
+
+### 验证结果
+
+- `swift test`：通过，176 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，`BUILD SUCCEEDED`。
+- `git diff --check`：通过。
+
+### 待手动验证
+
+- 浮窗 grouped/sectioned 模式进度条颜色一致。
+- Settings 预览区进度条颜色一致。
+- 刘海收起态进度条颜色一致。
+- BarWidget / RingWidget / StatusWidget 颜色与卡片内 tile 一致。
+- 所有 metric 数值显示不变（formattedValue 输出等价）。
+
+---
+
 ## 当前重点：MiMo 凭据输入拆分 — API Key 与 Token Plan Key（待实现）
 
 ### 问题

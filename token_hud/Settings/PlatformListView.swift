@@ -1148,6 +1148,12 @@ private enum CredentialStatusReader {
     }
 }
 
+enum CodexAuthStatus: Equatable {
+    case configured(email: String, plan: String)
+    case expired
+    case notConfigured
+}
+
 enum CodexAuthReader {
     static func status() -> CodexAuthStatus {
         let authPath = (NSHomeDirectory() as NSString).appendingPathComponent(".codex/auth.json")

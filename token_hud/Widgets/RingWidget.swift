@@ -36,11 +36,7 @@ struct RingWidget: View {
 
     private var ringColor: Color {
         // fraction = used/total; low fraction = lots remaining = green
-        switch fraction {
-        case 0..<0.5:   return .green
-        case 0.5..<0.8: return .yellow
-        default:         return .red
-        }
+        ProgressColorScheme.color(for: fraction)
     }
 }
 

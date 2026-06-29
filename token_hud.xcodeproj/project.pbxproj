@@ -21,6 +21,7 @@
 		3038CA493F0A77237F085220 /* NotchSurfaceStrategy.swift in Sources */ = {isa = PBXBuildFile; fileRef = D551A54C0DB7C143C6EC2051 /* NotchSurfaceStrategy.swift */; };
 		30E795CACD86590CD9E9D8B9 /* AppWatcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2C48CCA51D172C3DCF98FB3B /* AppWatcher.swift */; };
 		35D7C64A7839E023FE5CD1CD /* PanelResizeCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 22F16105F2EE3761E5514C69 /* PanelResizeCalculator.swift */; };
+		36B6B87615DAEFF45F5E919C /* ProgressColorScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B774FC9CA8676F10389702C /* ProgressColorScheme.swift */; };
 		39FC590951E1660217CEE82E /* NotchHostPanelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1CBC92BDA19F74479D1BCC5 /* NotchHostPanelManager.swift */; };
 		3A37C347F92EE850901370D0 /* NotchSurfaceWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF2BBCA6B02D5038050AC31 /* NotchSurfaceWindow.swift */; };
 		40A6924E9860250BF8373C7D /* TextWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64092BD47770FC0CCEB8EFB /* TextWidget.swift */; };
@@ -30,6 +31,7 @@
 		5000ECFD9D7A35013383AEE0 /* StatusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB6B53D2E04F6EFECAF0333 /* StatusWidget.swift */; };
 		546C7A81F6E6632956EE9226 /* OverlayModelCardStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D18A1F0C58EFF9F3856ADAA0 /* OverlayModelCardStyle.swift */; };
 		57BE3D6F0FEBEC5312BC7107 /* AppFilterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6747C85B6651829B41BD60A2 /* AppFilterStore.swift */; };
+		5C10EDC42E553DCEFEAB8376 /* WidgetMetricComputer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDFF44E5A2BA5A4CF68A891 /* WidgetMetricComputer.swift */; };
 		5C812796CB6407A115126290 /* SkyLightNotchSpace.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F89856CB689CB22035420D /* SkyLightNotchSpace.swift */; };
 		5EC4C18A0B0DBEBDEB8F072A /* SessionKeyExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */; };
 		5FFB74ADB3F9391E75342BD5 /* CodexFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = FCF8747F22AA729E109D21D1 /* CodexFetcher.swift */; };
@@ -52,7 +54,6 @@
 		AFC5FDFC9F64F6727598AD12 /* NotchHostedSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F290F04F6230F65EDF637A5A /* NotchHostedSurfaceView.swift */; };
 		CC1E55CA118A407A193EE65A /* BarWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66EE1EED049C463DEC42FEF8 /* BarWidget.swift */; };
 		CEAC64191168479B4E6BFC5C /* CodexJWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F0CA083103E2DD60D1D80EC /* CodexJWT.swift */; };
-		D5FD6AC3401FFC795F2EF6FE /* PlatformRowView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2E313F2A535B42D3D166FBE5 /* PlatformRowView.swift */; };
 		DCC5DE4DC102C00369CC7575 /* NotchSurfacePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D0283F40C45F31116BEFF7 /* NotchSurfacePolicy.swift */; };
 		DD26E1DB0A41D26BD3A26788 /* ModelBreakdownWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB8D39AB267CA78EFCC4FC4 /* ModelBreakdownWidget.swift */; };
 		F2E71681CDA08A979ACF1C4B /* NotchGeometryCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 240CEC7D3AC16015AF25170B /* NotchGeometryCalculator.swift */; };
@@ -73,7 +74,6 @@
 		240CEC7D3AC16015AF25170B /* NotchGeometryCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchGeometryCalculator.swift; sourceTree = "<group>"; };
 		28D0283F40C45F31116BEFF7 /* NotchSurfacePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchSurfacePolicy.swift; sourceTree = "<group>"; };
 		2C48CCA51D172C3DCF98FB3B /* AppWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppWatcher.swift; sourceTree = "<group>"; };
-		2E313F2A535B42D3D166FBE5 /* PlatformRowView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformRowView.swift; sourceTree = "<group>"; };
 		3ADB7CF593AB4ED9BB51E781 /* NotchCollapsedSourceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchCollapsedSourceStore.swift; sourceTree = "<group>"; };
 		3C206289F4EAAB00762518B7 /* MultiWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWidget.swift; sourceTree = "<group>"; };
 		3CB6B53D2E04F6EFECAF0333 /* StatusWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusWidget.swift; sourceTree = "<group>"; };
@@ -96,6 +96,7 @@
 		984F43F8D4E91F9EBD3E415A /* WidgetValueComputer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetValueComputer.swift; sourceTree = "<group>"; };
 		992E1C386A87EE8633B24043 /* AppFilterSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFilterSettingsView.swift; sourceTree = "<group>"; };
 		9A9DADE13CB5357B82D092F1 /* StateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateModel.swift; sourceTree = "<group>"; };
+		9B774FC9CA8676F10389702C /* ProgressColorScheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressColorScheme.swift; sourceTree = "<group>"; };
 		9C5DAEF11D3CBF6A3CC941F4 /* CompactOverlayContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactOverlayContent.swift; sourceTree = "<group>"; };
 		A170DEB6D27AF369BCEA927C /* FloatingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelView.swift; sourceTree = "<group>"; };
 		A6B354BB4B28539F177EE68A /* token_hudApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = token_hudApp.swift; sourceTree = "<group>"; };
@@ -113,6 +114,7 @@
 		D18A1F0C58EFF9F3856ADAA0 /* OverlayModelCardStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OverlayModelCardStyle.swift; sourceTree = "<group>"; };
 		D1CBC92BDA19F74479D1BCC5 /* NotchHostPanelManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchHostPanelManager.swift; sourceTree = "<group>"; };
 		D551A54C0DB7C143C6EC2051 /* NotchSurfaceStrategy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchSurfaceStrategy.swift; sourceTree = "<group>"; };
+		DBDFF44E5A2BA5A4CF68A891 /* WidgetMetricComputer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetMetricComputer.swift; sourceTree = "<group>"; };
 		E3DBFD0AD67BBDA232EFF90C /* GroupedOverlayView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GroupedOverlayView.swift; sourceTree = "<group>"; };
 		E6F89856CB689CB22035420D /* SkyLightNotchSpace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkyLightNotchSpace.swift; sourceTree = "<group>"; };
 		E83282326C0958A29BE530D6 /* GlobalHotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyManager.swift; sourceTree = "<group>"; };
@@ -177,6 +179,7 @@
 				CBF2BBCA6B02D5038050AC31 /* NotchSurfaceWindow.swift */,
 				D18A1F0C58EFF9F3856ADAA0 /* OverlayModelCardStyle.swift */,
 				18C08E05A79F9F9E1A1A1A71 /* PanelAdaptiveScale.swift */,
+				9B774FC9CA8676F10389702C /* ProgressColorScheme.swift */,
 				172123F11F08D6517E238529 /* SectionedOverlayView.swift */,
 				E6F89856CB689CB22035420D /* SkyLightNotchSpace.swift */,
 			);
@@ -190,7 +193,6 @@
 				1661E68AEBA3BF8DEEE8CDED /* MiMoConsoleConnectionSheet.swift */,
 				3ADB7CF593AB4ED9BB51E781 /* NotchCollapsedSourceStore.swift */,
 				C0FDBB570597901AA9C7CA64 /* PlatformListView.swift */,
-				2E313F2A535B42D3D166FBE5 /* PlatformRowView.swift */,
 				8E74DD2F7701BA7EF38E4535 /* ServiceConfig.swift */,
 				7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */,
 				66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */,
@@ -236,6 +238,7 @@
 				3CB6B53D2E04F6EFECAF0333 /* StatusWidget.swift */,
 				C64092BD47770FC0CCEB8EFB /* TextWidget.swift */,
 				ECD0698516FDF9871FFF5C6F /* WidgetConfig.swift */,
+				DBDFF44E5A2BA5A4CF68A891 /* WidgetMetricComputer.swift */,
 				C8A4772EC1DF06224545FA80 /* WidgetRenderer.swift */,
 			);
 			path = Widgets;
@@ -372,7 +375,7 @@
 				74EC8E8EA40AAB4A1B42307C /* PanelAdaptiveScale.swift in Sources */,
 				35D7C64A7839E023FE5CD1CD /* PanelResizeCalculator.swift in Sources */,
 				052FE4EDED4CEEC741F21A63 /* PlatformListView.swift in Sources */,
-				D5FD6AC3401FFC795F2EF6FE /* PlatformRowView.swift in Sources */,
+				36B6B87615DAEFF45F5E919C /* ProgressColorScheme.swift in Sources */,
 				2F3FC258A169010C69071DF0 /* RingWidget.swift in Sources */,
 				F38A0D517C86D00A382CB387 /* SectionedOverlayView.swift in Sources */,
 				7CC1B02E7A74E8059111F008 /* ServiceConfig.swift in Sources */,
@@ -386,6 +389,7 @@
 				1E77F3C6F81AD0564F14824C /* WidgetConfig.swift in Sources */,
 				4DF114D392695B6FABFB7C8A /* WidgetConfiguration.swift in Sources */,
 				81ED33E7C8C83E4E7B86F2C3 /* WidgetListEditor.swift in Sources */,
+				5C10EDC42E553DCEFEAB8376 /* WidgetMetricComputer.swift in Sources */,
 				1A4DF4EA8A197C0122B6CD88 /* WidgetRenderer.swift in Sources */,
 				00FB77F857B34F21612C0819 /* WidgetStore.swift in Sources */,
 				2A9E20D63E0CC0F34118AF32 /* WidgetValueComputer.swift in Sources */,
