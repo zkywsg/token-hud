@@ -4,13 +4,19 @@ import Testing
 @Suite("ProviderCapability")
 struct ProviderCapabilityTests {
     @Test func openAIAnthropicAndGeminiDoNotPromiseUsageForPlainAPIKeys() {
-        for id in ["openai", "anthropic", "gemini"] {
+        for id in ["anthropic", "gemini"] {
             let capability = ProviderCapability.catalog[id]
 
             #expect(capability?.credentialKind == .apiKey)
             #expect(capability?.usageCapability == .apiKeyValidationOnly)
             #expect(capability?.resetActions == [.credential, .serviceData])
         }
+
+        // OpenAI also supports optional admin key for usage/costs
+        let openai = ProviderCapability.catalog["openai"]
+        #expect(openai?.credentialKind == .apiKey)
+        #expect(openai?.usageCapability == .apiKeyValidationOnly)
+        #expect(openai?.resetActions == [.credential, .adminAPIKey, .serviceData])
     }
 
     @Test func directUsageProvidersExposeConcreteCapabilities() throws {

@@ -82,6 +82,43 @@ extension WidgetMetric {
         case .planName:          return "套餐名称"
         }
     }
+
+    public var icon: String {
+        switch self {
+        case .remainingTime:     return "clock"
+        case .resetCountdown:    return "arrow.clockwise"
+        case .tokensRemaining:   return "text.bubble"
+        case .balance:           return "dollarsign.circle"
+        case .sessionTokens:     return "arrow.up.circle"
+        case .usagePercent:      return "chart.bar"
+        case .inputTokens:       return "arrow.down.circle"
+        case .outputTokens:      return "arrow.up.circle"
+        case .dailyTokens:       return "calendar"
+        case .monthlyTokens:     return "calendar.circle"
+        case .costSpent:         return "dollarsign.circle.fill"
+        case .dailyRequests:     return "number.circle"
+        case .monthlyRequests:   return "number.circle.fill"
+        case .sessionDuration:   return "timer"
+        case .tokensPerMinute:   return "bolt.fill"
+        case .inputOutputRatio:  return "arrow.left.arrow.right"
+        case .costPerRequest:    return "dollarsign.arrow.circlepath"
+        case .rateLimitStatus:   return "exclamationmark.triangle"
+        case .creditsRemaining:  return "creditcard"
+        case .creditsUsed:       return "chart.pie"
+        case .sessionCredits:    return "sum"
+        case .subscriptionStatus:return "checkmark.seal"
+        case .planName:          return "tag"
+        }
+    }
+
+    /// Common metric title used by overlay tiles, widget renderer, and settings.
+    /// Handles service-specific overrides (MiMo), but NOT Codex remainingTime
+    /// which differs by display context.
+    public func baseTitle(for serviceID: String) -> String {
+        if serviceID == "mimo", self == .resetCountdown { return "Token Plan 到期时间" }
+        if serviceID == "mimo", self == .remainingTime { return "Token Plan 到期时间" }
+        return displayName
+    }
 }
 
 extension WidgetStyle {

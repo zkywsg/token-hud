@@ -271,7 +271,7 @@ public struct ProviderCapability: Sendable, Identifiable {
             displayName: "OpenAI",
             credentialKind: .apiKey,
             usageCapability: .apiKeyValidationOnly,
-            resetActions: [.credential, .serviceData]
+            resetActions: [.credential, .adminAPIKey, .serviceData]
         ),
         ProviderCapability(
             id: "codex",
@@ -314,6 +314,27 @@ public struct ProviderCapability: Sendable, Identifiable {
             credentialKind: .apiKeyAndConsoleCookie,
             usageCapability: .consoleCookieTokenPlan,
             resetActions: [.apiKey, .consoleCookie, .serviceData]
+        ),
+        ProviderCapability(
+            id: "moonshot",
+            displayName: "Moonshot / Kimi",
+            credentialKind: .apiKey,
+            usageCapability: .balanceEndpoint,
+            resetActions: [.credential, .serviceData]
+        ),
+        ProviderCapability(
+            id: "openrouter",
+            displayName: "OpenRouter",
+            credentialKind: .apiKey,
+            usageCapability: .balanceEndpoint,
+            resetActions: [.credential, .serviceData]
+        ),
+        ProviderCapability(
+            id: "qwen",
+            displayName: "Qwen / DashScope",
+            credentialKind: .apiKey,
+            usageCapability: .balanceEndpoint,
+            resetActions: [.credential, .serviceData]
         ),
     ]
 
@@ -416,19 +437,22 @@ public struct ProviderCredentialSnapshot: Sendable, Equatable {
     public let mimoConsoleCookie: String?
     public let codexAdminKey: String?
     public let mimoTokenPlanKey: String?
+    public let openaiAdminKey: String?
 
     public init(
         claudeSessionKey: String?,
         apiKeys: [String: String],
         mimoConsoleCookie: String?,
         codexAdminKey: String? = nil,
-        mimoTokenPlanKey: String? = nil
+        mimoTokenPlanKey: String? = nil,
+        openaiAdminKey: String? = nil
     ) {
         self.claudeSessionKey = claudeSessionKey
         self.apiKeys = apiKeys
         self.mimoConsoleCookie = mimoConsoleCookie
         self.codexAdminKey = codexAdminKey
         self.mimoTokenPlanKey = mimoTokenPlanKey
+        self.openaiAdminKey = openaiAdminKey
     }
 
     public static let empty = ProviderCredentialSnapshot(
@@ -480,10 +504,19 @@ public struct ProviderCredentialSnapshot: Sendable, Equatable {
         mimoConsoleCookie != nil || mimoTokenPlanKey != nil
     }
 
+    public var maskedOpenAIAdminKey: String? {
+        openaiAdminKey.map(Self.masked)
+    }
+
+    public var hasOpenAIAdminKey: Bool {
+        openaiAdminKey != nil
+    }
+
     public func status(for provider: ProviderCapability) -> ProviderCredentialSnapshotStatus {
         switch provider.credentialKind {
         case .sessionKey:
-            return claudeSessionKey == nil ? .notConfigured : .configured
+            // Claude: always configured (JSONL scanning works without credentials)
+            return .configured
         case .apiKey:
             return apiKeys[provider.id] == nil ? .notConfigured : .configured
         case .apiKeyAndConsoleCookie:

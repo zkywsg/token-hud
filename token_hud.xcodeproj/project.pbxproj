@@ -24,13 +24,19 @@
 		36B6B87615DAEFF45F5E919C /* ProgressColorScheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9B774FC9CA8676F10389702C /* ProgressColorScheme.swift */; };
 		39FC590951E1660217CEE82E /* NotchHostPanelManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = D1CBC92BDA19F74479D1BCC5 /* NotchHostPanelManager.swift */; };
 		3A37C347F92EE850901370D0 /* NotchSurfaceWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = CBF2BBCA6B02D5038050AC31 /* NotchSurfaceWindow.swift */; };
+		3AAAB0120F12623528C010FB /* HUDTextStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = 906963958DEBAEEF01F75D7B /* HUDTextStyle.swift */; };
 		40A6924E9860250BF8373C7D /* TextWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = C64092BD47770FC0CCEB8EFB /* TextWidget.swift */; };
 		41243C131E417A3F9B7BB84D /* AggregateWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 868DD929F1D2119F6B8D9A12 /* AggregateWidget.swift */; };
+		43314BFF15D75AA9D8454EBB /* ClaudeJSONLScanner.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4FEC4840DF1A4AEE7FBAB75A /* ClaudeJSONLScanner.swift */; };
+		43E8A2B54D7F4B86A1E4C11D /* DailyUsageAggregator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 43E8A2B44D7F4B86A1E4C11D /* DailyUsageAggregator.swift */; };
 		4C5C0A9B0D77B7C82E216DE4 /* AppFilterSettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 992E1C386A87EE8633B24043 /* AppFilterSettingsView.swift */; };
 		4DF114D392695B6FABFB7C8A /* WidgetConfiguration.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5BF12C8A92C447614B489F22 /* WidgetConfiguration.swift */; };
 		5000ECFD9D7A35013383AEE0 /* StatusWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3CB6B53D2E04F6EFECAF0333 /* StatusWidget.swift */; };
 		546C7A81F6E6632956EE9226 /* OverlayModelCardStyle.swift in Sources */ = {isa = PBXBuildFile; fileRef = D18A1F0C58EFF9F3856ADAA0 /* OverlayModelCardStyle.swift */; };
 		57BE3D6F0FEBEC5312BC7107 /* AppFilterStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6747C85B6651829B41BD60A2 /* AppFilterStore.swift */; };
+		5817D34A707F33C1A3796FF3 /* Logger+tokenHud.swift in Sources */ = {isa = PBXBuildFile; fileRef = 90FAA0A742600C7EB56CE059 /* Logger+tokenHud.swift */; };
+		5AA72840C0AE6C74D4EBC93F /* CustomWidgetSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5B5E0EA0DD0AE296DAB263B3 /* CustomWidgetSheet.swift */; };
+		5B5B8D56617A7B957EA9E43F /* APIPlatformFetcher.swift in Sources */ = {isa = PBXBuildFile; fileRef = F243A30D2C58CE7C1A22D650 /* APIPlatformFetcher.swift */; };
 		5C10EDC42E553DCEFEAB8376 /* WidgetMetricComputer.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDFF44E5A2BA5A4CF68A891 /* WidgetMetricComputer.swift */; };
 		5C812796CB6407A115126290 /* SkyLightNotchSpace.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F89856CB689CB22035420D /* SkyLightNotchSpace.swift */; };
 		5EC4C18A0B0DBEBDEB8F072A /* SessionKeyExtractor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */; };
@@ -48,14 +54,20 @@
 		94DD2048172D83044FB1C880 /* token_hudApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B354BB4B28539F177EE68A /* token_hudApp.swift */; };
 		96D7EF137D976D0F179E73D0 /* MultiWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C206289F4EAAB00762518B7 /* MultiWidget.swift */; };
 		A01E9B98696369E3A83021B3 /* MiMoConsoleConnectionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1661E68AEBA3BF8DEEE8CDED /* MiMoConsoleConnectionSheet.swift */; };
+		A7CFEE90BD904FB91377EB1C /* PlatformResetPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3F3559F2A4FF612D15CB93EA /* PlatformResetPanel.swift */; };
 		A97C40BDDCBA9F970EC4DD4E /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFB3E874F27CEB54B2DF5487 /* AppDelegate.swift */; };
+		A98532674EE7230DC5DA5A8A /* DailySnapshotStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 255C0420CD8240B42A20CD67 /* DailySnapshotStore.swift */; };
 		AB0BD0E113386637BD98BFB4 /* FloatingPanelContentLayoutPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D1057408813EF87CC144AD0 /* FloatingPanelContentLayoutPolicy.swift */; };
 		AF11C5D10A39AD7C0177817F /* NotchHostRootView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 89530E550E7B97AB84CE7651 /* NotchHostRootView.swift */; };
 		AFC5FDFC9F64F6727598AD12 /* NotchHostedSurfaceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = F290F04F6230F65EDF637A5A /* NotchHostedSurfaceView.swift */; };
+		B64931A96277536A5A28177D /* ProviderStatusMonitor.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6B088C247A13FC18072A8486 /* ProviderStatusMonitor.swift */; };
+		BA8D87E1C69F4A14A9C61E02 /* ProviderStatusPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = BA8D87E0C69F4A14A9C61E02 /* ProviderStatusPolicy.swift */; };
+		C1A584ADD390707D75B06B1F /* WidgetPreviewPanel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 56C75F1A11FA8BBC5B2BFDDC /* WidgetPreviewPanel.swift */; };
 		CC1E55CA118A407A193EE65A /* BarWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66EE1EED049C463DEC42FEF8 /* BarWidget.swift */; };
 		CEAC64191168479B4E6BFC5C /* CodexJWT.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5F0CA083103E2DD60D1D80EC /* CodexJWT.swift */; };
 		DCC5DE4DC102C00369CC7575 /* NotchSurfacePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D0283F40C45F31116BEFF7 /* NotchSurfacePolicy.swift */; };
 		DD26E1DB0A41D26BD3A26788 /* ModelBreakdownWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB8D39AB267CA78EFCC4FC4 /* ModelBreakdownWidget.swift */; };
+		F24C23B5788C1408C2A44C0F /* PlatformUIComponents.swift in Sources */ = {isa = PBXBuildFile; fileRef = A670E4D2EDA3041018CEE644 /* PlatformUIComponents.swift */; };
 		F2E71681CDA08A979ACF1C4B /* NotchGeometryCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 240CEC7D3AC16015AF25170B /* NotchGeometryCalculator.swift */; };
 		F38A0D517C86D00A382CB387 /* SectionedOverlayView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 172123F11F08D6517E238529 /* SectionedOverlayView.swift */; };
 		F5996FFAA9A255EA220B8C96 /* settings-layout-options-preview.html in Resources */ = {isa = PBXBuildFile; fileRef = 1473074D0006E7007E5225E8 /* settings-layout-options-preview.html */; };
@@ -72,14 +84,20 @@
 		1DE640C0DC152941C36FEAA5 /* CountdownWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CountdownWidget.swift; sourceTree = "<group>"; };
 		22F16105F2EE3761E5514C69 /* PanelResizeCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelResizeCalculator.swift; sourceTree = "<group>"; };
 		240CEC7D3AC16015AF25170B /* NotchGeometryCalculator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchGeometryCalculator.swift; sourceTree = "<group>"; };
+		255C0420CD8240B42A20CD67 /* DailySnapshotStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailySnapshotStore.swift; sourceTree = "<group>"; };
 		28D0283F40C45F31116BEFF7 /* NotchSurfacePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchSurfacePolicy.swift; sourceTree = "<group>"; };
 		2C48CCA51D172C3DCF98FB3B /* AppWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppWatcher.swift; sourceTree = "<group>"; };
 		3ADB7CF593AB4ED9BB51E781 /* NotchCollapsedSourceStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchCollapsedSourceStore.swift; sourceTree = "<group>"; };
 		3C206289F4EAAB00762518B7 /* MultiWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MultiWidget.swift; sourceTree = "<group>"; };
 		3CB6B53D2E04F6EFECAF0333 /* StatusWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StatusWidget.swift; sourceTree = "<group>"; };
+		3F3559F2A4FF612D15CB93EA /* PlatformResetPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformResetPanel.swift; sourceTree = "<group>"; };
+		43E8A2B44D7F4B86A1E4C11D /* DailyUsageAggregator.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DailyUsageAggregator.swift; sourceTree = "<group>"; };
 		44291AC0037CB79BA78578A6 /* NotchHostState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchHostState.swift; sourceTree = "<group>"; };
+		4FEC4840DF1A4AEE7FBAB75A /* ClaudeJSONLScanner.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ClaudeJSONLScanner.swift; sourceTree = "<group>"; };
+		56C75F1A11FA8BBC5B2BFDDC /* WidgetPreviewPanel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetPreviewPanel.swift; sourceTree = "<group>"; };
 		584A6B9F191A6EC0B798FBF7 /* NotchExpandedLayoutPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchExpandedLayoutPolicy.swift; sourceTree = "<group>"; };
 		590F59D9346587A2265B90CB /* NotchRestorePolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchRestorePolicy.swift; sourceTree = "<group>"; };
+		5B5E0EA0DD0AE296DAB263B3 /* CustomWidgetSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CustomWidgetSheet.swift; sourceTree = "<group>"; };
 		5BF12C8A92C447614B489F22 /* WidgetConfiguration.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetConfiguration.swift; sourceTree = "<group>"; };
 		5D0791EBB1B5070024A40B1A /* WidgetStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetStore.swift; sourceTree = "<group>"; };
 		5F0CA083103E2DD60D1D80EC /* CodexJWT.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexJWT.swift; sourceTree = "<group>"; };
@@ -87,23 +105,28 @@
 		66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsWindow.swift; sourceTree = "<group>"; };
 		66EE1EED049C463DEC42FEF8 /* BarWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = BarWidget.swift; sourceTree = "<group>"; };
 		6747C85B6651829B41BD60A2 /* AppFilterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFilterStore.swift; sourceTree = "<group>"; };
+		6B088C247A13FC18072A8486 /* ProviderStatusMonitor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStatusMonitor.swift; sourceTree = "<group>"; };
 		785C48870F7D50C608E045F5 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionKeyExtractor.swift; sourceTree = "<group>"; };
 		7D1057408813EF87CC144AD0 /* FloatingPanelContentLayoutPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelContentLayoutPolicy.swift; sourceTree = "<group>"; };
 		868DD929F1D2119F6B8D9A12 /* AggregateWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AggregateWidget.swift; sourceTree = "<group>"; };
 		89530E550E7B97AB84CE7651 /* NotchHostRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchHostRootView.swift; sourceTree = "<group>"; };
 		8E74DD2F7701BA7EF38E4535 /* ServiceConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceConfig.swift; sourceTree = "<group>"; };
+		906963958DEBAEEF01F75D7B /* HUDTextStyle.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HUDTextStyle.swift; sourceTree = "<group>"; };
+		90FAA0A742600C7EB56CE059 /* Logger+tokenHud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "Logger+tokenHud.swift"; sourceTree = "<group>"; };
 		984F43F8D4E91F9EBD3E415A /* WidgetValueComputer.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetValueComputer.swift; sourceTree = "<group>"; };
 		992E1C386A87EE8633B24043 /* AppFilterSettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFilterSettingsView.swift; sourceTree = "<group>"; };
 		9A9DADE13CB5357B82D092F1 /* StateModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateModel.swift; sourceTree = "<group>"; };
 		9B774FC9CA8676F10389702C /* ProgressColorScheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProgressColorScheme.swift; sourceTree = "<group>"; };
 		9C5DAEF11D3CBF6A3CC941F4 /* CompactOverlayContent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompactOverlayContent.swift; sourceTree = "<group>"; };
 		A170DEB6D27AF369BCEA927C /* FloatingPanelView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FloatingPanelView.swift; sourceTree = "<group>"; };
+		A670E4D2EDA3041018CEE644 /* PlatformUIComponents.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformUIComponents.swift; sourceTree = "<group>"; };
 		A6B354BB4B28539F177EE68A /* token_hudApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = token_hudApp.swift; sourceTree = "<group>"; };
 		A9FF1CC4D818E916F535E406 /* StateWatcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = StateWatcher.swift; sourceTree = "<group>"; };
 		ACB8D39AB267CA78EFCC4FC4 /* ModelBreakdownWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ModelBreakdownWidget.swift; sourceTree = "<group>"; };
 		AFB3E874F27CEB54B2DF5487 /* AppDelegate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppDelegate.swift; sourceTree = "<group>"; };
 		B0363728F904EEC55D3618B8 /* MenuBarBridgeProbe.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MenuBarBridgeProbe.swift; sourceTree = "<group>"; };
+		BA8D87E0C69F4A14A9C61E02 /* ProviderStatusPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ProviderStatusPolicy.swift; sourceTree = "<group>"; };
 		BE6F423D97166F8C00033C38 /* token_hud.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = token_hud.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		C0B2D7C7E9909F98C9E209AA /* token_hud-Bridging-Header.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = "token_hud-Bridging-Header.h"; sourceTree = "<group>"; };
 		C0FDBB570597901AA9C7CA64 /* PlatformListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlatformListView.swift; sourceTree = "<group>"; };
@@ -119,6 +142,7 @@
 		E6F89856CB689CB22035420D /* SkyLightNotchSpace.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SkyLightNotchSpace.swift; sourceTree = "<group>"; };
 		E83282326C0958A29BE530D6 /* GlobalHotkeyManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GlobalHotkeyManager.swift; sourceTree = "<group>"; };
 		ECD0698516FDF9871FFF5C6F /* WidgetConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetConfig.swift; sourceTree = "<group>"; };
+		F243A30D2C58CE7C1A22D650 /* APIPlatformFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = APIPlatformFetcher.swift; sourceTree = "<group>"; };
 		F290F04F6230F65EDF637A5A /* NotchHostedSurfaceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchHostedSurfaceView.swift; sourceTree = "<group>"; };
 		FCF8747F22AA729E109D21D1 /* CodexFetcher.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CodexFetcher.swift; sourceTree = "<group>"; };
 		FEF8CB8AF9790BE508616B5B /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
@@ -154,9 +178,13 @@
 		2E0E42AD3EAC848DF7B3E9BE /* State */ = {
 			isa = PBXGroup;
 			children = (
+				F243A30D2C58CE7C1A22D650 /* APIPlatformFetcher.swift */,
 				6747C85B6651829B41BD60A2 /* AppFilterStore.swift */,
 				2C48CCA51D172C3DCF98FB3B /* AppWatcher.swift */,
+				4FEC4840DF1A4AEE7FBAB75A /* ClaudeJSONLScanner.swift */,
 				FCF8747F22AA729E109D21D1 /* CodexFetcher.swift */,
+				255C0420CD8240B42A20CD67 /* DailySnapshotStore.swift */,
+				6B088C247A13FC18072A8486 /* ProviderStatusMonitor.swift */,
 				A9FF1CC4D818E916F535E406 /* StateWatcher.swift */,
 				5D0791EBB1B5070024A40B1A /* WidgetStore.swift */,
 			);
@@ -170,6 +198,7 @@
 				A170DEB6D27AF369BCEA927C /* FloatingPanelView.swift */,
 				E83282326C0958A29BE530D6 /* GlobalHotkeyManager.swift */,
 				E3DBFD0AD67BBDA232EFF90C /* GroupedOverlayView.swift */,
+				906963958DEBAEEF01F75D7B /* HUDTextStyle.swift */,
 				B0363728F904EEC55D3618B8 /* MenuBarBridgeProbe.swift */,
 				F290F04F6230F65EDF637A5A /* NotchHostedSurfaceView.swift */,
 				D1CBC92BDA19F74479D1BCC5 /* NotchHostPanelManager.swift */,
@@ -190,13 +219,17 @@
 			isa = PBXGroup;
 			children = (
 				992E1C386A87EE8633B24043 /* AppFilterSettingsView.swift */,
+				5B5E0EA0DD0AE296DAB263B3 /* CustomWidgetSheet.swift */,
 				1661E68AEBA3BF8DEEE8CDED /* MiMoConsoleConnectionSheet.swift */,
 				3ADB7CF593AB4ED9BB51E781 /* NotchCollapsedSourceStore.swift */,
 				C0FDBB570597901AA9C7CA64 /* PlatformListView.swift */,
+				3F3559F2A4FF612D15CB93EA /* PlatformResetPanel.swift */,
+				A670E4D2EDA3041018CEE644 /* PlatformUIComponents.swift */,
 				8E74DD2F7701BA7EF38E4535 /* ServiceConfig.swift */,
 				7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */,
 				66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */,
 				15FA515D5AD06D073A0B6352 /* WidgetListEditor.swift */,
+				56C75F1A11FA8BBC5B2BFDDC /* WidgetPreviewPanel.swift */,
 			);
 			path = Settings;
 			sourceTree = "<group>";
@@ -246,16 +279,18 @@
 		};
 		CAEFD3FBC1006CF5589FA1FC /* token_hudCore */ = {
 			isa = PBXGroup;
-			children = (
-				5F0CA083103E2DD60D1D80EC /* CodexJWT.swift */,
-				7D1057408813EF87CC144AD0 /* FloatingPanelContentLayoutPolicy.swift */,
-				584A6B9F191A6EC0B798FBF7 /* NotchExpandedLayoutPolicy.swift */,
-				240CEC7D3AC16015AF25170B /* NotchGeometryCalculator.swift */,
-				590F59D9346587A2265B90CB /* NotchRestorePolicy.swift */,
-				28D0283F40C45F31116BEFF7 /* NotchSurfacePolicy.swift */,
-				22F16105F2EE3761E5514C69 /* PanelResizeCalculator.swift */,
-				9A9DADE13CB5357B82D092F1 /* StateModel.swift */,
-				5BF12C8A92C447614B489F22 /* WidgetConfiguration.swift */,
+				children = (
+					5F0CA083103E2DD60D1D80EC /* CodexJWT.swift */,
+					43E8A2B44D7F4B86A1E4C11D /* DailyUsageAggregator.swift */,
+					7D1057408813EF87CC144AD0 /* FloatingPanelContentLayoutPolicy.swift */,
+					584A6B9F191A6EC0B798FBF7 /* NotchExpandedLayoutPolicy.swift */,
+					240CEC7D3AC16015AF25170B /* NotchGeometryCalculator.swift */,
+					590F59D9346587A2265B90CB /* NotchRestorePolicy.swift */,
+					28D0283F40C45F31116BEFF7 /* NotchSurfacePolicy.swift */,
+					22F16105F2EE3761E5514C69 /* PanelResizeCalculator.swift */,
+					BA8D87E0C69F4A14A9C61E02 /* ProviderStatusPolicy.swift */,
+					9A9DADE13CB5357B82D092F1 /* StateModel.swift */,
+					5BF12C8A92C447614B489F22 /* WidgetConfiguration.swift */,
 				984F43F8D4E91F9EBD3E415A /* WidgetValueComputer.swift */,
 			);
 			name = token_hudCore;
@@ -266,6 +301,7 @@
 			isa = PBXGroup;
 			children = (
 				785C48870F7D50C608E045F5 /* KeychainHelper.swift */,
+				90FAA0A742600C7EB56CE059 /* Logger+tokenHud.swift */,
 			);
 			path = Support;
 			sourceTree = "<group>";
@@ -341,21 +377,28 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				5B5B8D56617A7B957EA9E43F /* APIPlatformFetcher.swift in Sources */,
 				41243C131E417A3F9B7BB84D /* AggregateWidget.swift in Sources */,
 				A97C40BDDCBA9F970EC4DD4E /* AppDelegate.swift in Sources */,
 				4C5C0A9B0D77B7C82E216DE4 /* AppFilterSettingsView.swift in Sources */,
 				57BE3D6F0FEBEC5312BC7107 /* AppFilterStore.swift in Sources */,
 				30E795CACD86590CD9E9D8B9 /* AppWatcher.swift in Sources */,
 				CC1E55CA118A407A193EE65A /* BarWidget.swift in Sources */,
+				43314BFF15D75AA9D8454EBB /* ClaudeJSONLScanner.swift in Sources */,
 				5FFB74ADB3F9391E75342BD5 /* CodexFetcher.swift in Sources */,
 				CEAC64191168479B4E6BFC5C /* CodexJWT.swift in Sources */,
 				09D51443D5DECD66E3038385 /* CompactOverlayContent.swift in Sources */,
 				66F1C3DCE7858C31CC777484 /* CountdownWidget.swift in Sources */,
-				AB0BD0E113386637BD98BFB4 /* FloatingPanelContentLayoutPolicy.swift in Sources */,
+					5AA72840C0AE6C74D4EBC93F /* CustomWidgetSheet.swift in Sources */,
+					A98532674EE7230DC5DA5A8A /* DailySnapshotStore.swift in Sources */,
+					43E8A2B54D7F4B86A1E4C11D /* DailyUsageAggregator.swift in Sources */,
+					AB0BD0E113386637BD98BFB4 /* FloatingPanelContentLayoutPolicy.swift in Sources */,
 				7B3EE8655A323D3FB3ACF746 /* FloatingPanelView.swift in Sources */,
 				890145F61B5D9DB8B8B6C1CA /* GlobalHotkeyManager.swift in Sources */,
 				820766B6CDE48C132FAB2AC6 /* GroupedOverlayView.swift in Sources */,
+				3AAAB0120F12623528C010FB /* HUDTextStyle.swift in Sources */,
 				7FC68D4F2A998421648D471A /* KeychainHelper.swift in Sources */,
+				5817D34A707F33C1A3796FF3 /* Logger+tokenHud.swift in Sources */,
 				FFCF9C4BD34061DBCC15DB02 /* MenuBarBridgeProbe.swift in Sources */,
 				A01E9B98696369E3A83021B3 /* MiMoConsoleConnectionSheet.swift in Sources */,
 				DD26E1DB0A41D26BD3A26788 /* ModelBreakdownWidget.swift in Sources */,
@@ -375,7 +418,11 @@
 				74EC8E8EA40AAB4A1B42307C /* PanelAdaptiveScale.swift in Sources */,
 				35D7C64A7839E023FE5CD1CD /* PanelResizeCalculator.swift in Sources */,
 				052FE4EDED4CEEC741F21A63 /* PlatformListView.swift in Sources */,
-				36B6B87615DAEFF45F5E919C /* ProgressColorScheme.swift in Sources */,
+				A7CFEE90BD904FB91377EB1C /* PlatformResetPanel.swift in Sources */,
+				F24C23B5788C1408C2A44C0F /* PlatformUIComponents.swift in Sources */,
+					36B6B87615DAEFF45F5E919C /* ProgressColorScheme.swift in Sources */,
+					BA8D87E1C69F4A14A9C61E02 /* ProviderStatusPolicy.swift in Sources */,
+					B64931A96277536A5A28177D /* ProviderStatusMonitor.swift in Sources */,
 				2F3FC258A169010C69071DF0 /* RingWidget.swift in Sources */,
 				F38A0D517C86D00A382CB387 /* SectionedOverlayView.swift in Sources */,
 				7CC1B02E7A74E8059111F008 /* ServiceConfig.swift in Sources */,
@@ -390,6 +437,7 @@
 				4DF114D392695B6FABFB7C8A /* WidgetConfiguration.swift in Sources */,
 				81ED33E7C8C83E4E7B86F2C3 /* WidgetListEditor.swift in Sources */,
 				5C10EDC42E553DCEFEAB8376 /* WidgetMetricComputer.swift in Sources */,
+				C1A584ADD390707D75B06B1F /* WidgetPreviewPanel.swift in Sources */,
 				1A4DF4EA8A197C0122B6CD88 /* WidgetRenderer.swift in Sources */,
 				00FB77F857B34F21612C0819 /* WidgetStore.swift in Sources */,
 				2A9E20D63E0CC0F34118AF32 /* WidgetValueComputer.swift in Sources */,

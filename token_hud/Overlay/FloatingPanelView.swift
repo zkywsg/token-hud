@@ -11,15 +11,16 @@ struct FloatingPanelView: View {
 
     var body: some View {
         GeometryReader { geometry in
-            let adaptiveScale = calculateAdaptiveScale(for: geometry.size)
+            let contentBehavior = calculateContentBehavior(for: geometry.size)
+            let adaptiveScale = contentBehavior.adaptiveScale
             ZStack(alignment: .bottomTrailing) {
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius)
                     .fill(Color.black)
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius)
                     .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
                     .shadow(color: .black.opacity(0.28), radius: 12, y: 6)
 
-                overlayContent
+                scrollableOverlayContent(allowsVerticalScrolling: contentBehavior.allowsVerticalScrolling)
                     .padding(12 * adaptiveScale)
                     .frame(
                         maxWidth: .infinity,
@@ -71,12 +72,40 @@ struct FloatingPanelView: View {
         }
     }
 
+    @ViewBuilder
+    private func scrollableOverlayContent(allowsVerticalScrolling: Bool) -> some View {
+        if allowsVerticalScrolling {
+            ScrollView(.vertical, showsIndicators: false) {
+                overlayContent
+                    .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .scrollClipDisabled(false)
+        } else {
+            overlayContent
+        }
+    }
+
     private func calculateAdaptiveScale(for size: CGSize) -> CGFloat {
-        FloatingPanelContentLayoutPolicy.adaptiveScale(
-            panelHeight: size.height,
-            overlayMode: overlayMode,
-            serviceCount: Set(store.widgets.map(\.service)).count,
-            widgetCount: store.widgets.count
+        calculateContentBehavior(for: size).adaptiveScale
+    }
+
+    private func calculateContentBehavior(for size: CGSize) -> FloatingPanelContentOverflowBehavior {
+        let serviceCount = Set(store.widgets.map(\.service)).count
+        if overlayMode == "grouped" {
+            return FloatingPanelContentLayoutPolicy.groupedOverflowBehavior(
+                panelHeight: size.height,
+                serviceCount: serviceCount,
+                widgetCount: store.widgets.count
+            )
+        }
+        return FloatingPanelContentOverflowBehavior(
+            adaptiveScale: FloatingPanelContentLayoutPolicy.adaptiveScale(
+                panelHeight: size.height,
+                overlayMode: overlayMode,
+                serviceCount: serviceCount,
+                widgetCount: store.widgets.count
+            ),
+            allowsVerticalScrolling: false
         )
     }
 

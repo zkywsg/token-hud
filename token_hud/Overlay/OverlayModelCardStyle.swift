@@ -178,7 +178,7 @@ private struct OverlayMetricTile: View {
                 Text(formattedValue)
                     .font(.system(size: 12.5 * scale, weight: .semibold, design: .rounded))
                     .monospacedDigit()
-                    .foregroundColor(.white.opacity(0.94))
+                    .foregroundColor(HUDTextStyle.primary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.78)
 
@@ -268,17 +268,14 @@ private struct OverlayMetricTile: View {
             guard let quota = quotaFor(type: .time) else { return config.metric.displayName }
             return WidgetValueComputer.codexRateLimitDisplay(quota).detail ?? config.metric.displayName
         }
-        if config.service == "mimo", config.metric == .resetCountdown {
-            return "Token Plan 到期时间"
-        }
-        if config.service == "mimo", config.metric == .remainingTime {
-            return "Token Plan 到期时间"
-        }
-        return config.metric.displayName
+        return config.metric.baseTitle(for: config.service)
     }
 
     private var tooltipText: String {
-        "\(service?.label ?? config.service) · \(metricTitle)"
+        WidgetMetricComputer.tooltipText(
+            metric: config.metric, service: service, configService: config.service,
+            metricTitle: metricTitle
+        )
     }
 
     private func quotaFor(type: QuotaType) -> Quota? {

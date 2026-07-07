@@ -58,7 +58,7 @@ struct SettingsWindow: View {
                 .buttonStyle(.plain)
                 .foregroundStyle(selectedSection == section ? .primary : .secondary)
                 .background(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius, style: .continuous)
                         .fill(selectedSection == section ? Color.white.opacity(0.085) : Color.clear)
                 )
             }
@@ -67,7 +67,7 @@ struct SettingsWindow: View {
         .padding(.top, chromeTopInset)
         .padding(.horizontal, 12)
         .padding(.bottom, 12)
-        .background(Color(red: 0.025, green: 0.026, blue: 0.028))
+        .background(CompactBlackTheme.elevated)
         .overlay(alignment: .trailing) {
             Rectangle()
                 .fill(Color.white.opacity(0.10))
@@ -143,6 +143,7 @@ struct GeneralSettingsView: View {
     var body: some View {
         Form {
             FloatingPanelSection()
+            DailyUsageSection()
             DataSourceSection(stateFilePath: $stateFilePath,
                               refreshInterval: $refreshInterval,
                               browseFile: browseFile)
@@ -425,5 +426,67 @@ private struct LaunchAtLoginToggle: View {
                     isEnabled = SMAppService.mainApp.status == .enabled
                 }
             }
+    }
+}
+
+// MARK: - Daily Usage Section
+
+private struct DailyUsageSection: View {
+    @State private var snapshot: DailySnapshotStore.DailySnapshot?
+
+    var body: some View {
+        Section {
+            if let snapshot, !snapshot.services.isEmpty {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(sortedServices(snapshot), id: \.0) { id, svc in
+                        dailyServiceRow(id: id, snapshot: svc)
+                    }
+                }
+            } else {
+                Text("暂无今日增量，刷新两次后会从日初基线计算。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            Label("今日用量", systemImage: "chart.bar")
+        }
+        .onAppear { snapshot = DailySnapshotStore.todaySnapshot() }
+    }
+
+    private func sortedServices(_ snapshot: DailySnapshotStore.DailySnapshot) -> [(String, DailySnapshotStore.ServiceSnapshot)] {
+        snapshot.services.sorted { a, b in
+            (a.value.tokens ?? 0) > (b.value.tokens ?? 0)
+        }
+    }
+
+    private func dailyServiceRow(id: String, snapshot: DailySnapshotStore.ServiceSnapshot) -> some View {
+        let label = ProviderCapability.catalog[id]?.displayName ?? id
+
+        return HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+            Spacer()
+            if let tokens = snapshot.tokens, tokens > 0 {
+                Text(formatCount(tokens))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                Text("tokens")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            if let cost = snapshot.cost, cost > 0 {
+                Text(String(format: "$%.2f", cost))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func formatCount(_ count: Double) -> String {
+        if count >= 1_000_000 { return String(format: "%.1fM", count / 1_000_000) }
+        if count >= 1_000 { return String(format: "%.0fK", count / 1_000) }
+        return String(format: "%.0f", count)
     }
 }

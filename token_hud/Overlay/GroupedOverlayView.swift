@@ -45,12 +45,7 @@ struct OverlayServiceRefreshButton: View {
     @State private var isRefreshing = false
 
     private var isSupported: Bool {
-        switch serviceID {
-        case "codex", "deepseek", "minimax", "mimo":
-            return true
-        default:
-            return false
-        }
+        ProviderCapability.catalog[serviceID]?.canRefresh == true
     }
 
     var body: some View {

@@ -2,6 +2,472 @@
 
 这个文件跟踪当前项目正在进行的实现工作。保持内容小而可执行；可长期保留的决策沉淀到 `docs/`。
 
+## 已完成：Review 后质量修复
+
+### 问题
+
+深度 review 发现当前改动虽然 `swift test` 和 app target build 都能通过，但仍有几类会影响真实体验和后续交接的风险：
+
+- `.claude/worktrees/...` 作为未跟踪文件出现在仓库中，容易被误提交。
+- “今日用量”当前保存的是当天最后一次累计快照，不是严格意义上的今日增量。
+- grouped 浮窗/刘海展开在服务和组件变多时仍可能靠缩放或裁切处理，导致底部内容不可见。
+- Provider 状态监控用 `HEAD` + `<500` 判断可用，容易把鉴权失败或不支持 HEAD 的端点误报为正常。
+- 浮窗刷新按钮没有覆盖新增的 Moonshot/OpenRouter/Qwen provider。
+- `PLAN.md` 里旧任务标题仍写“待实现”，但正文已有实现结果，状态不一致。
+
+### 本轮目标
+
+1. 清理仓库跟踪风险：忽略 `.claude/`，避免工作树内容误入提交。
+2. 修正每日聚合语义：把今日展示改为基于日内 baseline 的 delta；无法计算 delta 的余额类指标不冒充“今日用量”。
+3. 强化浮窗内容自适应：优先保证内容可见，必要时滚动，不再只依赖继续缩小字体。
+4. 修正 Provider 状态语义：状态页仍按 statuspage 解析；普通 API endpoint 不再把 `401/403/405` 当 operational。
+5. 扩展浮窗刷新按钮：覆盖所有 `canRefresh` 且能静默刷新的 provider。
+6. 补测试：为每日 delta、Provider 状态分类、浮窗布局策略或刷新覆盖补核心测试。
+
+### 实施步骤
+
+1. 先补 RED 测试：
+   - `DailySnapshotStore` 用两次累计快照验证今日 delta。
+   - `ProviderStatusMonitor` 抽出 HTTP 状态分类纯函数并覆盖 `2xx/401/403/405/5xx`。
+   - `FloatingPanelContentLayoutPolicy` 覆盖内容高度超过面板高度时应开启滚动/不继续压缩到不可读。
+2. 实现最小修复：
+   - `.gitignore` 增加 `.claude/`。
+   - `DailySnapshotStore` 存储日初 baseline + latest，并暴露今日 delta。
+   - `SettingsWindow` 的“今日用量”读取 delta，空 delta 显示无今日增量。
+   - `ProviderStatusMonitor` 改善 endpoint 状态分类，并在 app 退出时 stop。
+   - `OverlayServiceRefreshButton` 使用 `ProviderCapability.catalog[serviceID]?.canRefresh` 判断支持范围。
+   - `FloatingPanelView` grouped 内容在空间不足时启用滚动，并调整 adaptiveScale 下限策略。
+3. 更新 `PLAN.md` 旧任务状态，避免“待实现/已实现”冲突。
+
+### 验证
+
+- `swift test`
+- `swift test --filter DailySnapshotStore`
+- `swift test --filter ProviderStatusMonitor`
+- `swift test --filter FloatingPanelContentLayoutPolicy`
+- `git diff --check`
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+
+### 风险
+
+- 每日 delta 对余额、套餐剩余量这类“剩余值”不能简单相减，需要只对 tokens/cost 等累计用量做增量。
+- Provider endpoint 健康检测本身不等同于真实业务可用，修复目标是减少误报，不承诺替代官方 status page。
+- 浮窗滚动能解决“看不到”，但真机触控手感和视觉节奏仍需要你用真实刘海环境确认。
+
+### 本轮实现结果（2026-07-06）
+
+- `.gitignore` 忽略 `.claude/`，避免内部工作树误提交。
+- 新增 `DailyUsageAggregator`，每日用量改为日初 baseline 到 latest 的增量；余额类 money quota 不再冒充“今日用量”。
+- `DailySnapshotStore` 兼容旧 `services` 存储格式，并用 delta 结果驱动 Settings 的“今日用量”。
+- 新增 `ProviderStatusPolicy`，`401/403/405` 不再被 endpoint 健康检测误判为 operational。
+- grouped 浮窗在内容超出可读高度时保持可读 scale 并启用纵向滚动。
+- 浮窗刷新按钮改为根据 `ProviderCapability.canRefresh` 覆盖可刷新 provider，包括新增 Moonshot/OpenRouter/Qwen。
+- `ProviderStatusMonitor` 在 app 退出时显式 stop。
+
+### 验证结果
+
+- RED：新增 `DailyUsageAggregator`、`ProviderStatusPolicy`、`FloatingPanelContentLayoutPolicy` 测试后先失败。
+- `swift test`：通过，182 个测试。
+- `git diff --check`：通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，`BUILD SUCCEEDED`。
+
+---
+
+## 已完成：新增 Moonshot + OpenRouter + Qwen Provider + 每日聚合 + 状态监控
+
+### 问题
+
+当前支持 8 个 provider，但国内热门的 Moonshot/Kimi、Qwen/DashScope 和代理网关 OpenRouter 都未接入。此外缺少每日用量聚合和 provider 状态监控。
+
+### 本轮目标
+
+1. **Moonshot/Kimi** — 接入余额查询
+2. **OpenRouter** — 接入 credits 查询
+3. **Qwen/DashScope** — 接入余额查询
+4. **每日聚合** — 统计今日各平台总用量
+5. **状态监控** — 轮询 provider 状态页
+
+### 实施步骤
+
+#### 1. Moonshot/Kimi
+
+**API**：`GET /v1/users/me/balance`
+- Headers: `Authorization: Bearer <api_key>`
+- 响应: `{ "available_balance": 100.0, "voucher_balance": 0, "cash_balance": 100.0 }`
+- 两个 region：国际 `api.moonshot.ai` / 国内 `api.moonshot.cn`
+
+**实现**：
+- KeychainHelper: `saveMoonshotAPIKey` / `loadMoonshotAPIKey` / `hasMoonshotAPIKey` / `deleteMoonshotAPIKey`
+- StateModel: 新增 `ProviderCapability(id: "moonshot", credentialKind: .apiKey, usageCapability: .balanceEndpoint)`
+- APIPlatformFetcher: `fetchMoonshot()` → 调用余额 API → 返回 `Quota(type: .money, unit: "CNY")`
+- Settings: apiKeyHelpText 和 apiKeyPlaceholder 更新
+
+#### 2. OpenRouter
+
+**API**：`GET /api/v1/credits`
+- Headers: `Authorization: Bearer <api_key>`
+- 响应: `{ "data": { "total_credits": 100.0, "total_usage": 60.0 } }`
+- 余额 = total_credits - total_usage
+
+**实现**：
+- KeychainHelper: `saveOpenRouterAPIKey` / `loadOpenRouterAPIKey` / `hasOpenRouterAPIKey` / `deleteOpenRouterAPIKey`
+- StateModel: 新增 `ProviderCapability(id: "openrouter", credentialKind: .apiKey, usageCapability: .balanceEndpoint)`
+- APIPlatformFetcher: `fetchOpenRouter()` → 调用 credits API → 返回 `Quota(type: .money, unit: "USD")`
+
+#### 3. Qwen/DashScope
+
+**API**：`GET https://dashscope.aliyuncs.com/api/v1/user/balance`
+- Headers: `Authorization: Bearer <api_key>`
+- 响应: `{ "balance": { "balance": 100.0, "currency": "CNY" } }`
+
+**实现**：
+- KeychainHelper: `saveQwenAPIKey` / `loadQwenAPIKey` / `hasQwenAPIKey` / `deleteQwenAPIKey`
+- StateModel: 新增 `ProviderCapability(id: "qwen", credentialKind: .apiKey, usageCapability: .balanceEndpoint)`
+- APIPlatformFetcher: `fetchQwen()` → 调用余额 API → 返回 `Quota(type: .money, unit: "CNY")`
+
+#### 4. 每日聚合
+
+**数据源**：`~/.token-hud/state.json` 每次刷新时追加快照到 `~/.token-hud/daily-snapshots.json`
+
+**实现**：
+- 新增 `DailySnapshotStore`：每次 state.json 更新时，记录 `{ date, services: { id: { tokens, cost } } }`
+- Settings 通用页新增"今日用量"面板：显示各平台今日 token/费用汇总
+- 浮窗可选：新增 `DailyTokensWidget` 显示今日总 token
+
+#### 5. 状态监控
+
+**数据源**：轮询各 provider 的 status page
+
+**实现**：
+- 新增 `ProviderStatusMonitor`：
+  - OpenAI: `https://status.openai.com/api/v2/status.json`
+  - Anthropic: `https://status.anthropic.com/api/v2/status.json`
+  - DeepSeek: 轮询 `https://api.deepseek.com/user/balance`（可访问 = 正常）
+  - 其它: 基于最近一次 fetch 成功/失败判断
+- 状态枚举: `.operational` / `.degraded` / `.down` / `.unknown`
+- Settings 平台列表: 每个 provider row 显示小状态点（绿/黄/红/灰）
+- 浮窗: 可选状态指示
+
+### 验证
+
+- `swift test`
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+- 手动验证：
+  - Settings → Moonshot 显示余额
+  - Settings → OpenRouter 显示 credits
+  - Settings → Qwen 显示余额
+  - Settings 通用页显示今日用量
+  - Settings 平台列表显示状态点
+
+### 风险
+
+- Moonshot 国内/国际 region 需要区分，默认用国内 `api.moonshot.cn`
+- DashScope 余额 API 可能需要特定权限
+- 每日聚合需要持久化存储，增加文件 I/O
+- 状态监控轮询频率需要控制，避免过于频繁
+
+### 本轮实现结果（2026-06-28）
+
+**新增 Provider**：
+- **Moonshot/Kimi**：`GET /v1/users/me/balance` → CNY 余额。先试国际 `api.moonshot.ai`，失败回退国内 `api.moonshot.cn`。
+- **OpenRouter**：`GET /api/v1/credits` → USD credits 余额。
+- **Qwen/DashScope**：`GET https://dashscope.aliyuncs.com/api/v1/user/balance` → CNY 余额。
+- 三个 provider 都用通用 `hasAPIKey(for:)` / `saveAPIKey(_:for:)` 方法，无需额外 Keychain 代码。
+
+**每日聚合**：
+- 新增 `DailySnapshotStore`：每次 state.json 更新时记录 `{ date, services: { id: { tokens, cost } } }`。
+- 持久化到 `~/.token-hud/daily-snapshots.json`，保留 90 天。
+- Settings 通用页新增"今日用量"面板，显示各平台今日 token/费用汇总。
+
+**状态监控**：
+- 新增 `ProviderStatusMonitor`：每 5 分钟轮询 provider 状态。
+- 支持 statuspage.io 格式（OpenAI、Anthropic）和端点可达性检测（DeepSeek、Moonshot、OpenRouter、Qwen、MiniMax、MiMo）。
+- Settings 平台列表每个 provider row 显示状态点（绿=正常、黄=降级、红=不可用、灰=未知）。
+- 状态点优先级：未配置时显示凭据状态色，已配置时显示服务状态色。
+
+**新增图标**：
+- Moonshot: `moon.stars`
+- OpenRouter: `arrow.triangle.branch`
+- Qwen: `cloud`
+
+### 验证结果
+
+- `swift test`：通过，176 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，`BUILD SUCCEEDED`。
+
+### 待手动验证
+
+- Settings → Moonshot 显示余额
+- Settings → OpenRouter 显示 credits
+- Settings → Qwen 显示余额
+- Settings 通用页显示今日用量
+- Settings 平台列表显示状态点（绿/黄/红/灰）
+- 浮窗各平台卡片正确显示数据
+
+---
+
+## 当前重点：Claude Code 本地 JSONL 扫描接入用量展示（待实现）
+
+### 问题
+
+Claude 当前只用 Session Key 做验证，显示 `usageUnsupported`。实际上 Claude Code 会在 `~/.claude/projects/<project>/<session>.jsonl` 写入详细的 session 日志，包含：
+
+- 每次 assistant 回复的 input/output tokens
+- cache_creation_input_tokens / cache_read_input_tokens
+- model 名称
+- costUSD（仅 Claude 官方模型有值，第三方模型为 nil）
+- timestamp、sessionId、cwd
+
+ccusage（Rust）和 claude-usage（Python）等开源工具都是扫描这套 JSONL 来统计用量。
+
+### 本轮目标
+
+- 扫描 `~/.claude/projects/` 下所有 JSONL 文件，提取 `type == "assistant"` 且 `usage.input_tokens > 0` 的条目。
+- 汇总为 Claude 服务的 quota 数据：
+  - `sessionTokens`（当前 session 总 tokens）
+  - `inputTokens` / `outputTokens`
+  - `costSpent`（仅统计有 costUSD 的条目）
+- 不修改 Session Key 凭据逻辑，JSONL 扫描是纯本地、不需要凭据。
+- 不改其它平台。
+- 参考 ccusage 和 claude-usage 的做法：只看 `type == "assistant"` 且 `usage.input_tokens > 0`。
+
+### 数据源
+
+**主数据源**：`~/.claude/projects/<project>/<session>.jsonl`
+
+每个 JSONL 条目格式：
+```json
+{
+  "type": "assistant",
+  "timestamp": "2026-04-08T17:27:39Z",
+  "sessionId": "xxx",
+  "message": {
+    "model": "claude-sonnet-4-20250514",
+    "usage": {
+      "input_tokens": 44546,
+      "output_tokens": 341,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    }
+  },
+  "costUSD": 0.12,
+  "cwd": "/path/to/project"
+}
+```
+
+**过滤条件**（参考 ccusage）：
+- `type == "assistant"`
+- `message.usage.input_tokens > 0` 或 `message.usage.output_tokens > 0`
+- 跳过 `message.model == "<synthetic>"` 的条目
+
+**成本计算**：
+- 有 `costUSD` 的条目直接用
+- 没有 `costUSD` 的条目不计入费用（避免用不准确的 pricing 表估算）
+
+### 实施步骤
+
+1. **新增 `ClaudeJSONLScanner`（core 或 app 层）**
+   - 扫描 `~/.claude/projects/` 下所有 `*.jsonl` 文件。
+   - 逐行解析 JSON，过滤 `type == "assistant"` 且有 token usage 的条目。
+   - 汇总：totalInputTokens、totalOutputTokens、totalCacheCreationTokens、totalCacheReadTokens、totalCostUSD。
+   - 按 sessionId 分组，取最近 session 的 model 和 tokens。
+   - 只扫描最近 7 天的文件（按文件修改时间过滤），避免扫描历史全量数据拖慢启动。
+
+2. **接入 `APIPlatformFetcher` 或新增 `ClaudeFetcher`**
+   - 在 Claude fetch 路径中调用 scanner。
+   - 返回 `Service`：
+     - `label: "Claude"`
+     - `quotas`: 包含 sessionTokens（如可计算总量）、costSpent（仅 costUSD 汇总）
+     - `currentSession`: 最近 session 的 inputTokens/outputTokens/tokens
+   - 无 JSONL 数据时保持现有行为。
+
+3. **更新 Claude 服务展示**
+   - Claude 从 `usageUnsupported` 变为有实际数据。
+   - Widget 可展示：会话 Token、输入 Token、输出 Token、已花费。
+   - 浮窗 Claude 卡片不再显示"仅验证"。
+
+4. **性能考虑**
+   - 只扫描最近 7 天修改的 JSONL 文件。
+   - 逐行解析，遇到 `usage` 字段才做完整 JSON 解析（参考 ccusage 的 `memmem` 快速过滤）。
+   - 在后台线程执行，不阻塞 UI。
+
+5. **验证**
+   - `swift test`
+   - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动验证：
+     - Settings → Claude 从"仅验证"变为显示 token 统计。
+     - 浮窗 Claude 卡片展示会话 Token、输入/输出 Token。
+     - 有 costUSD 的条目正确累加费用。
+     - 启动性能不受影响（7 天内的 JSONL 通常 < 10MB）。
+
+### 风险
+
+- 第三方模型（deepseek、mimo 等）通过 Claude Code 使用时 `costUSD` 为 nil，费用不会被统计。这是预期行为，避免用不准确的 pricing 表。
+- JSONL 文件可能很大（单个 session 可达几十 MB），需要流式逐行解析，不能一次性读入内存。
+- `~/.claude/projects/` 目录结构可能随 Claude Code 版本变化，需要防御性解析。
+- ccusage 有 `isSidechain` 去重逻辑，本轮先不做去重，直接累加所有条目。
+
+### 参考来源
+
+- ccusage: https://github.com/ccusage/ccusage （Rust，JSONL 解析 + LiteLLM pricing）
+- claude-usage: https://github.com/phuryn/claude-usage （Python，JSONL → SQLite）
+- JSONL 路径：`~/.claude/projects/<project>/<session>.jsonl`
+- stats-cache.json：`~/.claude/stats-cache.json`（只有 messageCount，无 token 数据，本轮不用）
+
+### 本轮实现结果（2026-06-28）
+
+- 新增 `ClaudeJSONLScanner`（`token_hud/State/ClaudeJSONLScanner.swift`）：
+  - 扫描 `~/.claude/projects/` 下所有 `.jsonl` 文件。
+  - 只处理 `type == "assistant"` 且有 token usage 的条目。
+  - 跳过 `model == "<synthetic>"`。
+  - 只扫描最近 7 天修改的文件。
+  - 流式逐行解析，内存效率高。
+  - 快速预过滤：只对包含 `"usage"` 和 `"assistant"` 的行做完整 JSON 解析。
+- `APIPlatformFetcher.fetchAll()` 新增 Claude JSONL 扫描：
+  - 不需要凭据，直接扫描本地文件。
+  - 返回 `Service`：tokens quota + costSpent quota + SessionSnapshot（inputTokens/outputTokens）。
+  - 只统计有 `costUSD` 的条目费用（第三方模型 costUSD 为 nil，不计入费用）。
+- Claude 从 `usageUnsupported` 变为有实际 token 数据。
+
+### 验证结果
+
+- `swift test`：通过，176 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，`BUILD SUCCEEDED`。
+- 本地数据验证：11 个 JSONL 文件、4768 条记录、10 个 session、~830 万 tokens。
+
+### 待手动验证
+
+- Settings → Claude 从"仅验证"变为显示 token 统计。
+- 浮窗 Claude 卡片展示会话 Token、输入/输出 Token。
+- 启动性能不受影响。
+- 刷新后 Claude 数据更新。
+
+### 修复结果（2026-06-28）
+
+- `ProviderCredentialSnapshot.status(for:)` Claude 改为始终返回 `.configured`（JSONL 扫描不需要凭据）。
+- `PlatformListView.refresh()` `.sessionKey` case 改为调用 `fetchSingle(platform: "claude")`。
+- `fetchClaudeFromJSONL()` 新增 inputTokens 和 outputTokens 独立 quota。
+- Claude 详情页 UI 重构：
+  - 顶部显示"本地用量自动扫描"绿色状态。
+  - 说明文字改为"从 `~/.claude/projects/` 扫描 Claude Code session 日志"。
+  - Session Key 部分降级为"可选"，用于 claude.ai Web 配额。
+  - 分隔线区分自动扫描和手动配置两部分。
+- Claude 默认 widget 配置更新：
+  - 移除 `remainingTime`（Claude 没有时间配额）。
+  - 改为：`sessionTokens`(text) + `inputTokens`(aggregate) + `outputTokens`(aggregate)。
+- `fetchClaudeFromJSONL()` 支持 `ModelUsage` 模型拆分（`currentSession.modelBreakdown`）。
+- `ClaudeJSONLScanner` 新增按模型/项目分组统计、时间范围。
+- Settings 平台详情页新增专属数据面板：
+  - **Codex**：Rate Limit 窗口进度条（5h/7d）+ 本月总用量。
+  - **DeepSeek**：账户余额（CNY）。
+  - **MiMo**：套餐用量进度条（已用/总量/百分比/重置时间）。
+  - **OpenAI**：余额 + 近 30 天费用（需 Admin Key）。
+  - **Claude**：模型用量拆分（已完成）。
+
+---
+
+
+
+## 当前重点：OpenAI Admin Key 接入用量/费用/余额查询（待实现）
+
+### 问题
+
+OpenAI 当前只用普通 `sk-` key 做验证，返回 `usageUnsupported`。实际上 OpenAI 提供了组织级 API：
+
+- `GET /v1/organization/credits` — 余额（赠金 + 充值）
+- `GET /v1/organization/usage/completions` — 按天 token 用量
+- `GET /v1/organization/costs` — 按天费用
+
+这些需要 Organization Admin API key（不是普通 `sk-` key）。CodexFetcher 已有 `codexAdminKey`（存在 `codexOpenAIAdminKey` account），并且已经实现了 `parseOpenAICostAmount` 和 `collectAmountValues` 用于解析 OpenAI costs 响应。
+
+### 本轮目标
+
+- 新增 OpenAI Admin Key 凭据输入（独立于普通 `sk-` key）。
+- 用 Admin Key 查询 OpenAI 余额和费用，替代当前的 `usageUnsupported`。
+- 普通 `sk-` key 保持"仅验证调用"。
+- 不改 Codex Admin Key 逻辑（它继续用于 Codex extras）。
+- 不改其它平台。
+
+### 实施步骤
+
+1. **KeychainHelper 增加 OpenAI Admin Key 存储**
+   - 新增 `saveOpenAIAdminKey` / `loadOpenAIAdminKey` / `hasOpenAIAdminKey` / `deleteOpenAIAdminKey`。
+   - Keychain account 为 `"openaiAdminKey"`，与 `"codexOpenAIAdminKey"` 分开。
+
+2. **ProviderCredentialSnapshot 增加 openaiAdminKey 字段**
+   - 新增 `openaiAdminKey: String?`。
+   - 新增 `maskedOpenAIAdminKey`、`hasOpenAIAdminKey`。
+   - `.empty` 同步更新。
+   - Settings 构造 snapshot 时读取 `KeychainHelper.hasOpenAIAdminKey()`。
+
+3. **APIPlatformFetcher.fetchOpenAI() 接入 Admin Key**
+   - 先尝试 `KeychainHelper.loadOpenAIAdminKey(allowUserInteraction: false)`。
+   - 有 admin key 时：
+     - 调用 `GET /v1/organization/credits` 查余额 → 写入 `Quota(type: .money, unit: "USD")`。
+     - 调用 `GET /v1/organization/costs?start_time=...&bucket_width=1d` 查近 30 天费用 → 写入 `Quota(type: .costSpent, unit: "USD")`。
+     - 复用已有的 `parseOpenAICostAmount` / `collectAmountValues` 解析逻辑。
+   - 无 admin key 时保持当前行为（返回 `usageUnsupported`）。
+   - 静默查询（`allowUserInteraction: false`），不弹 Keychain 授权框。
+
+4. **PlatformListView OpenAI 详情页增加 Admin Key 输入**
+   - OpenAI `apiKeyContent` 下方新增"Admin Key"区域：
+     - `StoredSecretRow` 显示已保存的 masked admin key。
+     - `SecureField` + "保存"按钮。
+     - 帮助文字说明"组织级 Admin API key，可查询用量和费用"。
+   - 新增"授权刷新"按钮（与其它平台一致），允许 `allowUserInteraction: true` 读取 admin key。
+
+5. **PlatformResetPanel 增加 OpenAI Admin Key 重置**
+   - 新增 `ResetAction.openAIAPIAdminKey`（或复用 `.adminAPIKey`）。
+   - OpenAI provider 的 `resetActions` 增加 `.adminAPIKey`。
+   - 重置时调用 `KeychainHelper.deleteOpenAIAdminKey()`。
+
+6. **验证**
+   - `swift test`
+   - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动验证：
+     - Settings → OpenAI 显示 Admin Key 输入框。
+     - 保存 admin key 后普通刷新返回余额和费用数据。
+     - 浮窗 OpenAI 卡片显示余额和已花费。
+     - 无 admin key 时保持"仅验证"行为。
+
+### 风险
+
+- OpenAI Admin Key 需要组织级权限，普通用户的 `sk-` key 不能作为 admin key 使用；UI 需要明确说明。
+- `/v1/organization/credits` 和 `/v1/organization/costs` 的响应格式可能随 API 版本变化；需要防御性解析。
+- 如果用户同时配置了 Codex Admin Key 和 OpenAI Admin Key，它们是独立的 key，互不影响。
+- 静默查询 admin key 失败时（如权限不足），应降级到 `usageUnsupported`，不弹错误。
+
+### 本轮实现结果（2026-06-28）
+
+- `KeychainHelper` 新增 `openAIAdminKey` 存储（account: `"openAIAdminKey"`）。
+- `ProviderCredentialSnapshot` 新增 `openaiAdminKey` 字段、`maskedOpenAIAdminKey`、`hasOpenAIAdminKey`。
+- `APIPlatformFetcher.fetchOpenAI()` 接入 Admin Key：
+  - 优先尝试 admin key → 调用 `/v1/organization/credits`（余额）和 `/v1/organization/costs`（费用）。
+  - 复用 `parseOpenAICostAmount` / `collectAmountValues` 解析 OpenAI costs 响应。
+  - 无 admin key 或查询失败时降级到 `usageUnsupported`。
+- `PlatformListView` OpenAI 详情页新增 Admin Key 输入框和帮助文字。
+- `PlatformResetPanel` OpenAI 的 `.adminAPIKey` 重置调用 `KeychainHelper.deleteOpenAIAdminKey()`。
+- `ProviderCapability` OpenAI 的 `resetActions` 增加 `.adminAPIKey`。
+- 测试 `openAIAnthropicAndGeminiDoNotPromiseUsageForPlainAPIKeys` 更新以覆盖 OpenAI admin key 行为。
+
+### 验证结果
+
+- `swift test`：通过，176 个测试通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过，`BUILD SUCCEEDED`。
+- `git diff --check`：通过。
+
+### 待手动验证
+
+- Settings → OpenAI 显示 Admin Key 输入框。
+- 保存 admin key 后普通刷新返回余额和费用数据。
+- 浮窗 OpenAI 卡片显示余额和已花费。
+- 无 admin key 时保持"仅验证"行为。
+- 重置 Admin Key 按钮正确删除 OpenAI admin key。
+
+---
+
+
+
 ## 当前重点：UI 一致性清理 — 进度颜色统一、死代码移除、格式化逻辑去重（待实现）
 
 ### 问题
@@ -107,6 +573,41 @@ UI 审查发现三类高优先级问题：
 - `WidgetRenderer` 和 `OverlayMetricTile` 的 `formattedValue` / `fraction` 改为调用 `WidgetMetricComputer`，消除跨文件重复。
 - 删除 `PlatformRowView.swift`（1184 行死代码）。
 - `CodexAuthStatus` 枚举迁移到 `PlatformListView.swift`（唯一使用处）。
+- `CodexAuthReader.decodeJWT` 私有副本删除，改为调用 core 的 `decodeJWTPayload`。
+- `metricIcon` 22-case switch 提取到 `WidgetMetric.icon` extension，`WidgetRenderer` 和 `WidgetListEditor` 共用。
+- MiMo "Token Plan 到期时间" 重复逻辑提取到 `WidgetMetric.baseTitle(for:)`，三处调用统一。
+- `tooltipText` 格式 `"\(service) · \(metric)"` 提取到 `WidgetMetricComputer.tooltipText`，`WidgetRenderer` 和 `OverlayMetricTile` 共用。
+- `SettingsWindow` 深色背景色改为引用 `CompactBlackTheme.elevated`，消除与 `WidgetListEditor` 的 RGB 重复。
+- `CompactBlackTheme` 从 `private` 改为 `internal`，Settings 层可共享。
+- `serviceDisplayName` 新增可选 `state` 参数，有 state 时优先用 `state.services[id]?.label`，3 个有 state 的调用方已传入。
+- `CompactBlackTheme` 新增共享常量：
+  - `cornerRadius: CGFloat = 8`：替换 Settings 和 FloatingPanelView 中 18 处硬编码。
+  - `subtleFill = Color.white.opacity(0.035)`：替换 PlatformListView 中 2 处硬编码。
+- `WidgetListEditor.swift` 拆分（1195 → 879 行）：
+  - `CustomWidgetSheet`（144 行）提取到独立文件。
+  - `WidgetPreviewPanel` + `WidgetPreviewGroup` + `WidgetPreviewGroupView` + `WidgetPreviewItem`（160 行）提取到独立文件。
+  - 共享函数 `serviceDisplayName`、`metricTitle`、`styleIcon` 和数据 `widgetCapabilities`、`presets`、`WidgetPreset`、`WidgetCapability` 改为 `internal`。
+  - `CompactBlackPanelStyle` 改为 `internal`。
+- `PlatformListView.swift` 拆分（1486 → 1044 行）：
+  - `PlatformUIComponents.swift`（310 行）：StatusDot、GlassPanel、StatusPill、StoredSecretRow、InfoRow、QuotaStatusRow、SessionStatusRow、sectionHeader、ProviderCapability/ProviderCredentialKind/ProviderUsageCapability/ProviderDataStatus extensions。
+  - `PlatformResetPanel.swift`（139 行）：PlatformResetPanel。
+  - `ProviderCredentialStatus` 改为 `internal`。
+- `CodexFetcher.swift` 拆分（1094 → 511 + 586 行）：
+  - `APIPlatformFetcher.swift`（586 行）：独立的 API 平台数据拉取类。
+  - `Service.mergingCodexLocalUsage` / `appendingCodexCost` extension 改为 `internal`。
+- `print` 语句改为 `os.Logger`（CodexFetcher 7 处、APIPlatformFetcher 31 处）：
+  - 新增 `Logger+tokenHud.swift`：`.codex`、`.apiPlatform`、`.notchHost` 三个 Logger。
+  - NotchHostPanelManager 的 `[NotchDiagnostics]` 保留 `print`（`os.Logger` 对 `CGRect`/`NSEdgeInsets` 插值要求 `CustomStringConvertible`，改动面过大）。
+- `minimumScaleFactor` 值统一：
+  - `0.75` → `0.78`（WidgetListEditor、PlatformUIComponents）。
+  - `0.8` → `0.82`（PlatformListView）。
+  - 保留 4 档语义：`0.82`（info row）、`0.78`（small label）、`0.7`（general）、`0.65`（caption）。
+- 新增 `HUDTextStyle.swift`：前景 opacity token。
+  - `.primary`（0.94）：替换 5 处 metric 值文字。
+  - `.secondary`（0.72）：替换 1 处 group 标题。
+  - `.tertiary`（0.56）：替换 2 处 sublabel。
+  - `.placeholder`（0.45）：替换 2 处空状态文字。
+  - `.subtle`（0.42）：替换 1 处计数标注。
 
 ### 验证结果
 

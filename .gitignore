@@ -14,6 +14,7 @@ docs/superpowers/
 
 # 内部 AI 工具
 .superpowers/
+.claude/
 
 # SwiftPM Xcode 生成文件
 .swiftpm/

@@ -27,4 +27,15 @@ struct FloatingPanelContentLayoutPolicyTests {
         #expect(groupedScale <= 1.35)
         #expect(groupedScale >= 0.72)
     }
+
+    @Test func groupedContentScrollsInsteadOfShrinkingBelowReadableScale() {
+        let behavior = FloatingPanelContentLayoutPolicy.groupedOverflowBehavior(
+            panelHeight: 180,
+            serviceCount: 5,
+            widgetCount: 15
+        )
+
+        #expect(behavior.allowsVerticalScrolling)
+        #expect(behavior.adaptiveScale == FloatingPanelContentLayoutPolicy.groupedReadableScale)
+    }
 }

@@ -8,6 +8,7 @@ enum KeychainHelper {
     static let account = "claudeSessionKey"
     private static let openAIAccount = "openAIAPIKey"
     private static let codexAdminKeyAccount = "codexOpenAIAdminKey"
+    private static let openAIAdminKeyAccount = "openAIAdminKey"
 
     // MARK: - Claude session key (existing interface)
 
@@ -65,6 +66,28 @@ enum KeychainHelper {
 
     static func deleteCodexAdminKey() throws {
         try delete(account: codexAdminKeyAccount)
+    }
+
+    // MARK: - OpenAI Admin Key (organization-level usage/costs)
+
+    static func saveOpenAIAdminKey(_ value: String) throws {
+        try save(value, account: openAIAdminKeyAccount)
+    }
+
+    static func loadOpenAIAdminKey() -> String? {
+        load(account: openAIAdminKeyAccount)
+    }
+
+    static func loadOpenAIAdminKey(allowUserInteraction: Bool) -> String? {
+        load(account: openAIAdminKeyAccount, allowUserInteraction: allowUserInteraction)
+    }
+
+    static func hasOpenAIAdminKey() -> Bool {
+        exists(account: openAIAdminKeyAccount)
+    }
+
+    static func deleteOpenAIAdminKey() throws {
+        try delete(account: openAIAdminKeyAccount)
     }
 
     // MARK: - Generic API key (per platform)

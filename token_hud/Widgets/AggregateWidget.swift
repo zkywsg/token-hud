@@ -15,7 +15,7 @@ struct AggregateWidget: View {
             Text(value)
                 .font(.system(size: 12 * scale, weight: .semibold, design: .rounded))
                 .monospacedDigit()
-                .foregroundColor(.white.opacity(0.94))
+                .foregroundColor(HUDTextStyle.primary)
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
         }

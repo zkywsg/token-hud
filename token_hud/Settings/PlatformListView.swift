@@ -62,7 +62,7 @@ struct PlatformListView: View {
                     .padding(.horizontal, 12)
                     .padding(.vertical, 8)
                     .background(.regularMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius))
                     .padding(.bottom, 12)
             }
         }
@@ -129,7 +129,7 @@ struct PlatformListView: View {
         }
         .background(.ultraThinMaterial)
         .overlay {
-            Color.white.opacity(0.035)
+            CompactBlackTheme.subtleFill
                 .allowsHitTesting(false)
         }
     }
@@ -157,7 +157,12 @@ struct PlatformListView: View {
                 )
                 handleRefreshResult(result, provider: provider)
             case .sessionKey:
-                break
+                // Claude: scan local JSONL files
+                let result = await apiPlatformFetcher.fetchSingle(
+                    platform: provider.id,
+                    allowUserInteraction: false
+                )
+                handleRefreshResult(result, provider: provider)
             }
         }
     }
@@ -209,7 +214,8 @@ struct PlatformListView: View {
             apiKeys: apiKeys,
             mimoConsoleCookie: KeychainHelper.hasMiMoConsoleCookie() ? "saved" : nil,
             codexAdminKey: KeychainHelper.hasCodexAdminKey() ? "saved" : nil,
-            mimoTokenPlanKey: KeychainHelper.hasMiMoTokenPlanKey() ? "saved" : nil
+            mimoTokenPlanKey: KeychainHelper.hasMiMoTokenPlanKey() ? "saved" : nil,
+            openaiAdminKey: KeychainHelper.hasOpenAIAdminKey() ? "saved" : nil
         )
         revision += 1
     }
@@ -274,9 +280,14 @@ private struct PlatformSidebarRow: View {
     let needsAuthorization: Bool
     let isSelected: Bool
     let onSelect: () -> Void
+    @Environment(ProviderStatusMonitor.self) private var statusMonitor
 
     private var dataStatus: ProviderDataStatus {
         ProviderDataStatus.status(for: service)
+    }
+
+    private var serviceStatus: ProviderStatusMonitor.Status {
+        statusMonitor.status(for: provider.id)
     }
 
     var body: some View {
@@ -296,7 +307,7 @@ private struct PlatformSidebarRow: View {
                         .lineLimit(1)
                         .truncationMode(.tail)
                     Spacer(minLength: 4)
-                    StatusDot(color: credentialStatus.color)
+                    StatusDot(color: statusDotColor)
                 }
                 StatusPill(
                     title: needsAuthorization ? "需授权" : dataStatus.title(for: provider.id),
@@ -307,14 +318,26 @@ private struct PlatformSidebarRow: View {
             .padding(.horizontal, 9)
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color.white.opacity(0.035))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .background(isSelected ? Color.accentColor.opacity(0.14) : CompactBlackTheme.subtleFill)
+            .clipShape(RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius))
             .overlay(
-                RoundedRectangle(cornerRadius: 8)
+                RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius)
                     .stroke(isSelected ? Color.accentColor.opacity(0.28) : Color.white.opacity(0.06), lineWidth: 0.8)
             )
         }
         .buttonStyle(.plain)
+    }
+
+    private var statusDotColor: Color {
+        // If credential is not configured, show credential status color
+        guard credentialStatus == .configured else { return credentialStatus.color }
+        // Otherwise show service status
+        switch serviceStatus {
+        case .operational: return .green
+        case .degraded:    return .yellow
+        case .down:        return .red
+        case .unknown:     return credentialStatus.color
+        }
     }
 
     private var iconName: String {
@@ -326,6 +349,9 @@ private struct PlatformSidebarRow: View {
         case "deepseek":            return "drop"
         case "minimax":             return "waveform"
         case "mimo":                return "m.circle"
+        case "moonshot":            return "moon.stars"
+        case "openrouter":          return "arrow.triangle.branch"
+        case "qwen":                return "cloud"
         default:                    return "cpu"
         }
     }
@@ -514,6 +540,27 @@ private struct PlatformCredentialPanel: View {
 
     private var claudeCredentialContent: some View {
         VStack(alignment: .leading, spacing: 10) {
+            // Local JSONL scan info
+            HStack(spacing: 6) {
+                Image(systemName: "checkmark.circle.fill")
+                    .foregroundStyle(.green)
+                    .font(.caption)
+                Text("本地用量自动扫描")
+                    .font(.caption.weight(.medium))
+                    .foregroundStyle(.primary)
+            }
+            Text("从 `~/.claude/projects/` 扫描 Claude Code session 日志，无需额外配置。点击上方刷新按钮更新数据。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+
+            Divider()
+
+            // Optional Session Key for claude.ai web quota
+            Text("claude.ai Web 配额（可选）")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+
             StoredSecretRow(label: "Session Key", maskedValue: credentialSnapshot.maskedClaudeSessionKey)
             HStack {
                 Picker("", selection: $selectedBrowser) {
@@ -548,6 +595,8 @@ private struct PlatformCredentialPanel: View {
         }
     }
 
+    @State private var openaiAdminKeyInput = ""
+
     private func apiKeyContent(platformID: String) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             StoredSecretRow(
@@ -573,6 +622,30 @@ private struct PlatformCredentialPanel: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+
+            if platformID == "openai" {
+                Divider()
+                StoredSecretRow(
+                    label: "Admin Key",
+                    maskedValue: credentialSnapshot.maskedOpenAIAdminKey
+                )
+                HStack {
+                    SecureField("sk-…（组织 Admin）", text: $openaiAdminKeyInput)
+                        .textFieldStyle(.roundedBorder)
+                    Button("保存") {
+                        let value = openaiAdminKeyInput.trimmingCharacters(in: .whitespacesAndNewlines)
+                        guard !value.isEmpty else { return }
+                        try? KeychainHelper.saveOpenAIAdminKey(value)
+                        openaiAdminKeyInput = ""
+                        onChanged()
+                    }
+                    .disabled(openaiAdminKeyInput.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                }
+                Text("组织级 Admin API key，可查询用量、费用和余额。需要 Organization Admin 权限。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -873,25 +946,31 @@ private struct PlatformCredentialPanel: View {
 
     private func apiKeyPlaceholder(for platformID: String) -> String {
         switch platformID {
-        case "openai":    return "sk-…"
-        case "gemini":    return "AIza…"
-        case "deepseek":  return "sk-…"
-        case "anthropic": return "sk-ant-…"
-        case "minimax":   return "Token Plan key 或 Open Platform key"
-        case "mimo":      return "sk-…"
-        default:          return "API key"
+        case "openai":     return "sk-…"
+        case "gemini":     return "AIza…"
+        case "deepseek":   return "sk-…"
+        case "anthropic":  return "sk-ant-…"
+        case "minimax":    return "Token Plan key 或 Open Platform key"
+        case "mimo":       return "sk-…"
+        case "moonshot":   return "sk-…"
+        case "openrouter": return "sk-or-…"
+        case "qwen":       return "sk-…"
+        default:           return "API key"
         }
     }
 
     private func apiKeyHelpText(for platformID: String) -> String {
         switch platformID {
-        case "openai":    return "OpenAI 普通 API key 可验证调用能力；组织用量/费用查询需要额外权限。"
-        case "gemini":    return "Gemini API key 可验证调用能力；费用侧建议接 Google Cloud Billing。"
-        case "deepseek":  return "DeepSeek API key 可用于官方余额接口。"
-        case "anthropic": return "Anthropic 普通 API key 可验证调用能力；费用报告需要 Console 权限。"
-        case "minimax":   return "MiniMax Token Plan key 可查询 remains；普通 Open Platform key 只能验证调用，公开 API 暂不能查余额。"
-        case "mimo":      return "MiMo `tp-` key 用于套餐服务；`sk-` key 仅验证调用能力。用量查询需连接控制台 Cookie。"
-        default:          return "输入平台 API key。"
+        case "openai":     return "OpenAI 普通 API key 可验证调用能力；组织用量/费用查询需要额外权限。"
+        case "gemini":     return "Gemini API key 可验证调用能力；费用侧建议接 Google Cloud Billing。"
+        case "deepseek":   return "DeepSeek API key 可用于官方余额接口。"
+        case "anthropic":  return "Anthropic 普通 API key 可验证调用能力；费用报告需要 Console 权限。"
+        case "minimax":    return "MiniMax Token Plan key 可查询 remains；普通 Open Platform key 只能验证调用，公开 API 暂不能查余额。"
+        case "mimo":       return "MiMo `tp-` key 用于套餐服务；`sk-` key 仅验证调用能力。用量查询需连接控制台 Cookie。"
+        case "moonshot":   return "Moonshot / Kimi API key，可查询账户余额。支持国际和国内 endpoint。"
+        case "openrouter": return "OpenRouter API key，可查询 credits 余额。"
+        case "qwen":       return "阿里云 DashScope API key，可查询账户余额。"
+        default:           return "输入平台 API key。"
         }
     }
 }
@@ -910,7 +989,7 @@ private struct PlatformCapabilityPanel: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.8)
+                        .minimumScaleFactor(0.82)
                 }
 
                 InfoRow(label: "凭据", value: provider.credentialKind.displayTitle)
@@ -947,6 +1026,26 @@ private struct PlatformMetricsPanel: View {
                         if let session = service.currentSession {
                             SessionStatusRow(session: session)
                         }
+                        if provider.id == "claude", let session = service.currentSession, let models = session.modelBreakdown, !models.isEmpty {
+                            Divider()
+                            claudeModelBreakdown(models)
+                        }
+                        if provider.id == "codex" {
+                            Divider()
+                            codexRateLimitPanel(service)
+                        }
+                        if provider.id == "deepseek" {
+                            Divider()
+                            deepseekBalancePanel(service)
+                        }
+                        if provider.id == "mimo" {
+                            Divider()
+                            mimoCreditPanel(service)
+                        }
+                        if provider.id == "openai" {
+                            Divider()
+                            openaiCostsPanel(service)
+                        }
                     }
                 } else {
                     VStack(alignment: .leading, spacing: 6) {
@@ -968,147 +1067,233 @@ private struct PlatformMetricsPanel: View {
             .frame(maxWidth: .infinity, alignment: .leading)
         }
     }
+
+    private func claudeModelBreakdown(_ models: [ModelUsage]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("模型用量")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            ForEach(Array(models.enumerated()), id: \.offset) { _, usage in
+                let total = (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0)
+                HStack(spacing: 8) {
+                    Text(shortModelName(usage.model))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.primary)
+                        .lineLimit(1)
+                    Spacer()
+                    Text(formatTokenCount(total))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+        }
+    }
+
+    private func shortModelName(_ model: String) -> String {
+        // "claude-opus-4-7" → "opus-4-7"
+        // "mimo-v2.5-pro-ultraspeed" → "mimo-v2.5-pro-ultraspeed"
+        if model.hasPrefix("claude-") {
+            return String(model.dropFirst("claude-".count))
+        }
+        return model
+    }
+
+    private func formatTokenCount(_ count: Double) -> String {
+        if count >= 1_000_000 { return String(format: "%.1fM", count / 1_000_000) }
+        if count >= 1_000 { return String(format: "%.0fK", count / 1_000) }
+        return String(format: "%.0f", count)
+    }
+
+    // MARK: - Codex rate limit panel
+
+    private func codexRateLimitPanel(_ service: Service) -> some View {
+        let timeQuotas = service.quotas.filter { $0.type == .time }
+        guard !timeQuotas.isEmpty else { return EmptyView().eraseToAnyView() }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("Rate Limit 窗口")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            ForEach(Array(timeQuotas.enumerated()), id: \.offset) { _, quota in
+                codexRateLimitRow(quota)
+            }
+            if let session = service.currentSession, let tokens = session.tokens, tokens > 0 {
+                HStack(spacing: 6) {
+                    Image(systemName: "arrow.up.arrow.down")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                    Text("本月总用量")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(formatTokenCount(tokens))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.primary)
+                }
+            }
+        }.eraseToAnyView()
+    }
+
+    private func codexRateLimitRow(_ quota: Quota) -> some View {
+        let fraction = quota.usedFraction
+        let remaining = quota.remaining
+        let label = quota.total.map { total in
+            if total >= 604_800 { return "7 天窗口" }
+            if total >= 18_000 { return "5 小时窗口" }
+            return "限制窗口"
+        } ?? "限制窗口"
+
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label)
+                    .font(.caption)
+                    .foregroundStyle(.primary)
+                Spacer()
+                Text(formatDuration(remaining))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+            }
+            ProgressView(value: min(max(fraction, 0), 1))
+                .tint(fraction > 0.85 ? .red : fraction > 0.65 ? .yellow : .green)
+        }
+    }
+
+    private func formatDuration(_ seconds: Double) -> String {
+        let total = Int(seconds)
+        let h = total / 3600
+        let m = (total % 3600) / 60
+        if h > 0 { return "\(h)h \(m)m" }
+        return "\(m)m"
+    }
+
+    // MARK: - DeepSeek balance panel
+
+    private func deepseekBalancePanel(_ service: Service) -> some View {
+        guard let quota = service.quotas.first(where: { $0.type == .money }) else {
+            return EmptyView().eraseToAnyView()
+        }
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("账户余额")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            HStack {
+                Image(systemName: "yensign.circle")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(String(format: "%.2f", quota.remaining))
+                    .font(.title3.monospaced().weight(.semibold))
+                    .foregroundStyle(.primary)
+                Text(quota.unit)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }.eraseToAnyView()
+    }
+
+    // MARK: - MiMo credit panel
+
+    private func mimoCreditPanel(_ service: Service) -> some View {
+        guard let quota = service.quotas.first(where: { $0.type == .monthlyTokens }) else {
+            return EmptyView().eraseToAnyView()
+        }
+
+        let fraction = quota.usedFraction
+        let used = quota.used
+        let total = quota.total ?? 0
+
+        return VStack(alignment: .leading, spacing: 6) {
+            Text("套餐用量")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            HStack {
+                Text(formatTokenCount(used))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.primary)
+                Text("/")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                Text(formatTokenCount(total))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(.secondary)
+                Spacer()
+                Text(String(format: "%.0f%%", fraction * 100))
+                    .font(.caption.monospaced())
+                    .foregroundStyle(fraction > 0.85 ? .red : fraction > 0.65 ? .orange : .secondary)
+            }
+            ProgressView(value: min(max(fraction, 0), 1))
+                .tint(fraction > 0.85 ? .red : fraction > 0.65 ? .yellow : .green)
+            if let resetsAt = quota.resetsAt {
+                Text("重置: \(formatResetsAt(resetsAt))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+        }.eraseToAnyView()
+    }
+
+    private func formatResetsAt(_ iso: String) -> String {
+        let formatter = ISO8601DateFormatter()
+        guard let date = formatter.date(from: iso) else { return iso }
+        let df = DateFormatter()
+        df.dateFormat = "MM/dd HH:mm"
+        return df.string(from: date)
+    }
+
+    // MARK: - OpenAI costs panel
+
+    private func openaiCostsPanel(_ service: Service) -> some View {
+        let creditsQuota = service.quotas.first(where: { $0.type == .money })
+        let costQuota = service.quotas.first(where: { $0.type == .costSpent })
+
+        guard creditsQuota != nil || costQuota != nil else {
+            return EmptyView().eraseToAnyView()
+        }
+
+        return VStack(alignment: .leading, spacing: 8) {
+            Text("组织用量")
+                .font(.caption.weight(.medium))
+                .foregroundStyle(.secondary)
+            if let q = creditsQuota {
+                HStack {
+                    Image(systemName: "creditcard")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("余额")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "$%.2f", q.remaining))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.primary)
+                }
+            }
+            if let q = costQuota {
+                HStack {
+                    Image(systemName: "chart.line.uptrend.xyaxis")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text("近 30 天费用")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Spacer()
+                    Text(String(format: "$%.2f", q.used))
+                        .font(.caption.monospaced())
+                        .foregroundStyle(.primary)
+                }
+            }
+        }.eraseToAnyView()
+    }
 }
 
-private struct PlatformResetPanel: View {
-    let provider: ProviderCapability
-    let credentialStatus: ProviderCredentialStatus
-    let onCredentialChanged: () -> Void
-    let onClearData: () -> Void
-    @State private var isConfirmingLocalAuthRemoval = false
+// MARK: - View erase helper
 
-    var body: some View {
-        GlassPanel {
-            DisclosureGroup {
-                VStack(alignment: .leading, spacing: 12) {
-                    resetButtons
-                    resetHelpText
-                }
-                .padding(.top, 8)
-            } label: {
-                sectionHeader("重置与清理", systemImage: "arrow.counterclockwise")
-            }
-            .padding(4)
-        }
-        .confirmationDialog(
-            "移除 Codex 本地认证？",
-            isPresented: $isConfirmingLocalAuthRemoval,
-            titleVisibility: .visible
-        ) {
-            Button("移除 ~/.codex/auth.json", role: .destructive) {
-                removeCodexLocalAuth()
-            }
-            Button("取消", role: .cancel) {}
-        } message: {
-            Text("这会让 Codex CLI 退出登录；sessions 不会被删除。之后需要重新运行 `codex login`。")
-        }
-    }
-
-    private var resetButtons: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(spacing: 10) {
-                resetButtonContent
-            }
-            VStack(alignment: .leading, spacing: 8) {
-                resetButtonContent
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var resetButtonContent: some View {
-        if provider.resetActions.contains(.credential) {
-            Button(role: .destructive) {
-                resetCredential()
-            } label: {
-                Label("重置认证", systemImage: "key.slash")
-            }
-            .disabled(credentialStatus == .notConfigured)
-        }
-        if provider.resetActions.contains(.apiKey) {
-            Button(role: .destructive) {
-                try? KeychainHelper.deleteAPIKey(for: provider.id)
-                if provider.id == "mimo" {
-                    MiMoAPIKeyRoleStore.clear()
-                }
-                onCredentialChanged()
-            } label: {
-                Label("重置 API Key", systemImage: "key.slash")
-            }
-        }
-        if provider.resetActions.contains(.consoleCookie) {
-            Button(role: .destructive) {
-                try? KeychainHelper.deleteMiMoConsoleCookie()
-                onCredentialChanged()
-            } label: {
-                Label("重置 Cookie", systemImage: "text.badge.xmark")
-            }
-        }
-        if provider.resetActions.contains(.localAuth) {
-            Button(role: .destructive) {
-                isConfirmingLocalAuthRemoval = true
-            } label: {
-                Label("移除本地认证", systemImage: "person.crop.circle.badge.xmark")
-            }
-        }
-        if provider.resetActions.contains(.adminAPIKey) {
-            Button(role: .destructive) {
-                try? KeychainHelper.deleteCodexAdminKey()
-                onCredentialChanged()
-            } label: {
-                Label("重置 Admin Key", systemImage: "key.slash")
-            }
-        }
-        if provider.resetActions.contains(.serviceData) {
-            Button(role: .destructive) {
-                onClearData()
-            } label: {
-                Label("清空数据", systemImage: "trash")
-            }
-        }
-    }
-
-    private var resetHelpText: some View {
-        Group {
-            if provider.credentialKind == .codexLocalAuth {
-                Text("Codex 认证由 Codex 自身管理；这里不会删除 `~/.codex/auth.json`。")
-            } else {
-                Text("重置认证会删除 Keychain 凭据；清空数据只删除 state.json 中当前平台的数据。")
-            }
-        }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-    }
-
-    private func resetCredential() {
-        switch provider.credentialKind {
-        case .sessionKey:
-            try? KeychainHelper.deleteClaudeSessionKey()
-        case .apiKey:
-            try? KeychainHelper.deleteAPIKey(for: provider.id)
-            if provider.id == "openai" {
-                try? KeychainHelper.deleteLegacyOpenAIKey()
-            }
-        case .apiKeyAndConsoleCookie:
-            try? KeychainHelper.deleteAPIKey(for: provider.id)
-            try? KeychainHelper.deleteMiMoConsoleCookie()
-            MiMoAPIKeyRoleStore.clear()
-        case .codexLocalAuth:
-            break
-        }
-        onCredentialChanged()
-    }
-
-    private func removeCodexLocalAuth() {
-        let path = (NSHomeDirectory() as NSString).appendingPathComponent(".codex/auth.json")
-        if FileManager.default.fileExists(atPath: path) {
-            try? FileManager.default.removeItem(atPath: path)
-        }
-        onCredentialChanged()
-    }
+extension View {
+    func eraseToAnyView() -> AnyView { AnyView(self) }
 }
 
-private enum ProviderCredentialStatus: Equatable {
+
+enum ProviderCredentialStatus: Equatable {
     case configured
     case expired
     case notConfigured
@@ -1163,11 +1348,11 @@ enum CodexAuthReader {
             let tokens = json["tokens"] as? [String: Any],
             let idToken = tokens["id_token"] as? String,
             let accessToken = tokens["access_token"] as? String,
-            let payload = decodeJWT(idToken)
+            let payload = decodeJWTPayload(idToken)
         else { return .notConfigured }
 
         guard
-            let accessPayload = decodeJWT(accessToken),
+            let accessPayload = decodeJWTPayload(accessToken),
             let exp = accessPayload["exp"] as? TimeInterval,
             Date().timeIntervalSince1970 < exp - 60
         else { return .expired }
@@ -1177,327 +1362,5 @@ enum CodexAuthReader {
             email: claim.email ?? "",
             plan: claim.plan ?? "unknown"
         )
-    }
-
-    private static func decodeJWT(_ token: String) -> [String: Any]? {
-        let parts = token.components(separatedBy: ".")
-        guard parts.count == 3 else { return nil }
-        var b64 = parts[1]
-            .replacingOccurrences(of: "-", with: "+")
-            .replacingOccurrences(of: "_", with: "/")
-        let remainder = b64.count % 4
-        if remainder > 0 {
-            b64 += String(repeating: "=", count: 4 - remainder)
-        }
-        guard
-            let data = Data(base64Encoded: b64),
-            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return obj
-    }
-}
-
-private struct StatusDot: View {
-    let color: Color
-
-    var body: some View {
-        Circle()
-            .fill(color)
-            .frame(width: 8, height: 8)
-    }
-}
-
-private struct GlassPanel<Content: View>: View {
-    let content: Content
-
-    init(@ViewBuilder content: () -> Content) {
-        self.content = content()
-    }
-
-    var body: some View {
-        content
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.thinMaterial)
-            .background(Color.white.opacity(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
-            )
-            .shadow(color: Color.black.opacity(0.05), radius: 10, y: 4)
-    }
-}
-
-private struct StatusPill: View {
-    let title: String
-    let color: Color
-
-    var body: some View {
-        Text(title)
-            .font(.caption2.weight(.medium))
-            .foregroundStyle(color)
-            .lineLimit(1)
-            .minimumScaleFactor(0.78)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 3)
-            .background(color.opacity(0.12))
-            .clipShape(RoundedRectangle(cornerRadius: 5))
-    }
-}
-
-private struct StoredSecretRow: View {
-    let label: String
-    let maskedValue: String?
-
-    var body: some View {
-        InfoRow(label: label, value: maskedValue ?? "未配置")
-    }
-}
-
-private struct InfoRow: View {
-    let label: String
-    let value: String
-
-    var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .firstTextBaseline) {
-                labelText
-                Spacer(minLength: 12)
-                valueText
-                    .frame(maxWidth: 280, alignment: .trailing)
-            }
-            VStack(alignment: .leading, spacing: 3) {
-                labelText
-                valueText
-            }
-        }
-    }
-
-    private var labelText: some View {
-        Text(label)
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .lineLimit(1)
-    }
-
-    private var valueText: some View {
-        Text(value)
-            .font(.caption.monospaced())
-            .foregroundStyle(.primary)
-            .lineLimit(1)
-            .truncationMode(.middle)
-            .minimumScaleFactor(0.82)
-    }
-}
-
-private struct QuotaStatusRow: View {
-    let quota: Quota
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Text(quotaTitle)
-                    .font(.caption.weight(.medium))
-                Spacer()
-                Text(quotaValue)
-                .font(.caption.monospaced())
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-            }
-            if quota.total != nil {
-                ProgressView(value: min(max(quota.usedFraction, 0), 1))
-                    .tint(quota.usedFraction > 0.85 ? .red : .accentColor)
-            }
-        }
-    }
-
-    private var quotaTitle: String {
-        switch quota.type {
-        case .time:            return "时间窗口"
-        case .tokens:          return "Token"
-        case .money:           return "余额"
-        case .requests:        return "请求"
-        case .inputTokens:     return "输入 Token"
-        case .outputTokens:    return "输出 Token"
-        case .dailyTokens:     return "日 Token"
-        case .monthlyTokens:   return "月 Token"
-        case .dailyRequests:   return "日请求"
-        case .monthlyRequests: return "月请求"
-        case .costSpent:       return "已花费"
-        }
-    }
-
-    private var quotaValue: String {
-        if let total = quota.total {
-            return "\(format(quota.used)) / \(format(total)) \(quota.unit)"
-        }
-        return "\(format(quota.used)) \(quota.unit)"
-    }
-
-    private func format(_ value: Double) -> String {
-        if value >= 1_000_000 { return String(format: "%.1fM", value / 1_000_000) }
-        if value >= 1_000 { return String(format: "%.1fk", value / 1_000) }
-        if value == floor(value) { return "\(Int(value))" }
-        return String(format: "%.2f", value)
-    }
-}
-
-private struct SessionStatusRow: View {
-    let session: SessionSnapshot
-
-    var body: some View {
-        HStack(spacing: 6) {
-            Image(systemName: "clock.arrow.circlepath")
-                .foregroundStyle(.secondary)
-            Text(sessionText)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .lineLimit(1)
-                .truncationMode(.tail)
-        }
-    }
-
-    private var sessionText: String {
-        var parts: [String] = []
-        if let tokens = session.tokens { parts.append("\(compact(tokens)) tokens") }
-        if let requests = session.requests { parts.append("\(Int(requests)) req") }
-        if let cost = session.costSpent { parts.append("$" + String(format: "%.2f", cost)) }
-        return parts.isEmpty ? "暂无会话摘要" : parts.joined(separator: " · ")
-    }
-
-    private func compact(_ value: Double) -> String {
-        if value >= 1_000_000 { return String(format: "%.1fM", value / 1_000_000) }
-        if value >= 1_000 { return String(format: "%.1fk", value / 1_000) }
-        return "\(Int(value))"
-    }
-}
-
-private func sectionHeader(_ title: String, systemImage: String) -> some View {
-    Label(title, systemImage: systemImage)
-        .font(.caption.weight(.semibold))
-        .foregroundStyle(.secondary)
-}
-
-private extension ProviderCapability {
-    var canRefresh: Bool {
-        credentialKind == .codexLocalAuth ||
-        credentialKind == .apiKey ||
-        credentialKind == .apiKeyAndConsoleCookie
-    }
-}
-
-private extension ProviderCredentialKind {
-    var displayTitle: String {
-        switch self {
-        case .sessionKey:             return "Session Key"
-        case .apiKey:                 return "API Key"
-        case .codexLocalAuth:         return "Codex 本地认证"
-        case .apiKeyAndConsoleCookie: return "API Key + Console Cookie"
-        }
-    }
-}
-
-private extension ProviderUsageCapability {
-    var displayTitle: String {
-        switch self {
-        case .localSessionLogs:       return "本地日志"
-        case .balanceEndpoint:        return "官方余额接口"
-        case .tokenPlanEndpoint:      return "Token Plan 接口"
-        case .consoleCookieTokenPlan: return "控制台 Token Plan"
-        case .apiKeyValidationOnly:   return "仅验证 Key"
-        }
-    }
-
-    var detail: String {
-        switch self {
-        case .localSessionLogs:
-            return "从本机 session 日志读取用量，不发起平台账单请求。"
-        case .balanceEndpoint:
-            return "平台提供可直接查询余额或额度的官方接口。"
-        case .tokenPlanEndpoint:
-            return "平台提供 Token Plan remains / usage 类接口，适合展示套餐剩余额度。"
-        case .consoleCookieTokenPlan:
-            return "普通 API key 只验证调用能力；Token Plan 需要控制台登录态 Cookie。"
-        case .apiKeyValidationOnly:
-            return "普通 API key 不保证能读取账单或组织用量；Settings 会明确显示不支持，而不是伪造额度。"
-        }
-    }
-}
-
-private extension ProviderDataStatus {
-    var title: String {
-        title(for: nil)
-    }
-
-    func title(for providerID: String?) -> String {
-        if self == .usageUnsupported, providerID == "minimax" {
-            return "无套餐数据"
-        }
-        switch self {
-        case .notQueried:       return "未查询"
-        case .noUsageData:      return "暂无数据"
-        case .usageUnsupported: return "用量不支持"
-        case .tokenExpired:     return "Token 过期"
-        case .permissionDenied: return "权限不足"
-        case .networkError:     return "网络错误"
-        case .error:            return "查询异常"
-        case .ready:            return "有数据"
-        }
-    }
-
-    var detail: String {
-        detail(for: nil)
-    }
-
-    func detail(for providerID: String?) -> String {
-        switch self {
-        case .notQueried:
-            return "还没有当前平台的数据。配置认证后点击刷新，或等待自动刷新。"
-        case .noUsageData:
-            return "已配置或已连接，但当前平台暂无可展示的用量数据。"
-        case .usageUnsupported:
-            if providerID == "minimax" {
-                return "MiniMax 普通 Open Platform API Key 可验证调用，但公开接口不能查询余额/套餐；只有 Token Plan remains 返回 quota 时才会展示用量。"
-            }
-            return "普通 API key 暂不支持直接读取用量或账单，需要额外组织/账单权限或外部数据源。"
-        case .tokenExpired:
-            return "认证已过期，需要重新登录或重新配置凭据。"
-        case .permissionDenied:
-            return "当前凭据没有查询该数据的权限。"
-        case .networkError:
-            return "网络请求失败，稍后重试或检查代理/网络。"
-        case .error:
-            return "查询结果无法解析或平台返回异常。"
-        case .ready:
-            return "当前平台已有可展示数据。"
-        }
-    }
-
-    var systemImage: String {
-        switch self {
-        case .ready:            return "checkmark.circle"
-        case .usageUnsupported: return "info.circle"
-        case .tokenExpired:     return "exclamationmark.triangle"
-        case .permissionDenied: return "lock"
-        case .networkError:     return "wifi.slash"
-        case .error:            return "xmark.circle"
-        case .notQueried, .noUsageData:
-            return "tray"
-        }
-    }
-
-    var color: Color {
-        switch self {
-        case .ready:            return .green
-        case .usageUnsupported: return .blue
-        case .tokenExpired:     return .orange
-        case .permissionDenied: return .yellow
-        case .networkError:     return .secondary
-        case .error:            return .red
-        case .notQueried, .noUsageData:
-            return .secondary
-        }
     }
 }

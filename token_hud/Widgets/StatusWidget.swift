@@ -25,10 +25,10 @@ struct StatusWidget: View {
             VStack(alignment: .leading, spacing: 0) {
                 Text(statusText)
                     .font(.system(size: 10 * scale, weight: .semibold, design: .rounded))
-                    .foregroundColor(.white.opacity(0.94))
+                    .foregroundColor(HUDTextStyle.primary)
                 Text(label)
                     .font(.system(size: 8 * scale, weight: .regular, design: .rounded))
-                    .foregroundColor(.white.opacity(0.56))
+                    .foregroundColor(HUDTextStyle.tertiary)
             }
         }
     }

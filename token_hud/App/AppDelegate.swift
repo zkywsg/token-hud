@@ -16,6 +16,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsController: NSWindowController?
     private var codexFetcher: CodexFetcher!
     private var apiPlatformFetcher: APIPlatformFetcher!
+    private var statusMonitor: ProviderStatusMonitor!
     private var didFinishInitialLaunch = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -30,6 +31,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         appWatcher.start()
         codexFetcher = CodexFetcher()
         apiPlatformFetcher = APIPlatformFetcher()
+        statusMonitor = ProviderStatusMonitor()
+        statusMonitor.start()
 
         floatingPanelManager = NotchHostPanelManager(
             stateWatcher: stateWatcher,
@@ -70,6 +73,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         hotkeyManager.teardown()
         codexFetcher.stop()
         apiPlatformFetcher.stop()
+        statusMonitor.stop()
     }
 
     // MARK: - App Icon
@@ -227,6 +231,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             .environment(appFilterStore)
             .environment(codexFetcher)
             .environment(apiPlatformFetcher)
+            .environment(statusMonitor)
         let win = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 620),
             styleMask: [.titled, .closable, .miniaturizable],

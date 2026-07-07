@@ -10,6 +10,11 @@ struct FloatingPanelContentLayout: Equatable {
     let scaleAnchor: FloatingPanelContentAnchor
 }
 
+struct FloatingPanelContentOverflowBehavior: Equatable {
+    let adaptiveScale: CGFloat
+    let allowsVerticalScrolling: Bool
+}
+
 enum FloatingPanelContentLayoutPolicy {
     static let compactIdealHeight: CGFloat = 60
     static let groupedModelCardRowHeight: CGFloat = 86
@@ -21,6 +26,7 @@ enum FloatingPanelContentLayoutPolicy {
     /// Real service card grid uses 1 adaptive column.
     static let groupedModelCardEstimatedColumns = 1
     static let minimumAdaptiveScale: CGFloat = 0.72
+    static let groupedReadableScale: CGFloat = 0.92
     static let maximumAdaptiveScale: CGFloat = 1.35
 
     static func layout() -> FloatingPanelContentLayout {
@@ -45,6 +51,28 @@ enum FloatingPanelContentLayoutPolicy {
 
         return (panelHeight / idealHeight)
             .clamped(to: minimumAdaptiveScale...maximumAdaptiveScale)
+    }
+
+    static func groupedOverflowBehavior(
+        panelHeight: CGFloat,
+        serviceCount: Int,
+        widgetCount: Int = 0
+    ) -> FloatingPanelContentOverflowBehavior {
+        let idealHeight = groupedModelCardIdealHeight(
+            serviceCount: serviceCount,
+            widgetCount: widgetCount
+        )
+        guard panelHeight < idealHeight * groupedReadableScale else {
+            return FloatingPanelContentOverflowBehavior(
+                adaptiveScale: (panelHeight / idealHeight)
+                    .clamped(to: groupedReadableScale...maximumAdaptiveScale),
+                allowsVerticalScrolling: false
+            )
+        }
+        return FloatingPanelContentOverflowBehavior(
+            adaptiveScale: groupedReadableScale,
+            allowsVerticalScrolling: true
+        )
     }
 
     static func groupedModelCardIdealHeight(serviceCount: Int, widgetCount: Int = 0) -> CGFloat {

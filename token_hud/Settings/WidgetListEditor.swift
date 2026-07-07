@@ -3,18 +3,18 @@ import UniformTypeIdentifiers
 
 // MARK: - Preset Definition
 
-private struct WidgetPreset: Identifiable, Equatable {
+struct WidgetPreset: Identifiable, Equatable {
     let id = UUID()
     let config: WidgetConfig
 }
 
-private struct WidgetCapability {
+struct WidgetCapability {
     let service: String
     let metrics: [WidgetMetric]
     let presets: [WidgetConfig]
 }
 
-private let widgetCapabilities: [WidgetCapability] = [
+let widgetCapabilities: [WidgetCapability] = [
     WidgetCapability(
         service: "claude",
         metrics: [.remainingTime, .tokensRemaining, .sessionTokens],
@@ -76,11 +76,12 @@ private let widgetCapabilities: [WidgetCapability] = [
     ),
 ]
 
-private let presets: [WidgetPreset] = widgetCapabilities.flatMap { capability in
+let presets: [WidgetPreset] = widgetCapabilities.flatMap { capability in
     capability.presets.map { WidgetPreset(config: $0) }
 }
 
-private func serviceDisplayName(_ id: String) -> String {
+func serviceDisplayName(_ id: String, state: StateFile? = nil) -> String {
+    if let label = state?.services[id]?.label { return label }
     switch id {
     case "claude":    return "Claude"
     case "openai":    return "OpenAI"
@@ -94,48 +95,14 @@ private func serviceDisplayName(_ id: String) -> String {
     }
 }
 
-private func metricTitle(_ widget: WidgetConfig) -> String {
+func metricTitle(_ widget: WidgetConfig) -> String {
     if widget.service == "codex", widget.metric == .remainingTime {
         return widget.quotaIndex == 1 ? "7 天剩余量" : "5 小时剩余量"
     }
-    if widget.service == "mimo", widget.metric == .resetCountdown {
-        return "Token Plan 到期时间"
-    }
-    if widget.service == "mimo", widget.metric == .remainingTime {
-        return "Token Plan 到期时间"
-    }
-    return widget.metric.displayName
+    return widget.metric.baseTitle(for: widget.service)
 }
 
-private func metricIcon(_ metric: WidgetMetric) -> String {
-    switch metric {
-    case .remainingTime:     return "clock"
-    case .resetCountdown:    return "arrow.clockwise"
-    case .tokensRemaining:   return "text.bubble"
-    case .balance:           return "dollarsign.circle"
-    case .sessionTokens:     return "arrow.up.circle"
-    case .usagePercent:      return "chart.bar"
-    case .inputTokens:       return "arrow.down.circle"
-    case .outputTokens:      return "arrow.up.circle"
-    case .dailyTokens:       return "calendar"
-    case .monthlyTokens:     return "calendar.circle"
-    case .costSpent:         return "dollarsign.circle.fill"
-    case .dailyRequests:     return "number.circle"
-    case .monthlyRequests:   return "number.circle.fill"
-    case .sessionDuration:   return "timer"
-    case .tokensPerMinute:   return "bolt"
-    case .inputOutputRatio:  return "arrow.left.arrow.right"
-    case .costPerRequest:    return "dollarsign.arrow.circlepath"
-    case .rateLimitStatus:   return "exclamationmark.triangle"
-    case .creditsRemaining:  return "creditcard"
-    case .creditsUsed:       return "chart.pie"
-    case .sessionCredits:    return "sum"
-    case .subscriptionStatus:return "checkmark.seal"
-    case .planName:          return "tag"
-    }
-}
-
-private func styleIcon(_ style: WidgetStyle) -> String {
+func styleIcon(_ style: WidgetStyle) -> String {
     switch style {
     case .ring:           return "circle"
     case .bar:            return "chart.bar.xaxis"
@@ -148,15 +115,27 @@ private func styleIcon(_ style: WidgetStyle) -> String {
     }
 }
 
-private enum CompactBlackTheme {
+enum CompactBlackTheme {
     static let surface = Color.black
     static let elevated = Color(red: 0.025, green: 0.026, blue: 0.028)
     static let inset = Color(red: 0.045, green: 0.046, blue: 0.050)
+
+    // MARK: - Shared corner radius
+
+    static let cornerRadius: CGFloat = 8
+
+    // MARK: - Stroke / border opacities
+
     static let hairline = Color.white.opacity(0.12)
     static let hairlineSoft = Color.white.opacity(0.08)
+
+    // MARK: - Surface opacities
+
+    /// Very subtle fill for inset tile backgrounds
+    static let subtleFill = Color.white.opacity(0.035)
 }
 
-private struct CompactBlackPanelStyle: ViewModifier {
+struct CompactBlackPanelStyle: ViewModifier {
     let cornerRadius: CGFloat
     let fill: Color
     let strokeOpacity: Double
@@ -353,7 +332,8 @@ struct WidgetListEditor: View {
             apiKeys: apiKeys,
             mimoConsoleCookie: KeychainHelper.hasMiMoConsoleCookie() ? "saved" : nil,
             codexAdminKey: KeychainHelper.hasCodexAdminKey() ? "saved" : nil,
-            mimoTokenPlanKey: KeychainHelper.hasMiMoTokenPlanKey() ? "saved" : nil
+            mimoTokenPlanKey: KeychainHelper.hasMiMoTokenPlanKey() ? "saved" : nil,
+            openaiAdminKey: KeychainHelper.hasOpenAIAdminKey() ? "saved" : nil
         )
     }
 }
@@ -396,9 +376,9 @@ private struct ConfiguredWidgetRecommendationPanel: View {
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 54)
                     .background(CompactBlackTheme.inset)
-                    .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .clipShape(RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius, style: .continuous))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius, style: .continuous)
                             .stroke(CompactBlackTheme.hairlineSoft, lineWidth: 0.7)
                     )
             } else {
@@ -428,7 +408,7 @@ private struct RecommendationChip: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: metricIcon(widget.metric))
+            Image(systemName: widget.metric.icon)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(isAdded ? Color.secondary : Color.accentColor)
                 .frame(width: 18)
@@ -468,11 +448,11 @@ private struct RecommendationChip: View {
         .padding(.vertical, 7)
         .frame(width: 205, alignment: .leading)
         .background(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius, style: .continuous)
                 .fill(isAdded ? CompactBlackTheme.inset : Color.accentColor.opacity(0.12))
         )
         .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
+            RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius, style: .continuous)
                 .stroke(isAdded ? CompactBlackTheme.hairlineSoft : Color.accentColor.opacity(0.24), lineWidth: 0.7)
         )
     }
@@ -564,7 +544,7 @@ private struct NotchCollapsedSettingsPanel: View {
                 if !widgets.isEmpty {
                     Section("当前小组件") {
                         ForEach(widgets) { widget in
-                            Text("\(serviceDisplayName(widget.service)) · \(metricTitle(widget))")
+                            Text("\(serviceDisplayName(widget.service, state: state)) · \(metricTitle(widget))")
                                 .tag(NotchCollapsedSourceStore.rawValue(for: .widget(widget.id.uuidString)))
                         }
                     }
@@ -572,7 +552,7 @@ private struct NotchCollapsedSettingsPanel: View {
                 if !recommendations.isEmpty {
                     Section("已配置推荐") {
                         ForEach(recommendations, id: \.descriptor.semanticKey) { widget in
-                            Text("\(serviceDisplayName(widget.service)) · \(metricTitle(widget))")
+                            Text("\(serviceDisplayName(widget.service, state: state)) · \(metricTitle(widget))")
                                 .tag(NotchCollapsedSourceStore.rawValue(for: .metric(
                                     service: widget.service,
                                     metric: widget.metric.rawValue,
@@ -594,159 +574,6 @@ private struct NotchCollapsedSettingsPanel: View {
 }
 
 // MARK: - Preview
-
-private struct WidgetPreviewPanel: View {
-    @Binding var widgets: [WidgetConfig]
-    let state: StateFile
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Label("当前效果", systemImage: "rectangle.dashed")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
-                Spacer()
-                Text(summaryText)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-            }
-
-            ZStack {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(CompactBlackTheme.surface)
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .stroke(CompactBlackTheme.hairline, lineWidth: 0.8)
-                    .shadow(color: Color.black.opacity(0.22), radius: 14, y: 8)
-
-                if widgets.isEmpty {
-                    VStack(spacing: 6) {
-                        Image(systemName: "rectangle.3.group")
-                            .font(.system(size: 22))
-                            .foregroundStyle(.white.opacity(0.45))
-                        Text("还没有小组件")
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundStyle(.white.opacity(0.75))
-                        Text("从下方预设添加，或拖拽预设到这里。")
-                            .font(.caption2)
-                            .foregroundStyle(.white.opacity(0.45))
-                    }
-                } else {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(groupedWidgets) { group in
-                                WidgetPreviewGroupView(
-                                    group: group,
-                                    state: state,
-                                    onRemove: removeWidget
-                                )
-                            }
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
-                    }
-                }
-            }
-            .frame(height: widgets.isEmpty ? 118 : 224)
-            .animation(.easeInOut(duration: 0.25), value: widgets.isEmpty)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .environment(\.panelAdaptiveScale, 1.15)
-        }
-    }
-
-    private var summaryText: String {
-        guard !widgets.isEmpty else { return "0 个组件" }
-        return "\(groupedWidgets.count) 组 · \(widgets.count) 个组件 · 排序在下方"
-    }
-
-    private var groupedWidgets: [WidgetPreviewGroup] {
-        let configsByID = Dictionary(uniqueKeysWithValues: widgets.map { ($0.id.uuidString, $0) })
-        return WidgetServiceGrouping
-            .groups(for: widgets.map(\.descriptor))
-            .map { group in
-                WidgetPreviewGroup(
-                    service: group.service,
-                    widgets: group.widgets.compactMap { configsByID[$0.id] }
-                )
-            }
-            .filter { !$0.widgets.isEmpty }
-    }
-
-    private func removeWidget(_ config: WidgetConfig) {
-        widgets.removeAll { $0.id == config.id }
-    }
-}
-
-private struct WidgetPreviewGroup: Identifiable {
-    let service: String
-    let widgets: [WidgetConfig]
-
-    var id: String { service }
-}
-
-private struct WidgetPreviewGroupView: View {
-    let group: WidgetPreviewGroup
-    let state: StateFile
-    let onRemove: (WidgetConfig) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text(serviceDisplayName(group.service))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                Text("\(group.widgets.count)")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.42))
-                Spacer(minLength: 0)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(group.widgets) { config in
-                        WidgetPreviewItem(config: config, state: state) {
-                            onRemove(config)
-                        }
-                    }
-                }
-                .padding(.trailing, 2)
-            }
-        }
-    }
-}
-
-private struct WidgetPreviewItem: View {
-    let config: WidgetConfig
-    let state: StateFile
-    let onRemove: () -> Void
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            WidgetRenderer(config: config, state: state, showServiceLabel: false)
-                .padding(.vertical, 6)
-                .padding(.leading, 8)
-                .padding(.trailing, 24)
-
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.48))
-                    .frame(width: 16, height: 16)
-                    .padding(6)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("移除")
-            .padding(.top, 2)
-            .padding(.trailing, 2)
-        }
-        .background(CompactBlackTheme.inset)
-        .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8, style: .continuous)
-                .stroke(CompactBlackTheme.hairlineSoft, lineWidth: 0.7)
-        )
-    }
-}
 
 // MARK: - Active Widgets
 
@@ -838,9 +665,9 @@ private struct ActiveWidgetsPanel: View {
                     .foregroundColor(.secondary)
                     .frame(maxWidth: .infinity, minHeight: 150)
                     .background(CompactBlackTheme.inset)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
+                    .clipShape(RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius))
                     .overlay(
-                        RoundedRectangle(cornerRadius: 8)
+                        RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius)
                             .stroke(Color.white.opacity(0.14), style: StrokeStyle(lineWidth: 1, dash: [4]))
                     )
                     .onDrop(of: [.text], delegate: WidgetListDropDelegate(
@@ -863,9 +690,9 @@ private struct ActiveWidgetsPanel: View {
                 .listStyle(.plain)
                 .scrollContentBackground(.hidden)
                 .background(CompactBlackTheme.inset)
-                .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .clipShape(RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius, style: .continuous))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius, style: .continuous)
                         .stroke(CompactBlackTheme.hairlineSoft, lineWidth: 0.7)
                 )
                 .frame(minHeight: 180)
@@ -885,7 +712,7 @@ private struct WidgetRow: View {
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: metricIcon(widget.metric))
+            Image(systemName: widget.metric.icon)
                 .font(.system(size: 12))
                 .foregroundStyle(.secondary)
                 .frame(width: 18)
@@ -974,7 +801,7 @@ private struct PresetCard: View {
         Button(action: onAdd) {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 6) {
-                    Image(systemName: metricIcon(preset.config.metric))
+                    Image(systemName: preset.config.metric.icon)
                         .font(.system(size: 12, weight: .medium))
                         .foregroundStyle(.tint)
                     Text(serviceDisplayName(preset.config.service))
@@ -987,7 +814,7 @@ private struct PresetCard: View {
                     .font(.system(size: 11, weight: .medium))
                     .foregroundColor(.primary)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.78)
 
                 HStack(spacing: 4) {
                     Image(systemName: styleIcon(preset.config.style))
@@ -999,9 +826,9 @@ private struct PresetCard: View {
             .padding(10)
             .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
             .background(CompactBlackTheme.inset)
-            .clipShape(RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .clipShape(RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius, style: .continuous))
             .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                RoundedRectangle(cornerRadius: CompactBlackTheme.cornerRadius, style: .continuous)
                     .stroke(CompactBlackTheme.hairlineSoft, lineWidth: 0.7)
             )
         }
@@ -1050,146 +877,3 @@ private struct WidgetListDropDelegate: DropDelegate {
 }
 
 // MARK: - Custom Widget Sheet
-
-private struct CustomWidgetSheet: View {
-    let store: WidgetStore
-    @State private var selectedOptionID: String?
-    @State private var serviceFilter = "all"
-    @State private var searchText = ""
-    @State private var style: WidgetStyle = .bar
-    @Environment(\.dismiss) var dismiss
-
-    private struct Option: Identifiable, Equatable {
-        let service: String
-        let metric: WidgetMetric
-
-        var id: String { "\(service)-\(metric.rawValue)" }
-    }
-
-    private var options: [Option] {
-        widgetCapabilities.flatMap { capability in
-            capability.metrics.map { Option(service: capability.service, metric: $0) }
-        }
-    }
-
-    private var serviceOptions: [String] {
-        widgetCapabilities.map(\.service)
-    }
-
-    private var filteredOptions: [Option] {
-        options.filter { option in
-            let matchesService = serviceFilter == "all" || option.service == serviceFilter
-            let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-            let matchesSearch = query.isEmpty ||
-                serviceDisplayName(option.service).lowercased().contains(query) ||
-                option.metric.displayName.lowercased().contains(query) ||
-                metricTitle(WidgetConfig(service: option.service, metric: option.metric, style: style)).lowercased().contains(query)
-            return matchesService && matchesSearch
-        }
-    }
-
-    private var selectedOption: Option? {
-        guard let selectedOptionID else { return filteredOptions.first ?? options.first }
-        return options.first { $0.id == selectedOptionID }
-    }
-
-    private var availableStyles: [WidgetStyle] {
-        guard let option = selectedOption else { return [.bar, .text] }
-        switch option.metric {
-        case .remainingTime, .tokensRemaining, .usagePercent, .creditsUsed, .dailyTokens, .monthlyTokens:
-            return [.bar, .text]
-        case .rateLimitStatus, .subscriptionStatus, .planName:
-            return [.status, .text]
-        default:
-            return [.text, .bar]
-        }
-    }
-
-    var body: some View {
-        NavigationStack {
-            VStack(alignment: .leading, spacing: 12) {
-                TextField("搜索平台或指标", text: $searchText)
-                    .textFieldStyle(.roundedBorder)
-
-                Picker("平台", selection: $serviceFilter) {
-                    Text("全部平台").tag("all")
-                    ForEach(serviceOptions, id: \.self) { service in
-                        Text(serviceDisplayName(service)).tag(service)
-                    }
-                }
-                .pickerStyle(.segmented)
-
-                List(filteredOptions, selection: $selectedOptionID) { option in
-                    HStack(spacing: 10) {
-                        Image(systemName: metricIcon(option.metric))
-                            .foregroundStyle(.tint)
-                            .frame(width: 18)
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(metricTitle(WidgetConfig(service: option.service, metric: option.metric, style: style)))
-                                .font(.system(size: 12, weight: .medium))
-                            Text(serviceDisplayName(option.service))
-                                .font(.caption2)
-                                .foregroundStyle(.secondary)
-                        }
-                        Spacer()
-                        if option.id == selectedOption?.id {
-                            Image(systemName: "checkmark")
-                                .foregroundStyle(.tint)
-                        }
-                    }
-                    .tag(option.id)
-                }
-                .frame(minHeight: 220)
-
-                Picker("样式", selection: $style) {
-                    ForEach(availableStyles, id: \.self) {
-                        Text($0.displayName).tag($0)
-                    }
-                }
-                .pickerStyle(.segmented)
-            }
-            .padding()
-            .navigationTitle("自定义组件")
-            .toolbar {
-                ToolbarItem(placement: .cancellationAction) {
-                    Button("取消") { dismiss() }
-                }
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("添加") {
-                        guard let selectedOption else { return }
-                        store.widgets.append(WidgetConfig(
-                            service: selectedOption.service,
-                            metric: selectedOption.metric,
-                            style: style
-                        ))
-                        dismiss()
-                    }
-                    .disabled(selectedOption == nil)
-                }
-            }
-            .onAppear {
-                if selectedOptionID == nil {
-                    selectedOptionID = options.first?.id
-                }
-            }
-            .onChange(of: serviceFilter) { _, _ in
-                if let selectedOptionID,
-                   !filteredOptions.contains(where: { $0.id == selectedOptionID }) {
-                    self.selectedOptionID = filteredOptions.first?.id
-                }
-            }
-            .onChange(of: searchText) { _, _ in
-                if let selectedOptionID,
-                   !filteredOptions.contains(where: { $0.id == selectedOptionID }) {
-                    self.selectedOptionID = filteredOptions.first?.id
-                }
-            }
-            .onChange(of: selectedOption?.id) { _, _ in
-                if !availableStyles.contains(style) {
-                    style = availableStyles.first ?? .text
-                }
-            }
-        }
-        .frame(width: 520, height: 420)
-    }
-}

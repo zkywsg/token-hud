@@ -108,6 +108,17 @@ enum WidgetMetricComputer {
         }
     }
 
+    // MARK: - Tooltip
+
+    static func tooltipText(
+        metric: WidgetMetric,
+        service: Service?,
+        configService: String,
+        metricTitle: String
+    ) -> String {
+        "\(service?.label ?? configService) · \(metricTitle)"
+    }
+
     // MARK: - Fraction (usage 0...1)
 
     static func fraction(

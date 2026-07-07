@@ -29,7 +29,7 @@ struct WidgetRenderer: View {
                 case .text:
                     TextWidget(text: formattedValue, subtext: formattedDetail)
                 case .aggregate:
-                    AggregateWidget(icon: icon, value: formattedValue)
+                    AggregateWidget(icon: config.metric.icon, value: formattedValue)
                 case .multi:
                     MultiWidget(service: service, config: config, state: state)
                 case .countdown:
@@ -79,36 +79,11 @@ struct WidgetRenderer: View {
         return WidgetValueComputer.codexRateLimitDisplay(q).detail
     }
 
-    private var icon: String {
-        switch config.metric {
-        case .remainingTime:   return "clock"
-        case .resetCountdown:  return "arrow.clockwise"
-        case .tokensRemaining: return "text.bubble"
-        case .balance:         return "dollarsign.circle"
-        case .sessionTokens:   return "arrow.up.circle"
-        case .usagePercent:    return "chart.bar"
-        case .inputTokens:     return "arrow.down.circle"
-        case .outputTokens:    return "arrow.up.circle"
-        case .dailyTokens:     return "calendar"
-        case .monthlyTokens:   return "calendar.circle"
-        case .costSpent:       return "dollarsign.circle.fill"
-        case .dailyRequests:   return "number.circle"
-        case .monthlyRequests: return "number.circle.fill"
-        case .sessionDuration:   return "timer"
-        case .tokensPerMinute:   return "bolt.fill"
-        case .inputOutputRatio:  return "arrow.left.arrow.right"
-        case .costPerRequest:    return "dollarsign.arrow.circlepath"
-        case .rateLimitStatus:   return "exclamationmark.triangle"
-        case .creditsRemaining:  return "creditcard"
-        case .creditsUsed:       return "chart.pie"
-        case .sessionCredits:    return "sum"
-        case .subscriptionStatus:return "checkmark.seal"
-        case .planName:          return "tag"
-        }
-    }
-
     private var tooltipText: String {
-        "\(service?.label ?? config.service) · \(config.metric.displayName)"
+        WidgetMetricComputer.tooltipText(
+            metric: config.metric, service: service, configService: config.service,
+            metricTitle: config.metric.displayName
+        )
     }
 
     private var widgetCaption: String {
@@ -132,13 +107,7 @@ struct WidgetRenderer: View {
         if config.service == "codex", config.metric == .remainingTime {
             return ""
         }
-        if config.service == "mimo", config.metric == .resetCountdown {
-            return "Token Plan 到期时间"
-        }
-        if config.service == "mimo", config.metric == .remainingTime {
-            return "Token Plan 到期时间"
-        }
-        return config.metric.displayName
+        return config.metric.baseTitle(for: config.service)
     }
 
     private func quotaFraction(type: QuotaType) -> Double {
