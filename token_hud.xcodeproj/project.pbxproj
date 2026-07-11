@@ -46,6 +46,7 @@
 		884FBC8DB013EB9BE8FC4960 /* ServiceColor+SwiftUI.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1F4E0D8A9904A713314BBE06 /* ServiceColor+SwiftUI.swift */; };
 		890145F61B5D9DB8B8B6C1CA /* GlobalHotkeyManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = E83282326C0958A29BE530D6 /* GlobalHotkeyManager.swift */; };
 		94DD2048172D83044FB1C880 /* token_hudApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A6B354BB4B28539F177EE68A /* token_hudApp.swift */; };
+		9660D27BC668CE97C9BBF415 /* SummaryEntranceAnimation.swift in Sources */ = {isa = PBXBuildFile; fileRef = 860AB60E0039F62CB25C0C16 /* SummaryEntranceAnimation.swift */; };
 		96D7EF137D976D0F179E73D0 /* MultiWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C206289F4EAAB00762518B7 /* MultiWidget.swift */; };
 		A01E9B98696369E3A83021B3 /* MiMoConsoleConnectionSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1661E68AEBA3BF8DEEE8CDED /* MiMoConsoleConnectionSheet.swift */; };
 		A97C40BDDCBA9F970EC4DD4E /* AppDelegate.swift in Sources */ = {isa = PBXBuildFile; fileRef = AFB3E874F27CEB54B2DF5487 /* AppDelegate.swift */; };
@@ -57,13 +58,11 @@
 		DCC5DE4DC102C00369CC7575 /* NotchSurfacePolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = 28D0283F40C45F31116BEFF7 /* NotchSurfacePolicy.swift */; };
 		DD26E1DB0A41D26BD3A26788 /* ModelBreakdownWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = ACB8D39AB267CA78EFCC4FC4 /* ModelBreakdownWidget.swift */; };
 		F2E71681CDA08A979ACF1C4B /* NotchGeometryCalculator.swift in Sources */ = {isa = PBXBuildFile; fileRef = 240CEC7D3AC16015AF25170B /* NotchGeometryCalculator.swift */; };
-		F5996FFAA9A255EA220B8C96 /* settings-layout-options-preview.html in Resources */ = {isa = PBXBuildFile; fileRef = 1473074D0006E7007E5225E8 /* settings-layout-options-preview.html */; };
 		F6839D66065414BB4F75A4DB /* SettingsWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = 66A4DE6C02A1395C7E8137DD /* SettingsWindow.swift */; };
 		FFCF9C4BD34061DBCC15DB02 /* MenuBarBridgeProbe.swift in Sources */ = {isa = PBXBuildFile; fileRef = B0363728F904EEC55D3618B8 /* MenuBarBridgeProbe.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
-		1473074D0006E7007E5225E8 /* settings-layout-options-preview.html */ = {isa = PBXFileReference; lastKnownFileType = text.html; path = "settings-layout-options-preview.html"; sourceTree = "<group>"; };
 		15FA515D5AD06D073A0B6352 /* WidgetListEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetListEditor.swift; sourceTree = "<group>"; };
 		1661E68AEBA3BF8DEEE8CDED /* MiMoConsoleConnectionSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MiMoConsoleConnectionSheet.swift; sourceTree = "<group>"; };
 		18C08E05A79F9F9E1A1A1A71 /* PanelAdaptiveScale.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PanelAdaptiveScale.swift; sourceTree = "<group>"; };
@@ -88,6 +87,7 @@
 		6747C85B6651829B41BD60A2 /* AppFilterStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AppFilterStore.swift; sourceTree = "<group>"; };
 		785C48870F7D50C608E045F5 /* KeychainHelper.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = KeychainHelper.swift; sourceTree = "<group>"; };
 		7A158E1BC0799ACEB3F50ACD /* SessionKeyExtractor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionKeyExtractor.swift; sourceTree = "<group>"; };
+		860AB60E0039F62CB25C0C16 /* SummaryEntranceAnimation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SummaryEntranceAnimation.swift; sourceTree = "<group>"; };
 		868DD929F1D2119F6B8D9A12 /* AggregateWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AggregateWidget.swift; sourceTree = "<group>"; };
 		89530E550E7B97AB84CE7651 /* NotchHostRootView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NotchHostRootView.swift; sourceTree = "<group>"; };
 		8E74DD2F7701BA7EF38E4535 /* ServiceConfig.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServiceConfig.swift; sourceTree = "<group>"; };
@@ -126,7 +126,6 @@
 		00CAC50DA0902AF7048C17F1 /* token_hud */ = {
 			isa = PBXGroup;
 			children = (
-				1473074D0006E7007E5225E8 /* settings-layout-options-preview.html */,
 				C0B2D7C7E9909F98C9E209AA /* token_hud-Bridging-Header.h */,
 				CF286D60C8084A91D44CA0C6 /* token_hud.entitlements */,
 				778C05A0F15D257BFB45EB9F /* App */,
@@ -260,6 +259,7 @@
 				22F16105F2EE3761E5514C69 /* PanelResizeCalculator.swift */,
 				B5D2F4D47951E08FDD7AF203 /* ServiceAccentColor.swift */,
 				9A9DADE13CB5357B82D092F1 /* StateModel.swift */,
+				860AB60E0039F62CB25C0C16 /* SummaryEntranceAnimation.swift */,
 				5BF12C8A92C447614B489F22 /* WidgetConfiguration.swift */,
 				984F43F8D4E91F9EBD3E415A /* WidgetValueComputer.swift */,
 			);
@@ -283,7 +283,6 @@
 			buildConfigurationList = 7258629B9396D1CFC6554095 /* Build configuration list for PBXNativeTarget "token_hud" */;
 			buildPhases = (
 				7D386869204FB371E6A7E732 /* Sources */,
-				CD9AB752E4A27691D826D588 /* Resources */,
 			);
 			buildRules = (
 			);
@@ -329,17 +328,6 @@
 			);
 		};
 /* End PBXProject section */
-
-/* Begin PBXResourcesBuildPhase section */
-		CD9AB752E4A27691D826D588 /* Resources */ = {
-			isa = PBXResourcesBuildPhase;
-			buildActionMask = 2147483647;
-			files = (
-				F5996FFAA9A255EA220B8C96 /* settings-layout-options-preview.html in Resources */,
-			);
-			runOnlyForDeploymentPostprocessing = 0;
-		};
-/* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */
 		7D386869204FB371E6A7E732 /* Sources */ = {
@@ -388,6 +376,7 @@
 				083A42F6672126C58765CA1C /* StateModel.swift in Sources */,
 				600B13DFCCC5F789A0C2B73A /* StateWatcher.swift in Sources */,
 				5000ECFD9D7A35013383AEE0 /* StatusWidget.swift in Sources */,
+				9660D27BC668CE97C9BBF415 /* SummaryEntranceAnimation.swift in Sources */,
 				40A6924E9860250BF8373C7D /* TextWidget.swift in Sources */,
 				3DDC310558891FD49BE22D67 /* Theme.swift in Sources */,
 				1E77F3C6F81AD0564F14824C /* WidgetConfig.swift in Sources */,
