@@ -8,6 +8,8 @@ public enum SummaryEntranceAnimation {
         rowIndex: Int,
         reduceMotion: Bool
     ) -> Double {
+        guard !expansion.isNaN else { return 0 }
+
         let expansion = min(max(expansion, 0), 1)
         let staggeredIndex = reduceMotion ? 0 : min(max(rowIndex, 0), maximumStaggeredIndex)
         let rowStart = contentStart + Double(staggeredIndex) * staggerStep
