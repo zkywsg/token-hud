@@ -19,11 +19,16 @@ struct OverlayContentView: View {
     let layout: OverlayLayout
     let widgets: [WidgetConfig]
     let state: StateFile?
+    var entranceProgress: CGFloat = 1
 
     var body: some View {
         switch layout {
         case .summary:
-            OverlaySummaryView(widgets: widgets, state: state)
+            OverlaySummaryView(
+                widgets: widgets,
+                state: state,
+                entranceProgress: entranceProgress
+            )
         case .drawer:
             OverlayListView(widgets: widgets, state: state)
         case .paged:
@@ -93,6 +98,7 @@ private struct PageDots: View {
 struct OverlaySummaryView: View {
     let widgets: [WidgetConfig]
     let state: StateFile?
+    let entranceProgress: CGFloat
 
     @Environment(\.panelAdaptiveScale) private var scale
 
