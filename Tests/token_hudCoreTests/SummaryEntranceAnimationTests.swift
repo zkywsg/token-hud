@@ -11,6 +11,14 @@ struct SummaryEntranceAnimationTests {
         #expect(abs(SummaryEntranceAnimation.delay(rowIndex: 100, reduceMotion: false) - 0.15) < 0.000_001)
     }
 
+    @Test("Maximum staggered entrance fits the 250 millisecond budget")
+    func maximumEntranceFitsBudget() {
+        let totalDuration = SummaryEntranceAnimation.itemDuration
+            + SummaryEntranceAnimation.delay(rowIndex: 100, reduceMotion: false)
+
+        #expect(abs(totalDuration - 0.25) < 0.000_001)
+    }
+
     @Test("Negative row indices have no delay")
     func negativeRowHasNoDelay() {
         #expect(SummaryEntranceAnimation.delay(rowIndex: -1, reduceMotion: false) == 0)

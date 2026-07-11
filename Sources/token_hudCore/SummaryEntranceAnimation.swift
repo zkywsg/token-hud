@@ -1,4 +1,5 @@
 public enum SummaryEntranceAnimation {
+    public static let itemDuration = 0.10
     public static let staggerDelay = 0.025
     public static let maximumStaggeredIndex = 6
 

@@ -186,7 +186,7 @@ private extension View {
     ) -> some View {
         let animation = reduceMotion
             ? Animation.easeOut(duration: 0.12)
-            : Animation.easeOut(duration: 0.18).delay(
+            : Animation.easeOut(duration: SummaryEntranceAnimation.itemDuration).delay(
                 SummaryEntranceAnimation.delay(rowIndex: rowIndex, reduceMotion: reduceMotion)
             )
 
