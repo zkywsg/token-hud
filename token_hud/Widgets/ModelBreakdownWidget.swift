@@ -26,9 +26,11 @@ struct ModelBreakdownWidget: View {
                         Spacer()
                         Text(WidgetValueComputer.formattedModelTokens(usage))
                             .font(.system(size: 8 * scale, weight: .semibold, design: .rounded))
+                            .monospacedDigit()
                             .foregroundColor(.white)
                         Text(WidgetValueComputer.formattedModelCost(usage))
                             .font(.system(size: 8 * scale, weight: .regular, design: .rounded))
+                            .monospacedDigit()
                             .foregroundColor(.white.opacity(0.6))
                     }
                 }

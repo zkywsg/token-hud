@@ -5,20 +5,15 @@ struct FloatingPanelView: View {
     @Environment(StateWatcher.self) private var watcher
     @Environment(WidgetStore.self) private var store
     @AppStorage("floatingPanelScale") private var scale = 1.0
-    @AppStorage("overlayMode") private var overlayMode = "compact"
+    @AppStorage("overlayLayout") private var overlayLayoutRaw = OverlayLayout.summary.rawValue
+    @AppStorage("widgetSizeScale") private var widgetSizeScale = 1.0
     @State private var gestureStartScale: CGFloat = 1.0
 
     var body: some View {
         GeometryReader { geometry in
             let adaptiveScale = calculateAdaptiveScale(for: geometry.size)
             ZStack(alignment: .bottomTrailing) {
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(.regularMaterial)
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(Color.black.opacity(0.58))
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.white.opacity(0.16), lineWidth: 0.8)
-                    .shadow(color: .black.opacity(0.28), radius: 12, y: 6)
+                SolidPanelBackground(shape: RoundedRectangle(cornerRadius: 8))
 
                 overlayContent
                     .padding(12 * adaptiveScale)
@@ -49,28 +44,18 @@ struct FloatingPanelView: View {
         .onAppear { gestureStartScale = scale }
     }
 
-    @ViewBuilder
     private var overlayContent: some View {
-        if overlayMode == "grouped" {
-            GroupedOverlayView(
-                widgets: store.widgets,
-                state: watcher.effectiveState
-            )
-        } else {
-            CompactOverlayContent()
-        }
+        OverlayContentView(
+            layout: OverlayLayout.from(overlayLayoutRaw),
+            widgets: store.widgets,
+            state: watcher.effectiveState
+        )
     }
 
     private func calculateAdaptiveScale(for size: CGSize) -> CGFloat {
-        let baseHeight: CGFloat = 60
-        let idealHeight: CGFloat
-        if overlayMode == "grouped" {
-            let serviceCount = Set(store.widgets.map(\.service)).count
-            idealHeight = max(baseHeight, CGFloat(serviceCount) * 32 + 16)
-        } else {
-            idealHeight = baseHeight
-        }
-        return (size.height / idealHeight).clamped(to: 0.5...3.0)
+        // Detached panel content uses a fixed, readable scale; overflow
+        // scrolls inside the list instead of shrinking the text.
+        widgetSizeScale
     }
 }
 

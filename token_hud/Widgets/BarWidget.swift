@@ -6,6 +6,7 @@ struct BarWidget: View {
     let label: String
     var detail: String? = nil
     let width: CGFloat
+    var service: String? = nil
 
     @Environment(\.panelAdaptiveScale) private var scale
 
@@ -21,7 +22,7 @@ struct BarWidget: View {
             GeometryReader { geo in
                 ZStack(alignment: .leading) {
                     RoundedRectangle(cornerRadius: 2 * scale)
-                        .fill(Color.white.opacity(0.13))
+                        .fill(trackColor)
                         .frame(height: 4 * scale)
 
                     RoundedRectangle(cornerRadius: 2 * scale)
@@ -42,6 +43,11 @@ struct BarWidget: View {
             }
         }
         .frame(width: width)
+    }
+
+    private var trackColor: Color {
+        guard let service else { return Color.white.opacity(0.13) }
+        return serviceAccentSwiftUIColor(for: service).opacity(0.30)
     }
 
     private var barColor: Color {

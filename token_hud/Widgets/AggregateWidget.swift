@@ -4,14 +4,20 @@ import SwiftUI
 struct AggregateWidget: View {
     let icon: String    // SF Symbol name
     let value: String
+    var service: String? = nil
 
     @Environment(\.panelAdaptiveScale) private var scale
+
+    private var iconColor: Color {
+        guard let service else { return Color.white.opacity(0.62) }
+        return serviceAccentSwiftUIColor(for: service)
+    }
 
     var body: some View {
         HStack(spacing: 2 * scale) {
             Image(systemName: icon)
                 .font(.system(size: 8 * scale, weight: .bold))
-                .foregroundColor(.white.opacity(0.62))
+                .foregroundColor(iconColor)
             Text(value)
                 .font(.system(size: 12 * scale, weight: .semibold, design: .rounded))
                 .monospacedDigit()

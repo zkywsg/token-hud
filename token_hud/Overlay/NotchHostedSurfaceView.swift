@@ -8,7 +8,8 @@ struct NotchHostedSurfaceView: View {
     @Environment(NotchHostState.self) private var hostState
     @Environment(WidgetStore.self) private var store
     @Environment(StateWatcher.self) private var watcher
-    @AppStorage("overlayMode") private var overlayMode = "compact"
+    @AppStorage("overlayLayout") private var overlayLayoutRaw = OverlayLayout.summary.rawValue
+    @AppStorage("widgetSizeScale") private var widgetSizeScale = 1.0
     @AppStorage("notchCollapsedLeadingSource") private var collapsedLeadingSource = NotchCollapsedSourceStore.autoRawValue
     @AppStorage("notchCollapsedTrailingSource") private var collapsedTrailingSource = NotchCollapsedSourceStore.autoRawValue
 
@@ -104,26 +105,16 @@ struct NotchHostedSurfaceView: View {
         )
 
         return ZStack {
-            panelShape
-                .fill(.regularMaterial)
-            panelShape
-                .fill(Color.black.opacity(0.70))
-            panelShape
-                .stroke(Color.white.opacity(0.12 * opacity), lineWidth: 0.8)
-                .shadow(color: Color.black.opacity(0.20 * opacity), radius: 18, y: 10)
+            SolidPanelBackground(shape: panelShape, prominence: opacity)
 
-            VStack {
-                if overlayMode == "grouped" {
-                    GroupedOverlayView(
-                        widgets: store.widgets,
-                        state: watcher.effectiveState
-                    )
-                } else {
-                    CompactOverlayContent()
-                }
-            }
-            .padding(.horizontal, 12 * adaptiveScale)
-            .padding(.vertical, 8 * adaptiveScale)
+            OverlayContentView(
+                layout: OverlayLayout.from(overlayLayoutRaw),
+                widgets: store.widgets,
+                state: watcher.effectiveState
+            )
+            .environment(\.panelAdaptiveScale, widgetSizeScale)
+            .padding(.horizontal, 12 * widgetSizeScale)
+            .padding(.vertical, 8 * widgetSizeScale)
             .opacity(opacity)
             .scaleEffect(0.98 + 0.02 * opacity)
         }
@@ -137,12 +128,17 @@ struct NotchHostedSurfaceView: View {
     private func progressBar(fraction: Double) -> some View {
         GeometryReader { geo in
             let value = fraction.clamped(to: 0...1)
+            let color = progressColor(for: value)
             ZStack(alignment: .leading) {
                 Capsule()
                     .fill(Color.white.opacity(0.18))
                 Capsule()
-                    .fill(progressColor(for: value))
+                    .fill(color)
                     .frame(width: geo.size.width * value)
+                    // Subtle glow when usage is critical, so a nearly-exhausted
+                    // quota reads at a glance even in the tiny collapsed strip.
+                    .shadow(color: value >= 0.85 ? color.opacity(0.85) : .clear, radius: 3)
+                    .animation(.easeOut(duration: 0.3), value: value)
             }
         }
     }
@@ -164,10 +160,13 @@ struct NotchHostedSurfaceView: View {
             let screenFrame = hostState.screenFrame == .zero
                 ? CGRect(origin: .zero, size: size)
                 : hostState.screenFrame
+            // Match the adaptive height the manager baked into the window frame.
+            let bodyHeight = hostState.frames.map { $0.expanded.height - geometry.menuBarHeight }
             return NotchGeometryCalculator.hostedSurfaceLayout(
                 screenFrame: screenFrame,
                 geometry: geometry,
-                expansionProgress: hostState.expansionProgress
+                expansionProgress: hostState.expansionProgress,
+                expandedHeight: bodyHeight
             )
         }
         let fallbackScreen = CGRect(origin: .zero, size: size)
@@ -180,16 +179,10 @@ struct NotchHostedSurfaceView: View {
     }
 
     private func adaptiveScale(for size: CGSize) -> CGFloat {
-        let baseHeight: CGFloat = 60
-        let idealHeight: CGFloat
-        if overlayMode == "grouped" {
-            let serviceCount = Set(store.widgets.map(\.service)).count
-            idealHeight = max(baseHeight, CGFloat(serviceCount) * 32 + 16)
-        } else {
-            idealHeight = baseHeight
-        }
-        guard size.height > 1 else { return 1 }
-        return (size.height / idealHeight).clamped(to: 0.5...3.0)
+        // The expanded body now uses a fixed content scale (widgetSizeScale)
+        // with internal scrolling, so the surface scale only needs to stay
+        // stable; content no longer stretches to fill the panel height.
+        widgetSizeScale
     }
 
     // MARK: - Status

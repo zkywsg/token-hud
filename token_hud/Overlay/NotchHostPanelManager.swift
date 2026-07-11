@@ -19,6 +19,12 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     private var mouseDownMonitor: Any?
     private var isDragging = false
     private var isResettingHostedFrame = false
+    /// True only while `restoreState()` runs. Programmatic `setFrame` /
+    /// styleMask changes during restore synchronously fire
+    /// `windowDidResize` / `windowDidMove`; without this guard those
+    /// callbacks mistake the restore resize for a user action and kick off
+    /// an unwanted `transitionTo(.detached)`, leaving both windows visible.
+    private var isRestoringState = false
     private var savedDetachedFrame: CGRect?
     private var targetDisplayID: CGDirectDisplayID?
     private var surfaceStrategy: NotchSurfaceStrategy = .publicPanel
@@ -59,6 +65,31 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             name: NSApplication.didChangeScreenParametersNotification,
             object: nil
         )
+
+        observeContentChanges()
+    }
+
+    // MARK: - Live content height
+
+    /// Re-measures the adaptive panel height when the widget list changes, so
+    /// an expanded panel grows/shrinks live instead of waiting for the next
+    /// expand. Re-registers itself because `withObservationTracking` fires once.
+    private func observeContentChanges() {
+        withObservationTracking {
+            _ = widgetStore.widgets.count
+        } onChange: { [weak self] in
+            Task { @MainActor [weak self] in
+                self?.handleContentHeightChange()
+                self?.observeContentChanges()
+            }
+        }
+    }
+
+    private func handleContentHeightChange() {
+        guard hostState.isHosted, !isRestoringState, !isDragging else { return }
+        guard let screen = preferredScreen(preferredWindow: overlayWindow) else { return }
+        refreshGeometry(for: screen)
+        reassertHostedFrame(reason: "content height change")
     }
 
     func teardown() {
@@ -230,7 +261,24 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     }
 
     private func computeFrames(for screen: NSScreen, geometry: NotchGeometry) -> NotchFrames {
-        NotchGeometryCalculator.notchFrames(screenFrame: screen.frame, geometry: geometry)
+        let layout = OverlayLayout.from(
+            UserDefaults.standard.string(forKey: "overlayLayout") ?? OverlayLayout.summary.rawValue
+        )
+        let height: CGFloat
+        if layout == .paged {
+            height = NotchGeometryCalculator.pagedExpandedHeight()
+        } else {
+            height = NotchGeometryCalculator.adaptiveExpandedHeight(
+                itemCount: widgetStore.widgets.count,
+                isSummary: layout == .summary,
+                availableHeight: screen.visibleFrame.height
+            )
+        }
+        return NotchGeometryCalculator.notchFrames(
+            screenFrame: screen.frame,
+            geometry: geometry,
+            expandedHeight: height
+        )
     }
 
     private func preferredScreen(preferredWindow: NSWindow? = nil) -> NSScreen? {
@@ -571,6 +619,11 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
         guard let win = overlayWindow else { return }
         cancelCollapseTimer()
         detachedWindow?.orderOut(nil)
+        // Re-measure adaptive height against the current widget count so the
+        // panel grows/shrinks to fit before it animates open.
+        if let screen = preferredScreen(preferredWindow: overlayWindow) {
+            refreshGeometry(for: screen)
+        }
         reassertHostedFrame(reason: "animate expanded")
         prepareOverlayForDisplay(label: "animate expanded")
         // Expanded surface is draggable; once the user drags more than a
@@ -682,6 +735,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     // MARK: - NSWindowDelegate
 
     func windowDidMove(_ notification: Notification) {
+        guard !isRestoringState else { return }
         let movedWindow = notification.object as? NSWindow
         let movedWindowNumber = movedWindow?.windowNumber
 
@@ -726,7 +780,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     }
 
     func windowDidResize(_ notification: Notification) {
-        guard !isAnimating else { return }
+        guard !isRestoringState, !isResettingHostedFrame, !isAnimating else { return }
         if hostState.isHosted {
             // Resize while hosted should not happen (style mask prevents it)
             transitionTo(.detached)
@@ -872,6 +926,8 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     }
 
     private func restoreState() {
+        isRestoringState = true
+        defer { isRestoringState = false }
         guard let screen = preferredScreen(preferredWindow: detachedWindow ?? overlayWindow) else { return }
         refreshGeometry(for: screen)
         guard let frames = hostState.frames, let geo = hostState.geometry else { return }

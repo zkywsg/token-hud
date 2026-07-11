@@ -5,12 +5,14 @@ struct RingWidget: View {
     let fraction: Double  // 0.0 – 1.0 (used / total, so remaining = 1 - fraction)
     let label: String
     let size: CGFloat
+    var service: String? = nil
 
     var body: some View {
         ZStack {
-            // Track
+            // Track — tinted with the service's accent color for at-a-glance identification.
+            // The progress arc below keeps the usage/warning color untouched.
             Circle()
-                .stroke(Color.white.opacity(0.15), lineWidth: lineWidth)
+                .stroke(trackColor, lineWidth: lineWidth)
 
             // Progress arc (shows remaining, so 1 - fraction)
             Circle()
@@ -25,6 +27,7 @@ struct RingWidget: View {
             // Center label
             Text(label)
                 .font(.system(size: size * 0.28, weight: .semibold, design: .rounded))
+                .monospacedDigit()
                 .foregroundColor(.white)
                 .minimumScaleFactor(0.5)
                 .lineLimit(1)
@@ -33,6 +36,11 @@ struct RingWidget: View {
     }
 
     private var lineWidth: CGFloat { size * 0.12 }
+
+    private var trackColor: Color {
+        guard let service else { return Color.white.opacity(0.15) }
+        return serviceAccentSwiftUIColor(for: service).opacity(0.35)
+    }
 
     private var ringColor: Color {
         // fraction = used/total; low fraction = lots remaining = green

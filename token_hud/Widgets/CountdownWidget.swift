@@ -3,6 +3,7 @@ import SwiftUI
 struct CountdownWidget: View {
     let fraction: Double
     let label: String
+    var service: String? = nil
 
     @AppStorage("widgetSizeScale") private var widgetSizeScale = 1.0
     @Environment(\.panelAdaptiveScale) private var adaptiveScale
@@ -13,12 +14,17 @@ struct CountdownWidget: View {
         return .green
     }
 
+    private var trackColor: Color {
+        guard let service else { return Color.white.opacity(0.15) }
+        return serviceAccentSwiftUIColor(for: service).opacity(0.35)
+    }
+
     private var effectiveScale: CGFloat { widgetSizeScale * adaptiveScale }
 
     var body: some View {
         ZStack {
             Circle()
-                .stroke(Color.white.opacity(0.15), lineWidth: 3 * effectiveScale)
+                .stroke(trackColor, lineWidth: 3 * effectiveScale)
             Circle()
                 .trim(from: 0, to: fraction)
                 .stroke(color, style: StrokeStyle(lineWidth: 3 * effectiveScale, lineCap: .round))
@@ -26,6 +32,7 @@ struct CountdownWidget: View {
                 .animation(.easeOut(duration: 0.3), value: fraction)
             Text(label)
                 .font(.system(size: 9 * effectiveScale, weight: .bold, design: .rounded))
+                .monospacedDigit()
                 .foregroundColor(.white)
                 .minimumScaleFactor(0.5)
         }

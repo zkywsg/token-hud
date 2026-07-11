@@ -22,7 +22,7 @@ struct PlatformListView: View {
             platformSidebar
                 .frame(width: 260)
             Rectangle()
-                .fill(Color.primary.opacity(0.08))
+                .fill(Theme.Palette.borderSubtle)
                 .frame(width: 0.8)
             PlatformDetailView(
                 provider: selectedProvider,
@@ -57,11 +57,11 @@ struct PlatformListView: View {
                 Text(resetMessage)
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 8)
-                    .background(.regularMaterial)
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .padding(.bottom, 12)
+                    .padding(.horizontal, Theme.Spacing.md)
+                    .padding(.vertical, Theme.Spacing.sm)
+                    .glassCard(cornerRadius: Theme.Radius.sm, padding: nil)
+                    .padding(.bottom, Theme.Spacing.md)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
             }
         }
         .task {
@@ -90,10 +90,10 @@ struct PlatformListView: View {
                     Spacer()
                     Text("已配置 \(configuredCount)")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.green)
+                        .foregroundStyle(Theme.Palette.statusOK)
                         .padding(.horizontal, 8)
                         .padding(.vertical, 4)
-                        .background(Color.green.opacity(0.13))
+                        .background(Theme.Palette.statusOK.opacity(0.14))
                         .clipShape(Capsule())
                 }
                 Text("已配置平台会排在前面。")
@@ -127,8 +127,7 @@ struct PlatformListView: View {
         }
         .background(.ultraThinMaterial)
         .overlay {
-            Color.white.opacity(0.035)
-                .allowsHitTesting(false)
+            Color.white.opacity(0.03).allowsHitTesting(false)
         }
     }
 
@@ -213,12 +212,12 @@ struct PlatformListView: View {
     }
 
     private func showResetMessage(_ message: String, duration: TimeInterval = 2.5) {
-        resetMessage = message
+        withAnimation(.easeInOut(duration: 0.2)) { resetMessage = message }
         let token = resetMessageGate.advance()
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: UInt64(duration * 1_000_000_000))
             if resetMessageGate.isCurrent(token) {
-                resetMessage = nil
+                withAnimation(.easeInOut(duration: 0.2)) { resetMessage = nil }
             }
         }
     }
@@ -267,17 +266,23 @@ private struct PlatformSidebarRow: View {
         ProviderDataStatus.status(for: service)
     }
 
+    /// Stable per-provider identity color — kept separate from `credentialStatus`/`dataStatus`
+    /// colors, which continue to signal quota/auth warnings, not provider identity.
+    private var accentColor: Color {
+        serviceAccentSwiftUIColor(for: provider.id)
+    }
+
     var body: some View {
         Button(action: onSelect) {
             VStack(alignment: .leading, spacing: 7) {
                 HStack(spacing: 8) {
                     RoundedRectangle(cornerRadius: 2)
-                        .fill(isSelected ? Color.accentColor : Color.clear)
+                        .fill(isSelected ? accentColor : Color.clear)
                         .frame(width: 3, height: 18)
                     Image(systemName: iconName)
                         .font(.system(size: 13, weight: .semibold))
                         .frame(width: 18)
-                        .foregroundColor(isSelected ? .accentColor : .secondary)
+                        .foregroundColor(isSelected ? accentColor : accentColor.opacity(0.55))
                     Text(provider.displayName)
                         .font(.system(size: 13, weight: .semibold))
                         .foregroundStyle(.primary)
@@ -288,18 +293,18 @@ private struct PlatformSidebarRow: View {
                 }
                 StatusPill(
                     title: needsAuthorization ? "需授权" : dataStatus.title(for: provider.id),
-                    color: needsAuthorization ? .orange : dataStatus.color
+                    color: needsAuthorization ? Theme.Palette.statusWarn : dataStatus.color
                 )
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(.horizontal, 9)
             .padding(.vertical, 9)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(isSelected ? Color.accentColor.opacity(0.14) : Color.white.opacity(0.035))
+            .background(isSelected ? accentColor.opacity(0.14) : Color.white.opacity(0.035))
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(isSelected ? Color.accentColor.opacity(0.28) : Color.white.opacity(0.06), lineWidth: 0.8)
+                    .stroke(isSelected ? accentColor.opacity(0.28) : Color.white.opacity(0.06), lineWidth: 0.8)
             )
         }
         .buttonStyle(.plain)
@@ -405,7 +410,7 @@ private struct PlatformDetailView: View {
         StatusPill(title: credentialStatus.title, color: credentialStatus.color)
         StatusPill(title: dataStatus.title(for: provider.id), color: dataStatus.color)
         if needsAuthorization {
-            StatusPill(title: "需授权刷新", color: .orange)
+            StatusPill(title: "需授权刷新", color: Theme.Palette.statusWarn)
         }
     }
 
@@ -591,7 +596,7 @@ private struct PlatformCredentialPanel: View {
             switch credentialSnapshot.miMoAPIKeyRole {
             case .tokenPlanKey:
                 Label("Token Plan Key 已配置，可用于套餐服务。", systemImage: "checkmark.circle")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Theme.Palette.statusOK)
             case .payAsYouGoAPIKey:
                 Label("按量 API Key 已配置，仅用于调用验证。", systemImage: "info.circle")
                     .foregroundStyle(.secondary)
@@ -605,10 +610,10 @@ private struct PlatformCredentialPanel: View {
 
             if credentialSnapshot.maskedMiMoConsoleCookie != nil {
                 Label("Console Cookie 已配置，可查询控制台 Token Plan。", systemImage: "checkmark.circle")
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Theme.Palette.statusOK)
             } else if !credentialSnapshot.hasMiMoTokenPlanCredential {
                 Label("未配置套餐查询凭据；推荐使用 Token Plan Key 或连接控制台。", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.Palette.statusWarn)
             }
         }
         .font(.caption)
@@ -651,7 +656,7 @@ private struct PlatformCredentialPanel: View {
             case .expired:
                 Label("认证已过期，请在 Terminal 运行 `codex login`。", systemImage: "exclamationmark.triangle")
                     .font(.caption)
-                    .foregroundStyle(.orange)
+                    .foregroundStyle(Theme.Palette.statusWarn)
                     .fixedSize(horizontal: false, vertical: true)
             case .notConfigured:
                 Label("未找到 Codex 登录信息，请在 Terminal 运行 `codex login`。", systemImage: "info.circle")
@@ -698,7 +703,7 @@ private struct PlatformCredentialPanel: View {
             if credentialSnapshot.hasCodexAdminKey {
                 Label("Extras key 已配置；刷新时会尝试查询 Usage/Costs。权限不足时不会覆盖本地 Codex 数据。", systemImage: "checkmark.circle")
                     .font(.caption)
-                    .foregroundStyle(.green)
+                    .foregroundStyle(Theme.Palette.statusOK)
                     .fixedSize(horizontal: false, vertical: true)
             } else {
                 Label("未配置 extras key；Codex 仍会使用 Codex 本地登录查询套餐和限额。", systemImage: "info.circle")
@@ -1061,8 +1066,8 @@ private enum ProviderCredentialStatus: Equatable {
 
     var color: Color {
         switch self {
-        case .configured:    return .green
-        case .expired:       return .orange
+        case .configured:    return Theme.Palette.statusOK
+        case .expired:       return Theme.Palette.statusWarn
         case .notConfigured: return .secondary
         }
     }
@@ -1148,16 +1153,8 @@ private struct GlassPanel<Content: View>: View {
 
     var body: some View {
         content
-            .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.thinMaterial)
-            .background(Color.white.opacity(0.06))
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(Color.white.opacity(0.12), lineWidth: 0.8)
-            )
-            .shadow(color: Color.black.opacity(0.05), radius: 10, y: 4)
+            .glassCard(cornerRadius: Theme.Radius.md, padding: Theme.Spacing.md)
     }
 }
 
@@ -1240,7 +1237,7 @@ private struct QuotaStatusRow: View {
             }
             if quota.total != nil {
                 ProgressView(value: min(max(quota.usedFraction, 0), 1))
-                    .tint(quota.usedFraction > 0.85 ? .red : .accentColor)
+                    .tint(quota.usedFraction > 0.85 ? Theme.Palette.statusError : Theme.Palette.brandAccent)
             }
         }
     }
@@ -1422,12 +1419,12 @@ private extension ProviderDataStatus {
 
     var color: Color {
         switch self {
-        case .ready:            return .green
-        case .usageUnsupported: return .blue
-        case .tokenExpired:     return .orange
-        case .permissionDenied: return .yellow
+        case .ready:            return Theme.Palette.statusOK
+        case .usageUnsupported: return Theme.Palette.brandAccent
+        case .tokenExpired:     return Theme.Palette.statusWarn
+        case .permissionDenied: return Theme.Palette.statusWarn
         case .networkError:     return .secondary
-        case .error:            return .red
+        case .error:            return Theme.Palette.statusError
         case .notQueried, .noUsageData:
             return .secondary
         }

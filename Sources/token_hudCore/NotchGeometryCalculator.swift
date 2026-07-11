@@ -57,6 +57,36 @@ enum NotchGeometryCalculator {
     static let collapsedHoverPadding: CGFloat = collapsedTriggerHitPadding
     static let expandedHeight: CGFloat = 110
     static let expandedBodyMaxWidth: CGFloat = 560
+
+    /// Estimated body height for the expanded panel given its content, so the
+    /// panel grows to fit instead of clipping. Clamped to
+    /// `[expandedHeight, availableHeight * 0.6]`; overflow beyond that scrolls.
+    static let heroRowHeight: CGFloat = 84
+    static let listRowHeight: CGFloat = 40
+    static let bodyVerticalPadding: CGFloat = 16
+
+    static func adaptiveExpandedHeight(
+        itemCount: Int,
+        isSummary: Bool,
+        availableHeight: CGFloat
+    ) -> CGFloat {
+        guard itemCount > 0 else { return expandedHeight }
+        let base: CGFloat
+        if isSummary {
+            let listRows = max(0, itemCount - 1)
+            base = heroRowHeight + CGFloat(listRows) * listRowHeight + bodyVerticalPadding
+        } else {
+            base = CGFloat(itemCount) * listRowHeight + bodyVerticalPadding
+        }
+        let maxHeight = max(expandedHeight, availableHeight * 0.6)
+        return base.clamped(to: expandedHeight...maxHeight)
+    }
+
+    /// Paged layout shows one hero-sized page plus a dots row; height is fixed
+    /// regardless of item count.
+    static func pagedExpandedHeight() -> CGFloat {
+        max(expandedHeight, heroRowHeight + bodyVerticalPadding + 14)
+    }
     static let contentFadeStartProgress: CGFloat = 0.55
     static let snapZoneExpandX: CGFloat = 80
     static let snapZoneExpandY: CGFloat = 50
@@ -109,8 +139,10 @@ enum NotchGeometryCalculator {
 
     static func notchFrames(
         screenFrame: CGRect,
-        geometry: NotchGeometry
+        geometry: NotchGeometry,
+        expandedHeight customExpandedHeight: CGFloat? = nil
     ) -> NotchFrames {
+        let bodyHeight = customExpandedHeight ?? expandedHeight
         let notchCenterX = geometry.hasNotch
             ? (geometry.notchGapMinX + geometry.notchGapMaxX) / 2
             : screenFrame.midX
@@ -135,9 +167,9 @@ enum NotchGeometryCalculator {
             x: (notchCenterX - expandedWidth / 2).clamped(
                 to: screenFrame.minX...(screenFrame.maxX - expandedWidth)
             ),
-            y: hostTopY - geometry.menuBarHeight - expandedHeight,
+            y: hostTopY - geometry.menuBarHeight - bodyHeight,
             width: expandedWidth,
-            height: geometry.menuBarHeight + expandedHeight
+            height: geometry.menuBarHeight + bodyHeight
         )
 
         let snapZone = CGRect(
@@ -263,10 +295,11 @@ enum NotchGeometryCalculator {
     static func hostedSurfaceLayout(
         screenFrame: CGRect,
         geometry: NotchGeometry,
-        expansionProgress: CGFloat
+        expansionProgress: CGFloat,
+        expandedHeight customExpandedHeight: CGFloat? = nil
     ) -> NotchHostedSurfaceLayout {
         let progress = expansionProgress.clamped(to: 0...1)
-        let frames = notchFrames(screenFrame: screenFrame, geometry: geometry)
+        let frames = notchFrames(screenFrame: screenFrame, geometry: geometry, expandedHeight: customExpandedHeight)
         let surfaceSize = frames.expanded.size
         let menuBarHeight = geometry.menuBarHeight
 
@@ -285,7 +318,9 @@ enum NotchGeometryCalculator {
         )
         let collapsedTopCapWidth = min(surfaceSize.width, gapWidth + collapsedStatusWidth * 2)
 
-        let bodyHeight = expandedHeight * progress
+        // Derive from the actual surface height so adaptive (taller) panels
+        // expand their body accordingly instead of assuming the 110pt default.
+        let bodyHeight = max(0, surfaceSize.height - menuBarHeight) * progress
         let bodyMaxWidth = min(surfaceSize.width, expandedBodyMaxWidth)
         let bodyMinWidth = min(bodyMaxWidth, max(collapsedTopCapWidth, 120))
         let bodyWidth = interpolate(from: bodyMinWidth, to: bodyMaxWidth, progress: progress)

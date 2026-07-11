@@ -215,6 +215,55 @@ struct NotchGeometryCalculatorTests {
         #expect(frames.expanded.maxY == screen.maxY)
     }
 
+    // MARK: - Adaptive expanded height
+
+    @Test func customExpandedHeightDrivesFrameAndBody() {
+        let geo = NotchGeometryCalculator.notchGeometry(
+            screenFrame: screen, safeAreaInsetTop: safeAreaTop,
+            auxiliaryTopLeftArea: leftAux, auxiliaryTopRightArea: rightAux
+        )
+        let custom: CGFloat = 260
+        let frames = NotchGeometryCalculator.notchFrames(
+            screenFrame: screen, geometry: geo, expandedHeight: custom
+        )
+        #expect(frames.expanded.height == geo.menuBarHeight + custom)
+        #expect(frames.expanded.maxY == screen.maxY)
+
+        let layout = NotchGeometryCalculator.hostedSurfaceLayout(
+            screenFrame: screen, geometry: geo, expansionProgress: 1, expandedHeight: custom
+        )
+        #expect(layout.body.height == custom)
+        #expect(layout.surfaceSize == frames.expanded.size)
+    }
+
+    @Test func adaptiveHeightGrowsWithItemsAndClamps() {
+        let avail: CGFloat = 900
+        let base = NotchGeometryCalculator.expandedHeight
+
+        // Empty falls back to the default.
+        #expect(NotchGeometryCalculator.adaptiveExpandedHeight(itemCount: 0, isSummary: true, availableHeight: avail) == base)
+
+        // Few items: at least the default, grows with count.
+        let one = NotchGeometryCalculator.adaptiveExpandedHeight(itemCount: 1, isSummary: true, availableHeight: avail)
+        let three = NotchGeometryCalculator.adaptiveExpandedHeight(itemCount: 3, isSummary: true, availableHeight: avail)
+        #expect(one >= base)
+        #expect(three > one)
+
+        // Many items clamp to availableHeight * 0.6.
+        let many = NotchGeometryCalculator.adaptiveExpandedHeight(itemCount: 100, isSummary: true, availableHeight: avail)
+        #expect(many == avail * 0.6)
+    }
+
+    @Test func adaptiveHeightNeverBelowDefault() {
+        let small = NotchGeometryCalculator.adaptiveExpandedHeight(itemCount: 50, isSummary: false, availableHeight: 100)
+        #expect(small >= NotchGeometryCalculator.expandedHeight)
+    }
+
+    @Test func pagedHeightIsFixedAndAtLeastDefault() {
+        let h = NotchGeometryCalculator.pagedExpandedHeight()
+        #expect(h >= NotchGeometryCalculator.expandedHeight)
+    }
+
     // MARK: - Snap zone
 
     @Test func snapZoneEnclosesCollapsed() {

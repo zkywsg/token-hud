@@ -1,6 +1,5 @@
 // token_hud/Support/KeychainHelper.swift
 import Foundation
-import LocalAuthentication
 import Security
 
 enum KeychainHelper {
@@ -151,9 +150,14 @@ enum KeychainHelper {
             kSecMatchLimit:   kSecMatchLimitOne,
         ]
         if !allowUserInteraction {
-            let context = LAContext()
-            context.interactionNotAllowed = true
-            query[kSecUseAuthenticationContext] = context
+            // On the macOS file-based keychain, `LAContext.interactionNotAllowed`
+            // does NOT suppress the ACL password dialog — only
+            // `kSecUseAuthenticationUIFail` makes a would-be-interactive read
+            // fail silently (errSecInteractionNotAllowed) instead of prompting.
+            // Without this, every background/interval fetch pops the keychain
+            // prompt. Explicit user-triggered reads pass allowUserInteraction:true
+            // and still prompt once, as intended.
+            query[kSecUseAuthenticationUI] = kSecUseAuthenticationUIFail
         }
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)

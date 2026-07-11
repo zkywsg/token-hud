@@ -394,7 +394,7 @@ private struct RecommendationChip: View {
         HStack(spacing: 8) {
             Image(systemName: metricIcon(widget.metric))
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(isAdded ? Color.secondary : Color.accentColor)
+                .foregroundStyle(isAdded ? Color.secondary : serviceAccentSwiftUIColor(for: widget.service))
                 .frame(width: 18)
             VStack(alignment: .leading, spacing: 2) {
                 Text(serviceDisplayName(widget.service))
@@ -431,11 +431,11 @@ private struct RecommendationChip: View {
         .padding(.horizontal, 10)
         .padding(.vertical, 7)
         .frame(width: 205, alignment: .leading)
-        .background(isAdded ? Color.secondary.opacity(0.06) : Color.accentColor.opacity(0.07))
+        .background(isAdded ? Color.secondary.opacity(0.06) : Theme.Palette.brandAccent.opacity(0.10))
         .clipShape(RoundedRectangle(cornerRadius: 7))
         .overlay(
             RoundedRectangle(cornerRadius: 7)
-                .stroke(isAdded ? Color.secondary.opacity(0.10) : Color.accentColor.opacity(0.14), lineWidth: 0.6)
+                .stroke(isAdded ? Color.secondary.opacity(0.10) : Theme.Palette.brandAccent.opacity(0.20), lineWidth: 0.6)
         )
     }
 }
@@ -563,11 +563,12 @@ private struct NotchCollapsedSettingsPanel: View {
 private struct WidgetPreviewPanel: View {
     @Binding var widgets: [WidgetConfig]
     let state: StateFile
+    @AppStorage("overlayLayout") private var overlayLayoutRaw = "summary"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack {
-                Label("当前效果", systemImage: "rectangle.dashed")
+                Label("实时预览", systemImage: "rectangle.dashed")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -576,11 +577,11 @@ private struct WidgetPreviewPanel: View {
                     .foregroundStyle(.secondary)
             }
 
-            ZStack {
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(Color(red: 0.015, green: 0.017, blue: 0.02).opacity(0.96))
+            ZStack(alignment: .topTrailing) {
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(Theme.SurfaceLevel.raised.gradient)
                     .overlay(
-                        RoundedRectangle(cornerRadius: 10)
+                        RoundedRectangle(cornerRadius: 12, style: .continuous)
                             .stroke(Color.white.opacity(0.10), lineWidth: 0.8)
                     )
                     .shadow(color: Color.black.opacity(0.16), radius: 14, y: 8)
@@ -597,118 +598,34 @@ private struct WidgetPreviewPanel: View {
                             .font(.caption2)
                             .foregroundStyle(.white.opacity(0.45))
                     }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    ScrollView(.vertical, showsIndicators: false) {
-                        VStack(alignment: .leading, spacing: 12) {
-                            ForEach(groupedWidgets) { group in
-                                WidgetPreviewGroupView(
-                                    group: group,
-                                    state: state,
-                                    onRemove: removeWidget
-                                )
-                            }
-                        }
-                        .padding(14)
-                        .frame(maxWidth: .infinity, alignment: .topLeading)
+                    OverlayContentView(
+                        layout: OverlayLayout.from(overlayLayoutRaw),
+                        widgets: widgets,
+                        state: state
+                    )
+                    .environment(\.panelAdaptiveScale, 1.0)
+                    .padding(12)
+
+                    if overlayLayoutRaw == "summary" {
+                        Text("主指标 (hero)")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(.white.opacity(0.7))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(Color.white.opacity(0.10), in: Capsule())
+                            .padding(8)
                     }
                 }
             }
-            .frame(height: widgets.isEmpty ? 118 : 224)
-            .environment(\.panelAdaptiveScale, 1.15)
+            .frame(height: widgets.isEmpty ? 118 : 240)
         }
     }
 
     private var summaryText: String {
         guard !widgets.isEmpty else { return "0 个组件" }
-        return "\(groupedWidgets.count) 组 · \(widgets.count) 个组件 · 排序在下方"
-    }
-
-    private var groupedWidgets: [WidgetPreviewGroup] {
-        let configsByID = Dictionary(uniqueKeysWithValues: widgets.map { ($0.id.uuidString, $0) })
-        return WidgetServiceGrouping
-            .groups(for: widgets.map(\.descriptor))
-            .map { group in
-                WidgetPreviewGroup(
-                    service: group.service,
-                    widgets: group.widgets.compactMap { configsByID[$0.id] }
-                )
-            }
-            .filter { !$0.widgets.isEmpty }
-    }
-
-    private func removeWidget(_ config: WidgetConfig) {
-        widgets.removeAll { $0.id == config.id }
-    }
-}
-
-private struct WidgetPreviewGroup: Identifiable {
-    let service: String
-    let widgets: [WidgetConfig]
-
-    var id: String { service }
-}
-
-private struct WidgetPreviewGroupView: View {
-    let group: WidgetPreviewGroup
-    let state: StateFile
-    let onRemove: (WidgetConfig) -> Void
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text(serviceDisplayName(group.service))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.72))
-                Text("\(group.widgets.count)")
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundStyle(.white.opacity(0.42))
-                Spacer(minLength: 0)
-            }
-
-            ScrollView(.horizontal, showsIndicators: false) {
-                HStack(spacing: 8) {
-                    ForEach(group.widgets) { config in
-                        WidgetPreviewItem(config: config, state: state) {
-                            onRemove(config)
-                        }
-                    }
-                }
-                .padding(.trailing, 2)
-            }
-        }
-    }
-}
-
-private struct WidgetPreviewItem: View {
-    let config: WidgetConfig
-    let state: StateFile
-    let onRemove: () -> Void
-
-    var body: some View {
-        ZStack(alignment: .topTrailing) {
-            WidgetRenderer(config: config, state: state, showServiceLabel: false)
-                .padding(.vertical, 6)
-                .padding(.leading, 8)
-                .padding(.trailing, 24)
-
-            Button(action: onRemove) {
-                Image(systemName: "xmark.circle.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundStyle(.white.opacity(0.48))
-                    .frame(width: 20, height: 20)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-            .help("移除")
-            .padding(.top, 3)
-            .padding(.trailing, 3)
-        }
-        .background(Color.white.opacity(0.055))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.white.opacity(0.10), lineWidth: 0.7)
-        )
+        return "\(widgets.count) 个组件 · 第一条为主指标 · 排序在下方"
     }
 }
 

@@ -13,7 +13,7 @@ struct MultiWidget: View {
                 HStack(spacing: 4 * scale) {
                     Image(systemName: item.icon)
                         .font(.system(size: 7 * scale, weight: .bold))
-                        .foregroundColor(.white.opacity(0.6))
+                        .foregroundColor(serviceAccentSwiftUIColor(for: config.service))
                         .frame(width: 10 * scale)
                     Text(item.label)
                         .font(.system(size: 8 * scale, weight: .regular))
@@ -21,6 +21,7 @@ struct MultiWidget: View {
                         .frame(width: 28 * scale, alignment: .leading)
                     Text(item.value)
                         .font(.system(size: 9 * scale, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
                         .foregroundColor(.white)
                         .minimumScaleFactor(0.7)
                 }

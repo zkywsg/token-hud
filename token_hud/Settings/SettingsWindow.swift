@@ -18,11 +18,11 @@ struct SettingsWindow: View {
                 sidebar
                     .frame(width: sidebarWidth)
                 Rectangle()
-                    .fill(Color.primary.opacity(0.08))
+                    .fill(Theme.Palette.borderSubtle)
                     .frame(width: 0.8)
                 detail
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .background(Color.white.opacity(0.035))
+                    .background(Color.white.opacity(0.03))
             }
         }
         .frame(
@@ -43,7 +43,7 @@ struct SettingsWindow: View {
                 } label: {
                     HStack(spacing: 10) {
                         RoundedRectangle(cornerRadius: 2)
-                            .fill(selectedSection == section ? Color.accentColor : Color.clear)
+                            .fill(selectedSection == section ? Theme.Palette.brandAccent : Color.clear)
                             .frame(width: 3, height: 18)
                         Label(section.title, systemImage: section.systemImage)
                             .font(.system(size: 14, weight: .semibold))
@@ -51,26 +51,26 @@ struct SettingsWindow: View {
                         Spacer(minLength: 0)
                     }
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 10)
+                    .padding(.horizontal, Theme.Spacing.md)
                     .padding(.vertical, 9)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(selectedSection == section ? .primary : .secondary)
                 .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(selectedSection == section ? Color.accentColor.opacity(0.16) : Color.clear)
+                    RoundedRectangle(cornerRadius: Theme.Radius.sm)
+                        .fill(selectedSection == section ? Theme.Palette.brandAccent.opacity(0.18) : Color.clear)
                 )
             }
             Spacer()
         }
         .padding(.top, chromeTopInset)
-        .padding(.horizontal, 12)
-        .padding(.bottom, 12)
-        .background(.regularMaterial.opacity(0.78))
+        .padding(.horizontal, Theme.Spacing.md)
+        .padding(.bottom, Theme.Spacing.md)
+        .background(.regularMaterial.opacity(0.6))
         .overlay(alignment: .trailing) {
             Rectangle()
-                .fill(Color.white.opacity(0.08))
+                .fill(Theme.Palette.borderSubtle)
                 .frame(width: 1)
         }
     }
@@ -103,22 +103,7 @@ struct SettingsWindow: View {
 
 private struct SettingsGlassBackground: View {
     var body: some View {
-        ZStack {
-            Rectangle()
-                .fill(.regularMaterial)
-            Rectangle()
-                .fill(
-                    LinearGradient(
-                        colors: [
-                            Color.white.opacity(0.16),
-                            Color.white.opacity(0.07),
-                            Color.black.opacity(0.05)
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
-        }
+        Theme.GlassWindowBackground()
     }
 }
 
@@ -185,18 +170,22 @@ private struct FloatingPanelSection: View {
     @AppStorage("floatingHotkeyKeyCode") private var keyCode = -1
     @AppStorage("floatingHotkeyModifiers") private var modifiers = 0
     @AppStorage("floatingPanelScale") private var scale = 1.0
-    @AppStorage("overlayMode") private var overlayMode = "compact"
+    @AppStorage("overlayLayout") private var overlayLayout = "summary"
     @State private var accessibilityEnabled = GlobalHotkeyManager.isAccessibilityEnabled
 
     var body: some View {
         Section("浮动面板") {
             Toggle("启用浮动面板", isOn: $enabled)
             if enabled {
-                Picker("显示模式", selection: $overlayMode) {
-                    Text("紧凑").tag("compact")
-                    Text("分组").tag("grouped")
+                Picker("布局", selection: $overlayLayout) {
+                    Text("摘要").tag("summary")
+                    Text("列表").tag("drawer")
+                    Text("分页").tag("paged")
                 }
                 .pickerStyle(.segmented)
+                Text("摘要：第一条放大为主指标；列表：等高排列；分页：一屏一个，左右翻页。")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
                 KeyRecorder(label: "快捷键", keyCode: $keyCode, modifiers: $modifiers)
                 if requiresAccessibilityPrompt {
                     HStack(alignment: .firstTextBaseline, spacing: 10) {
@@ -332,7 +321,7 @@ private struct KeyRecorder: View {
                     .foregroundStyle(isRecording ? .white : .primary)
                     .padding(.horizontal, 8)
                     .padding(.vertical, 4)
-                    .background(isRecording ? Color.accentColor : Color.secondary.opacity(0.15))
+                    .background(isRecording ? Theme.Palette.brandAccent : Color.secondary.opacity(0.15))
                     .clipShape(RoundedRectangle(cornerRadius: 6))
             }
             .buttonStyle(.plain)
