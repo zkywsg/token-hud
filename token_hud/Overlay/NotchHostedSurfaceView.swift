@@ -111,7 +111,7 @@ struct NotchHostedSurfaceView: View {
                 layout: OverlayLayout.from(overlayLayoutRaw),
                 widgets: store.widgets,
                 state: watcher.effectiveState,
-                entranceProgress: hostState.expansionProgress
+                entranceState: hostState.isExpanded
             )
             .environment(\.panelAdaptiveScale, widgetSizeScale)
             .padding(.horizontal, 12 * widgetSizeScale)

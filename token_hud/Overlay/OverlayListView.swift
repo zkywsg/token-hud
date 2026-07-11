@@ -24,7 +24,7 @@ struct OverlayContentView: View {
     let layout: OverlayLayout
     let widgets: [WidgetConfig]
     let state: StateFile?
-    var entranceProgress: CGFloat = 1
+    var entranceState: Bool? = nil
 
     var body: some View {
         switch layout {
@@ -32,7 +32,7 @@ struct OverlayContentView: View {
             OverlaySummaryView(
                 widgets: widgets,
                 state: state,
-                entranceProgress: entranceProgress
+                entranceState: entranceState
             )
         case .drawer:
             OverlayListView(widgets: widgets, state: state)
@@ -103,10 +103,12 @@ private struct PageDots: View {
 struct OverlaySummaryView: View {
     let widgets: [WidgetConfig]
     let state: StateFile?
-    let entranceProgress: CGFloat
+    let entranceState: Bool?
 
     @Environment(\.panelAdaptiveScale) private var scale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var entranceVisible = true
+    @State private var entranceGeneration = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -114,7 +116,8 @@ struct OverlaySummaryView: View {
                 OverlayHeroRow(config: hero, state: state, presentation: .summary)
                     .padding(.bottom, 4 * scale)
                     .summaryEntrance(
-                        progress: visibleProgress(for: 0),
+                        visible: entranceVisible,
+                        rowIndex: 0,
                         scale: scale,
                         reduceMotion: reduceMotion
                     )
@@ -128,7 +131,8 @@ struct OverlaySummaryView: View {
                                 OverlayListRow(config: config, state: state, presentation: .summary)
                             }
                             .summaryEntrance(
-                                progress: visibleProgress(for: index + 1),
+                                visible: entranceVisible,
+                                rowIndex: index + 1,
                                 scale: scale,
                                 reduceMotion: reduceMotion
                             )
@@ -137,21 +141,53 @@ struct OverlaySummaryView: View {
                 }
             }
         }
+        .onChange(of: entranceState, initial: true) { _, newValue in
+            updateEntrance(for: newValue)
+        }
     }
 
-    private func visibleProgress(for rowIndex: Int) -> CGFloat {
-        CGFloat(SummaryEntranceAnimation.progress(
-            expansion: Double(entranceProgress),
-            rowIndex: rowIndex,
-            reduceMotion: reduceMotion
-        ))
+    private func updateEntrance(for trigger: Bool?) {
+        entranceGeneration += 1
+        let generation = entranceGeneration
+
+        var transaction = Transaction()
+        transaction.disablesAnimations = true
+
+        guard trigger == true else {
+            withTransaction(transaction) {
+                entranceVisible = true
+            }
+            return
+        }
+
+        withTransaction(transaction) {
+            entranceVisible = false
+        }
+
+        Task { @MainActor [generation] in
+            await Task.yield()
+            guard generation == entranceGeneration, entranceState == true else { return }
+            entranceVisible = true
+        }
     }
 }
 
 private extension View {
-    func summaryEntrance(progress: CGFloat, scale: CGFloat, reduceMotion: Bool) -> some View {
-        opacity(progress)
-            .offset(y: reduceMotion ? 0 : 5 * scale * (1 - progress))
+    func summaryEntrance(
+        visible: Bool,
+        rowIndex: Int,
+        scale: CGFloat,
+        reduceMotion: Bool
+    ) -> some View {
+        let animation = reduceMotion
+            ? Animation.easeOut(duration: 0.12)
+            : Animation.easeOut(duration: 0.18).delay(
+                SummaryEntranceAnimation.delay(rowIndex: rowIndex, reduceMotion: reduceMotion)
+            )
+
+        return opacity(visible ? 1 : 0)
+            .offset(y: reduceMotion || visible ? 0 : 5 * scale)
+            .animation(animation, value: visible)
     }
 }
 
