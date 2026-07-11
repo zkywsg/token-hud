@@ -13,6 +13,11 @@ enum OverlayLayout: String, CaseIterable {
     }
 }
 
+fileprivate enum OverlayPresentation {
+    case standard
+    case summary
+}
+
 /// Dispatches the configured layout. `summary` is implemented; `drawer` and
 /// `paged` currently render the plain list (A/C are a later round).
 struct OverlayContentView: View {
@@ -106,7 +111,7 @@ struct OverlaySummaryView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let hero = widgets.first {
-                OverlayHeroRow(config: hero, state: state)
+                OverlayHeroRow(config: hero, state: state, presentation: .summary)
                     .padding(.bottom, 4 * scale)
                     .summaryEntrance(
                         progress: visibleProgress(for: 0),
@@ -120,7 +125,7 @@ struct OverlaySummaryView: View {
                         ForEach(Array(widgets.dropFirst().enumerated()), id: \.element.id) { index, config in
                             VStack(alignment: .leading, spacing: 0) {
                                 Divider().overlay(Color.white.opacity(index == 0 ? 0.10 : 0.06))
-                                OverlayListRow(config: config, state: state)
+                                OverlayListRow(config: config, state: state, presentation: .summary)
                             }
                             .summaryEntrance(
                                 progress: visibleProgress(for: index + 1),
@@ -175,13 +180,51 @@ struct OverlayListView: View {
 struct OverlayHeroRow: View {
     let config: WidgetConfig
     let state: StateFile?
+    fileprivate var presentation: OverlayPresentation = .standard
 
     @Environment(\.panelAdaptiveScale) private var scale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var metric: WidgetMetricComputer { WidgetMetricComputer(config: config, state: state) }
     private var accent: Color { serviceAccentSwiftUIColor(for: config.service) }
 
     var body: some View {
+        switch presentation {
+        case .standard:
+            standardBody
+        case .summary:
+            summaryBody
+        }
+    }
+
+    private var standardBody: some View {
+        VStack(alignment: .leading, spacing: 4 * scale) {
+            HStack(spacing: 8 * scale) {
+                iconChip
+                VStack(alignment: .leading, spacing: 0) {
+                    Text(metric.serviceLabel)
+                        .font(.system(size: 12 * scale, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.92))
+                        .lineLimit(1)
+                    if !metric.metricTitle.isEmpty {
+                        Text(metric.metricTitle)
+                            .font(.system(size: 10 * scale, weight: .regular))
+                            .foregroundColor(.white.opacity(0.45))
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 8 * scale)
+            }
+
+            animatedValue(size: 30 * scale)
+
+            if showsBar {
+                UsageBar(fraction: metric.fraction, accent: accent, height: 5 * scale)
+            }
+        }
+    }
+
+    private var summaryBody: some View {
         VStack(alignment: .leading, spacing: 4 * scale) {
             HStack(alignment: .center, spacing: 8 * scale) {
                 iconChip
@@ -200,19 +243,13 @@ struct OverlayHeroRow: View {
                 }
                 Spacer(minLength: 8 * scale)
                 VStack(alignment: .trailing, spacing: 0) {
-                    Text(metric.formattedValue)
-                        .font(.system(size: 26 * scale, weight: .semibold, design: .rounded))
-                        .monospacedDigit()
-                        .foregroundColor(.white)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.5)
-                        .contentTransition(.numericText())
-                        .animation(.snappy(duration: 0.35), value: metric.formattedValue)
+                    animatedValue(size: 26 * scale)
                     if let detail = metric.formattedDetail, !detail.isEmpty {
                         Text(detail)
                             .font(.system(size: 9 * scale, weight: .medium, design: .monospaced))
                             .foregroundColor(.white.opacity(0.5))
                             .lineLimit(1)
+                            .minimumScaleFactor(0.65)
                             .textCase(.uppercase)
                     }
                 }
@@ -220,9 +257,25 @@ struct OverlayHeroRow: View {
             }
 
             if showsBar {
-                UsageBar(fraction: metric.fraction, accent: accent, height: 5 * scale)
+                UsageBar(
+                    fraction: metric.fraction,
+                    accent: accent,
+                    height: 5 * scale,
+                    presentation: .summary
+                )
             }
         }
+    }
+
+    private func animatedValue(size: CGFloat) -> some View {
+        Text(metric.formattedValue)
+            .font(.system(size: size, weight: .semibold, design: .rounded))
+            .monospacedDigit()
+            .foregroundColor(.white)
+            .lineLimit(1)
+            .minimumScaleFactor(0.5)
+            .contentTransition(reduceMotion ? .identity : .numericText())
+            .animation(reduceMotion ? nil : .snappy(duration: 0.35), value: metric.formattedValue)
     }
 
     private var iconChip: some View {
@@ -242,8 +295,10 @@ struct OverlayHeroRow: View {
 struct OverlayListRow: View {
     let config: WidgetConfig
     let state: StateFile?
+    fileprivate var presentation: OverlayPresentation = .standard
 
     @Environment(\.panelAdaptiveScale) private var scale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     private var metric: WidgetMetricComputer { WidgetMetricComputer(config: config, state: state) }
     private var accent: Color { serviceAccentSwiftUIColor(for: config.service) }
@@ -277,30 +332,60 @@ struct OverlayListRow: View {
                         .foregroundColor(.white)
                         .lineLimit(1)
                         .minimumScaleFactor(0.6)
-                        .contentTransition(.numericText())
-                        .animation(.snappy(duration: 0.35), value: metric.formattedValue)
-                    if let detail = metric.formattedDetail, !detail.isEmpty {
-                        Text(detail)
-                            .font(.system(size: 9 * scale, weight: .medium))
-                            .monospacedDigit()
-                            .foregroundColor(.white.opacity(0.5))
-                            .lineLimit(1)
+                        .contentTransition(reduceMotion ? .identity : .numericText())
+                        .animation(
+                            reduceMotion ? nil : .snappy(duration: 0.35),
+                            value: metric.formattedValue
+                        )
+                    if presentation == .summary {
+                        if let detail = metric.formattedDetail, !detail.isEmpty {
+                            detailText(detail)
+                                .minimumScaleFactor(0.65)
+                        }
+                    } else if let detail = metric.formattedDetail {
+                        detailText(detail)
                     }
                 }
-                .frame(width: 76 * scale, alignment: .trailing)
+                .modifier(ValueColumnFrame(presentation: presentation, scale: scale))
             }
 
             if showsBar {
-                UsageBar(fraction: metric.fraction, accent: accent, height: 4 * scale)
+                UsageBar(
+                    fraction: metric.fraction,
+                    accent: accent,
+                    height: 4 * scale,
+                    presentation: presentation
+                )
             }
         }
         .padding(.vertical, 6 * scale)
+    }
+
+    private func detailText(_ detail: String) -> some View {
+        Text(detail)
+            .font(.system(size: 9 * scale, weight: .medium))
+            .monospacedDigit()
+            .foregroundColor(.white.opacity(0.5))
+            .lineLimit(1)
     }
 
     private var showsBar: Bool {
         switch config.metric {
         case .subscriptionStatus, .planName, .resetCountdown: return false
         default: return metric.fraction > 0
+        }
+    }
+}
+
+private struct ValueColumnFrame: ViewModifier {
+    let presentation: OverlayPresentation
+    let scale: CGFloat
+
+    func body(content: Content) -> some View {
+        if presentation == .summary {
+            content.frame(width: 76 * scale, alignment: .trailing)
+        } else {
+            content.frame(minWidth: 64 * scale, alignment: .trailing)
         }
     }
 }
@@ -335,6 +420,7 @@ struct UsageBar: View {
     let fraction: Double
     let accent: Color
     var height: CGFloat = 4
+    fileprivate var presentation: OverlayPresentation = .standard
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
@@ -347,16 +433,24 @@ struct UsageBar: View {
                     .fill(barColor)
                     .frame(width: geo.size.width * CGFloat(remaining))
                     .shadow(
-                        color: fraction >= 0.85 ? barColor.opacity(0.32) : .clear,
-                        radius: fraction >= 0.85 ? 3 : 0
+                        color: showsGlow ? barColor.opacity(0.32) : .clear,
+                        radius: showsGlow ? 3 : 0
                     )
                     .animation(
-                        reduceMotion ? nil : .easeOut(duration: 0.22),
+                        animatesWidth ? .easeOut(duration: 0.22) : nil,
                         value: remaining
                     )
             }
         }
         .frame(height: height)
+    }
+
+    private var animatesWidth: Bool {
+        presentation == .summary && !reduceMotion
+    }
+
+    private var showsGlow: Bool {
+        presentation == .summary && fraction >= 0.85
     }
 
     private var barColor: Color {
