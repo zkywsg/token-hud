@@ -22,4 +22,14 @@ struct SummaryEntranceAnimationTests {
             #expect(SummaryEntranceAnimation.delay(rowIndex: rowIndex, reduceMotion: true) == 0)
         }
     }
+
+    @Test("Only an explicit collapsed to expanded edge animates")
+    func onlyExpansionEdgeAnimates() {
+        #expect(SummaryEntranceAnimation.shouldAnimate(previous: false, current: true))
+        #expect(!SummaryEntranceAnimation.shouldAnimate(previous: nil, current: true))
+        #expect(!SummaryEntranceAnimation.shouldAnimate(previous: true, current: true))
+        #expect(!SummaryEntranceAnimation.shouldAnimate(previous: true, current: false))
+        #expect(!SummaryEntranceAnimation.shouldAnimate(previous: false, current: false))
+        #expect(!SummaryEntranceAnimation.shouldAnimate(previous: nil, current: nil))
+    }
 }

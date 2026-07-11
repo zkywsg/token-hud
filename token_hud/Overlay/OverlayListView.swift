@@ -108,7 +108,7 @@ struct OverlaySummaryView: View {
     @Environment(\.panelAdaptiveScale) private var scale
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var entranceVisible = true
-    @State private var entranceGeneration = 0
+    @State private var entranceTask: Task<Void, Never>?
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -141,19 +141,23 @@ struct OverlaySummaryView: View {
                 }
             }
         }
-        .onChange(of: entranceState, initial: true) { _, newValue in
-            updateEntrance(for: newValue)
+        .onChange(of: entranceState, initial: true) { oldValue, newValue in
+            updateEntrance(previous: oldValue, current: newValue)
+        }
+        .onDisappear {
+            entranceTask?.cancel()
+            entranceTask = nil
         }
     }
 
-    private func updateEntrance(for trigger: Bool?) {
-        entranceGeneration += 1
-        let generation = entranceGeneration
+    private func updateEntrance(previous: Bool?, current: Bool?) {
+        entranceTask?.cancel()
+        entranceTask = nil
 
         var transaction = Transaction()
         transaction.disablesAnimations = true
 
-        guard trigger == true else {
+        guard SummaryEntranceAnimation.shouldAnimate(previous: previous, current: current) else {
             withTransaction(transaction) {
                 entranceVisible = true
             }
@@ -164,10 +168,11 @@ struct OverlaySummaryView: View {
             entranceVisible = false
         }
 
-        Task { @MainActor [generation] in
+        entranceTask = Task { @MainActor in
             await Task.yield()
-            guard generation == entranceGeneration, entranceState == true else { return }
+            guard !Task.isCancelled, entranceState == true else { return }
             entranceVisible = true
+            entranceTask = nil
         }
     }
 }

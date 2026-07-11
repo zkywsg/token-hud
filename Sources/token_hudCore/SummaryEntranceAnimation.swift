@@ -10,4 +10,8 @@ public enum SummaryEntranceAnimation {
         let staggeredIndex = min(max(rowIndex, 0), maximumStaggeredIndex)
         return Double(staggeredIndex) * staggerDelay
     }
+
+    public static func shouldAnimate(previous: Bool?, current: Bool?) -> Bool {
+        previous == false && current == true
+    }
 }
