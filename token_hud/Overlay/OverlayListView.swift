@@ -101,27 +101,52 @@ struct OverlaySummaryView: View {
     let entranceProgress: CGFloat
 
     @Environment(\.panelAdaptiveScale) private var scale
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if let hero = widgets.first {
                 OverlayHeroRow(config: hero, state: state)
                     .padding(.bottom, 4 * scale)
+                    .summaryEntrance(
+                        progress: visibleProgress(for: 0),
+                        scale: scale,
+                        reduceMotion: reduceMotion
+                    )
             }
             if widgets.count > 1 {
-                Divider().overlay(Color.white.opacity(0.10))
                 ScrollView(.vertical, showsIndicators: false) {
                     VStack(alignment: .leading, spacing: 0) {
                         ForEach(Array(widgets.dropFirst().enumerated()), id: \.element.id) { index, config in
-                            if index > 0 {
-                                Divider().overlay(Color.white.opacity(0.06))
+                            VStack(alignment: .leading, spacing: 0) {
+                                Divider().overlay(Color.white.opacity(index == 0 ? 0.10 : 0.06))
+                                OverlayListRow(config: config, state: state)
                             }
-                            OverlayListRow(config: config, state: state)
+                            .summaryEntrance(
+                                progress: visibleProgress(for: index + 1),
+                                scale: scale,
+                                reduceMotion: reduceMotion
+                            )
                         }
                     }
                 }
             }
         }
+    }
+
+    private func visibleProgress(for rowIndex: Int) -> CGFloat {
+        CGFloat(SummaryEntranceAnimation.progress(
+            expansion: Double(entranceProgress),
+            rowIndex: rowIndex,
+            reduceMotion: reduceMotion
+        ))
+    }
+}
+
+private extension View {
+    func summaryEntrance(progress: CGFloat, scale: CGFloat, reduceMotion: Bool) -> some View {
+        opacity(progress)
+            .offset(y: reduceMotion ? 0 : 5 * scale * (1 - progress))
     }
 }
 
@@ -158,7 +183,7 @@ struct OverlayHeroRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4 * scale) {
-            HStack(spacing: 8 * scale) {
+            HStack(alignment: .center, spacing: 8 * scale) {
                 iconChip
                 VStack(alignment: .leading, spacing: 0) {
                     Text(metric.serviceLabel)
@@ -167,22 +192,32 @@ struct OverlayHeroRow: View {
                         .lineLimit(1)
                     if !metric.metricTitle.isEmpty {
                         Text(metric.metricTitle)
-                            .font(.system(size: 10 * scale, weight: .regular))
+                            .font(.system(size: 9 * scale, weight: .medium, design: .monospaced))
                             .foregroundColor(.white.opacity(0.45))
                             .lineLimit(1)
+                            .textCase(.uppercase)
                     }
                 }
                 Spacer(minLength: 8 * scale)
+                VStack(alignment: .trailing, spacing: 0) {
+                    Text(metric.formattedValue)
+                        .font(.system(size: 26 * scale, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(.white)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.5)
+                        .contentTransition(.numericText())
+                        .animation(.snappy(duration: 0.35), value: metric.formattedValue)
+                    if let detail = metric.formattedDetail, !detail.isEmpty {
+                        Text(detail)
+                            .font(.system(size: 9 * scale, weight: .medium, design: .monospaced))
+                            .foregroundColor(.white.opacity(0.5))
+                            .lineLimit(1)
+                            .textCase(.uppercase)
+                    }
+                }
+                .frame(minWidth: 76 * scale, alignment: .trailing)
             }
-
-            Text(metric.formattedValue)
-                .font(.system(size: 30 * scale, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundColor(.white)
-                .lineLimit(1)
-                .minimumScaleFactor(0.5)
-                .contentTransition(.numericText())
-                .animation(.snappy(duration: 0.35), value: metric.formattedValue)
 
             if showsBar {
                 UsageBar(fraction: metric.fraction, accent: accent, height: 5 * scale)
@@ -244,7 +279,7 @@ struct OverlayListRow: View {
                         .minimumScaleFactor(0.6)
                         .contentTransition(.numericText())
                         .animation(.snappy(duration: 0.35), value: metric.formattedValue)
-                    if let detail = metric.formattedDetail {
+                    if let detail = metric.formattedDetail, !detail.isEmpty {
                         Text(detail)
                             .font(.system(size: 9 * scale, weight: .medium))
                             .monospacedDigit()
@@ -252,7 +287,7 @@ struct OverlayListRow: View {
                             .lineLimit(1)
                     }
                 }
-                .frame(minWidth: 64 * scale, alignment: .trailing)
+                .frame(width: 76 * scale, alignment: .trailing)
             }
 
             if showsBar {
@@ -301,6 +336,8 @@ struct UsageBar: View {
     let accent: Color
     var height: CGFloat = 4
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
     var body: some View {
         GeometryReader { geo in
             let remaining = (1 - fraction).clamped(to: 0...1)
@@ -309,6 +346,14 @@ struct UsageBar: View {
                 Capsule()
                     .fill(barColor)
                     .frame(width: geo.size.width * CGFloat(remaining))
+                    .shadow(
+                        color: fraction >= 0.85 ? barColor.opacity(0.32) : .clear,
+                        radius: fraction >= 0.85 ? 3 : 0
+                    )
+                    .animation(
+                        reduceMotion ? nil : .easeOut(duration: 0.22),
+                        value: remaining
+                    )
             }
         }
         .frame(height: height)
