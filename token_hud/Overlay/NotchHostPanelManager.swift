@@ -9,6 +9,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     private var overlayWindow: NSPanel?
     private let stateWatcher: StateWatcher
     private let widgetStore: WidgetStore
+    private let usageHistory: UsageHistoryStore
     let hostState = NotchHostState()
 
     private var globalMouseMonitor: Any?
@@ -45,9 +46,10 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     private static let detachedStyleMask: NSWindow.StyleMask = [.borderless, .resizable, .nonactivatingPanel]
     private static let hostedTransitionAnimation = Animation.spring(response: 0.32, dampingFraction: 0.82)
 
-    init(stateWatcher: StateWatcher, widgetStore: WidgetStore) {
+    init(stateWatcher: StateWatcher, widgetStore: WidgetStore, usageHistory: UsageHistoryStore) {
         self.stateWatcher = stateWatcher
         self.widgetStore = widgetStore
+        self.usageHistory = usageHistory
         super.init()
     }
 
@@ -63,6 +65,13 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
             self,
             selector: #selector(screenParametersChanged),
             name: NSApplication.didChangeScreenParametersNotification,
+            object: nil
+        )
+        // HUD focus-card "collapse" button.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(handleCollapseRequest),
+            name: .hudCollapse,
             object: nil
         )
 
@@ -82,6 +91,20 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
                 self?.handleContentHeightChange()
                 self?.observeContentChanges()
             }
+        }
+    }
+
+    /// HUD focus-card collapse button: collapse the expanded notch surface, or
+    /// hide the detached panel.
+    @objc private func handleCollapseRequest() {
+        if hostState.isDetached {
+            if detachedWindow?.isVisible == true {
+                saveState()
+                detachedWindow?.orderOut(nil)
+                applyLifecycleCleanup(for: .hide)
+            }
+        } else if hostState.isExpanded {
+            transitionTo(.collapsed)
         }
     }
 
@@ -169,6 +192,7 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
                 .environment(stateWatcher)
                 .environment(widgetStore)
                 .environment(hostState)
+                .environment(usageHistory)
         )
         let hosting = NSHostingView(rootView: rootView)
         let containerView = NotchTrackingContainerView(frame: NSRect(origin: .zero, size: defaultRect.size))
@@ -261,23 +285,10 @@ final class NotchHostPanelManager: NSObject, NSWindowDelegate {
     }
 
     private func computeFrames(for screen: NSScreen, geometry: NotchGeometry) -> NotchFrames {
-        let layout = OverlayLayout.from(
-            UserDefaults.standard.string(forKey: "overlayLayout") ?? OverlayLayout.summary.rawValue
-        )
-        let height: CGFloat
-        if layout == .paged {
-            height = NotchGeometryCalculator.pagedExpandedHeight()
-        } else {
-            height = NotchGeometryCalculator.adaptiveExpandedHeight(
-                itemCount: widgetStore.widgets.count,
-                isSummary: layout == .summary,
-                availableHeight: screen.visibleFrame.height
-            )
-        }
         return NotchGeometryCalculator.notchFrames(
             screenFrame: screen.frame,
             geometry: geometry,
-            expandedHeight: height
+            expandedHeight: NotchGeometryCalculator.focusExpandedHeight()
         )
     }
 

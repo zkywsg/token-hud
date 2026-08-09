@@ -8,7 +8,6 @@ struct NotchHostedSurfaceView: View {
     @Environment(NotchHostState.self) private var hostState
     @Environment(WidgetStore.self) private var store
     @Environment(StateWatcher.self) private var watcher
-    @AppStorage("overlayLayout") private var overlayLayoutRaw = OverlayLayout.summary.rawValue
     @AppStorage("widgetSizeScale") private var widgetSizeScale = 1.0
     @AppStorage("notchCollapsedLeadingSource") private var collapsedLeadingSource = NotchCollapsedSourceStore.autoRawValue
     @AppStorage("notchCollapsedTrailingSource") private var collapsedTrailingSource = NotchCollapsedSourceStore.autoRawValue
@@ -22,8 +21,15 @@ struct NotchHostedSurfaceView: View {
             ZStack(alignment: .topLeading) {
                 bodyPanel(layout.body, opacity: layout.contentOpacity, adaptiveScale: adaptiveScale, layout: layout)
                 topCap(layout.topCap, bodyHeight: layout.body.height, layout: layout)
-                statusSlot(layout.leftStatusSlot, isLeading: true, status: status, layout: layout)
-                statusSlot(layout.rightStatusSlot, isLeading: false, status: status, layout: layout)
+                if layout.body.height > 0.5 {
+                    // Expanded: the collapsed pill's 56pt ears end up stranded at
+                    // the outer edges of the much wider cap, so the expanded state
+                    // gets its own header laid out against the real cap width.
+                    expandedHeader(layout: layout)
+                } else {
+                    statusSlot(layout.leftStatusSlot, isLeading: true, status: status, layout: layout)
+                    statusSlot(layout.rightStatusSlot, isLeading: false, status: status, layout: layout)
+                }
             }
             .frame(width: geo.size.width, height: geo.size.height, alignment: .topLeading)
             .environment(\.panelAdaptiveScale, adaptiveScale)
@@ -35,7 +41,8 @@ struct NotchHostedSurfaceView: View {
     private func topCap(_ rect: CGRect, bodyHeight: CGFloat, layout: NotchHostedSurfaceLayout) -> some View {
         let topY = topOffset(for: rect, in: layout)
         let collapsedRadius = min(14, max(0, rect.height / 2))
-        let bottomRadius = bodyHeight > 0.5 ? 0 : collapsedRadius
+        let isExpanded = bodyHeight > 0.5
+        let bottomRadius = isExpanded ? 0 : collapsedRadius
         let capShape = UnevenRoundedRectangle(
             topLeadingRadius: 0,
             bottomLeadingRadius: bottomRadius,
@@ -44,15 +51,76 @@ struct NotchHostedSurfaceView: View {
         )
 
         return ZStack {
-            capShape
-                .fill(.thinMaterial)
-            capShape
-                .fill(Color.black.opacity(0.90))
-            capShape
-                .stroke(Color.white.opacity(bodyHeight > 0.5 ? 0.06 : 0.10), lineWidth: 0.7)
+            if isExpanded {
+                // Expanded: flat pure black — byte-identical to the focus card's
+                // fill below, and no stroke, so the physical notch, the cap and
+                // the card read as one continuous black surface with no seam.
+                capShape.fill(Color.black)
+            } else {
+                // Collapsed: solid black so it reads as the physical notch pill.
+                capShape.fill(.thinMaterial)
+                capShape.fill(Color.black.opacity(0.90))
+                capShape.stroke(Color.white.opacity(0.10), lineWidth: 0.7)
+            }
         }
         .frame(width: rect.width, height: rect.height)
         .offset(x: rect.minX, y: topY)
+    }
+
+    /// Menu-bar row shown while expanded: provider identity on the left of the
+    /// notch, the headline value on the right. Both sides are inset from the cap
+    /// edges and stop short of the notch gap, so nothing sits under the camera.
+    @ViewBuilder
+    private func expandedHeader(layout: NotchHostedSurfaceLayout) -> some View {
+        let cap = layout.topCap
+        let gap = layout.notchGap
+        let topY = topOffset(for: cap, in: layout)
+        let sideInset: CGFloat = 14
+        let gapPad: CGFloat = 10
+        let leftWidth = max(0, (gap.minX - gapPad) - (cap.minX + sideInset))
+        let rightWidth = max(0, (cap.maxX - sideInset) - (gap.maxX + gapPad))
+
+        if let metric = headlineMetric {
+            let accent = serviceAccentSwiftUIColor(for: metric.config.service)
+
+            if leftWidth > 40 {
+                HStack(spacing: 6) {
+                    ServiceIconChip(icon: metric.computer.icon, accent: accent, size: 15)
+                    Text(metric.computer.serviceLabel)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(.white.opacity(0.9))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Spacer(minLength: 0)
+                }
+                .frame(width: leftWidth, height: cap.height, alignment: .leading)
+                .offset(x: cap.minX + sideInset, y: topY)
+            }
+
+            if rightWidth > 40 {
+                HStack(spacing: 6) {
+                    Spacer(minLength: 0)
+                    Text(metric.computer.formattedValue)
+                        .font(.system(size: 11.5, weight: .semibold, design: .rounded))
+                        .monospacedDigit()
+                        .foregroundColor(accent)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                }
+                .frame(width: rightWidth, height: cap.height, alignment: .trailing)
+                .offset(x: gap.maxX + gapPad, y: topY)
+            }
+        }
+    }
+
+    /// The metric the expanded header describes — whichever card the carousel is
+    /// currently showing, so swiping updates the menu-bar row with it.
+    private var headlineMetric: (config: WidgetConfig, computer: WidgetMetricComputer)? {
+        let focused = hostState.focusedWidgetID.flatMap { id in
+            store.widgets.first { $0.id == id }
+        }
+        guard let config = focused ?? store.widgets.first else { return nil }
+        return (config, WidgetMetricComputer(config: config, state: watcher.effectiveState))
     }
 
     @ViewBuilder
@@ -65,6 +133,8 @@ struct NotchHostedSurfaceView: View {
         if rect.width > 1 {
             let topY = topOffset(for: rect, in: layout)
 
+            // Kept visible while expanded too: the menu-bar strip beside the
+            // notch would otherwise read as an empty black band.
             if isLeading {
                 progressBar(fraction: status.leadingFraction)
                     .frame(
@@ -73,7 +143,6 @@ struct NotchHostedSurfaceView: View {
                     )
                     .frame(width: rect.width, height: rect.height, alignment: .center)
                     .offset(x: rect.minX, y: topY)
-                    .opacity(1 - layout.contentOpacity)
             } else {
                 Text(status.trailingText)
                     .font(.system(size: 10.5, weight: .semibold, design: .rounded))
@@ -83,7 +152,6 @@ struct NotchHostedSurfaceView: View {
                     .minimumScaleFactor(0.65)
                     .frame(width: rect.width, height: rect.height, alignment: .center)
                     .offset(x: rect.minX, y: topY)
-                    .opacity(1 - layout.contentOpacity)
             }
         }
     }
@@ -105,19 +173,16 @@ struct NotchHostedSurfaceView: View {
         )
 
         return ZStack {
-            SolidPanelBackground(shape: panelShape, prominence: opacity)
+            // A flat black backdrop fills the whole body so no desktop shows
+            // through above/below the card — the cap, backdrop and card are all
+            // the same black, which is what makes the notch fusion seamless.
+            panelShape.fill(Color.black)
 
-            OverlayContentView(
-                layout: OverlayLayout.from(overlayLayoutRaw),
-                widgets: store.widgets,
-                state: watcher.effectiveState,
-                entranceState: hostState.isExpanded
-            )
-            .environment(\.panelAdaptiveScale, widgetSizeScale)
-            .padding(.horizontal, 12 * widgetSizeScale)
-            .padding(.vertical, 8 * widgetSizeScale)
-            .opacity(opacity)
-            .scaleEffect(0.98 + 0.02 * opacity)
+            OverlayFocusView(widgets: store.widgets, state: watcher.effectiveState)
+                .environment(\.panelAdaptiveScale, widgetSizeScale)
+                .environment(\.hudNotchHosted, true)
+                .opacity(opacity)
+                .scaleEffect(0.98 + 0.02 * opacity)
         }
         .frame(width: rect.width, height: rect.height)
         .clipped()
@@ -126,7 +191,20 @@ struct NotchHostedSurfaceView: View {
         .allowsHitTesting(hostState.isExpanded && isVisible)
     }
 
+    @ViewBuilder
     private func progressBar(fraction: Double) -> some View {
+        if fraction <= 0 {
+            // No denominator (or nothing consumed yet): an empty bar would read
+            // as "plenty left", so show a neutral rule instead.
+            Capsule()
+                .fill(Color.white.opacity(0.18))
+                .frame(height: 2)
+        } else {
+            filledProgressBar(fraction: fraction)
+        }
+    }
+
+    private func filledProgressBar(fraction: Double) -> some View {
         GeometryReader { geo in
             let value = fraction.clamped(to: 0...1)
             let color = progressColor(for: value)
@@ -145,9 +223,7 @@ struct NotchHostedSurfaceView: View {
     }
 
     private func progressColor(for fraction: Double) -> Color {
-        if fraction >= 0.85 { return Color(red: 1.0, green: 0.27, blue: 0.32) }
-        if fraction >= 0.65 { return Color(red: 1.0, green: 0.84, blue: 0.10) }
-        return Color(red: 0.25, green: 0.86, blue: 0.48)
+        Theme.severityColor(forFraction: fraction)
     }
 
     // MARK: - Layout helpers

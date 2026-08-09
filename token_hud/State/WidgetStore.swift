@@ -6,8 +6,19 @@ import Observation
 @MainActor
 final class WidgetStore {
 
+    /// Retired metrics are rejected here rather than at each call site — the
+    /// store is the one place every write passes through (defaults, reset,
+    /// migration, the editor, drag-and-drop), so filtering anywhere else just
+    /// leaves gaps.
     var widgets: [WidgetConfig] {
-        didSet { save() }
+        didSet {
+            let cleaned = Self.dropRetired(widgets)
+            if cleaned != widgets {
+                widgets = cleaned // re-enters didSet once; then falls through to save
+                return
+            }
+            save()
+        }
     }
 
     private enum Keys {
@@ -24,7 +35,10 @@ final class WidgetStore {
         // 1. Try v3 (unified)
         if let d = UserDefaults.standard.data(forKey: Keys.v3),
            let v = try? decoder.decode([WidgetConfig].self, from: d) {
-            self.widgets = v
+            let cleaned = Self.dropRetired(v)
+            self.widgets = cleaned
+            // didSet doesn't fire during init, so persist the cleanup here.
+            if cleaned.count != v.count { save() }
             return
         }
 
@@ -36,8 +50,36 @@ final class WidgetStore {
                 ?? Self.loadArray(forKey: Keys.rightV1, decoder: decoder).map { Self.migrateV1($0) }
                 ?? []
 
-        self.widgets = left + right
+        self.widgets = Self.dropRetired(left + right)
         save()
+    }
+
+    /// Silently discards widgets whose metric has been withdrawn. The enum
+    /// cases still exist so decoding never fails; this is where they stop being
+    /// shown. See `RetiredMetrics`.
+    private static func dropRetired(_ configs: [WidgetConfig]) -> [WidgetConfig] {
+        collapseCodexRateLimitWindows(configs.filter { $0.metric.isSelectable })
+    }
+
+    /// Codex used to expose two rate-limit windows (5 hours at quotaIndex 0,
+    /// 7 days at 1). Upstream dropped the 5-hour window, so both indexes now
+    /// resolve to the same quota and saved configs show the identical value
+    /// twice. Normalise the index and keep one.
+    private static func collapseCodexRateLimitWindows(_ configs: [WidgetConfig]) -> [WidgetConfig] {
+        var seenCodexRateLimit = false
+        return configs.compactMap { config in
+            guard config.service == "codex", config.metric == .remainingTime else { return config }
+            guard !seenCodexRateLimit else { return nil }
+            seenCodexRateLimit = true
+            guard config.quotaIndex != 0 else { return config }
+            return WidgetConfig(
+                id: config.id,
+                service: config.service,
+                metric: config.metric,
+                style: config.style,
+                quotaIndex: 0
+            )
+        }
     }
 
     private static func loadArray(forKey key: String, decoder: JSONDecoder) -> [WidgetConfig]? {
@@ -68,7 +110,5 @@ final class WidgetStore {
         WidgetConfig(service: "claude", metric: .remainingTime,  style: .bar),
         WidgetConfig(service: "claude", metric: .sessionTokens,  style: .text),
         WidgetConfig(service: "codex",  metric: .remainingTime,  style: .bar, quotaIndex: 0),
-        WidgetConfig(service: "codex",  metric: .remainingTime,  style: .bar, quotaIndex: 1),
-        WidgetConfig(service: "codex",  metric: .subscriptionStatus,  style: .text),
     ]
 }

@@ -13,6 +13,11 @@ final class NotchHostState {
     /// Gap width within the collapsed window (0 when no notch).
     var gapWidth: CGFloat = 0
 
+    /// Which card the focus carousel is currently showing. The expanded notch
+    /// header reads this so swiping between providers updates the menu-bar row
+    /// alongside the card, instead of pinning it to the first widget.
+    var focusedWidgetID: UUID?
+
     var isHosted: Bool { mode == .collapsed || mode == .expanded }
     var isCollapsed: Bool { mode == .collapsed }
     var isExpanded: Bool { mode == .expanded }

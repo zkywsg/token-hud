@@ -10,18 +10,47 @@ struct WidgetMetricComputer {
 
     private var service: Service? { state?.services[config.service] }
 
+    // MARK: - Presentation
+
+    /// Decides at runtime whether this metric can be drawn as a gauge. A gauge
+    /// requires a real `quota.total`; without one the value is an unbounded
+    /// counter and must not be shown as a proportion.
+    var presentation: MetricPresentation {
+        switch config.metric {
+        case .subscriptionStatus, .planName, .resetCountdown:
+            return .status
+        case .remainingTime:
+            return hasTotal(for: .time) ? .quota(fraction) : .counter
+        case .sessionTokens, .inputTokens, .outputTokens:
+            return hasTotal(for: .tokens) ? .quota(fraction) : .counter
+        case .costSpent:
+            return hasTotal(for: .money) ? .quota(fraction) : .counter
+        case .sessionCredits:
+            return creditQuota()?.total.map { $0 > 0 } == true ? .quota(fraction) : .counter
+        case .sessionDuration, .tokensPerMinute, .inputOutputRatio, .costPerRequest:
+            // Retired: their percentages came from hardcoded denominators.
+            return .counter
+        default:
+            return .quota(fraction)
+        }
+    }
+
+    private func hasTotal(for type: QuotaType) -> Bool {
+        guard let total = service?.quotas.first(where: { $0.type == type })?.total else { return false }
+        return total > 0
+    }
+
     // MARK: - Fraction (0...1, usage)
 
     var fraction: Double {
         guard let svc = service else { return 0 }
         switch config.metric {
         case .remainingTime:
-            guard let q = quotaFor(type: .time) ?? creditQuota() else { return 0 }
-            if q.type == .time { return quotaFraction(type: .time) }
-            guard let resetsAt = q.resetsAt,
-                  let date = ISO8601DateFormatter().date(from: resetsAt)
-            else { return 0 }
-            return max(0, min(1, date.timeIntervalSinceNow / 2_592_000))
+            // Only a real time quota has a denominator. The credit-quota
+            // fallback is a countdown to a date, which used to be divided by a
+            // hardcoded 30 days — that percentage meant nothing, so it's gone.
+            guard let q = quotaFor(type: .time), q.type == .time else { return 0 }
+            return quotaFraction(type: .time)
         case .tokensRemaining:
             return quotaFraction(type: .tokens)
         case .balance:
@@ -37,13 +66,8 @@ struct WidgetMetricComputer {
             else { return 0 }
             return tokens / qTotal
         case .resetCountdown:
-            guard let q = quotaFor(type: .time) ?? creditQuota(),
-                  let resetsAt = q.resetsAt,
-                  let date = ISO8601DateFormatter().date(from: resetsAt)
-            else { return 0 }
-            let remaining = date.timeIntervalSinceNow
-            let maxSeconds = q.type == .time ? max(q.total ?? 0, 1) : 2_592_000.0 // 30 days for credit quotas
-            return max(0, min(1, remaining / maxSeconds))
+            // A timestamp, not a magnitude — rendered as a label.
+            return 0
         case .inputTokens:
             guard let val = svc.currentSession?.inputTokens,
                   let quota = svc.quotas.first(where: { $0.type == .tokens }),
@@ -70,28 +94,11 @@ struct WidgetMetricComputer {
             return quotaFraction(type: .dailyRequests)
         case .monthlyRequests:
             return quotaFraction(type: .monthlyRequests)
-        case .sessionDuration:
-            guard let session = svc.currentSession else { return 0 }
-            return min(1, WidgetValueComputer.sessionDurationSeconds(from: session) / 28800)
-        case .tokensPerMinute:
-            guard let session = svc.currentSession,
-                  let tokens = session.tokens,
-                  WidgetValueComputer.sessionDurationSeconds(from: session) > 60
-            else { return 0 }
-            let rate = tokens / (WidgetValueComputer.sessionDurationSeconds(from: session) / 60)
-            return min(1, rate / 200)
-        case .inputOutputRatio:
-            guard let input = svc.currentSession?.inputTokens,
-                  let output = svc.currentSession?.outputTokens,
-                  (input + output) > 0
-            else { return 0 }
-            return input / (input + output)
-        case .costPerRequest:
-            guard let cost = svc.currentSession?.costSpent,
-                  let quota = svc.quotas.first(where: { $0.type == .money }),
-                  let total = quota.total, total > 0
-            else { return 0 }
-            return cost / total
+        // Retired metrics: these previously divided by hardcoded constants
+        // (8h session, 200 tokens/min) to fake a percentage. They render as
+        // plain counters now, so they contribute no fraction.
+        case .sessionDuration, .tokensPerMinute, .inputOutputRatio, .costPerRequest:
+            return 0
         case .rateLimitStatus:
             let fractions = svc.quotas.compactMap { q -> Double? in
                 guard q.total != nil, q.total! > 0 else { return nil }
@@ -253,7 +260,9 @@ struct WidgetMetricComputer {
 
     var metricTitle: String {
         if config.service == "codex", config.metric == .remainingTime {
-            return ""
+            // Derived from the quota's real duration — Codex removed its
+            // 5-hour window, so a hardcoded index→name map lies.
+            return WidgetValueComputer.rateLimitWindowDisplayName(quotaFor(type: .time))
         }
         if config.service == "mimo", config.metric == .resetCountdown {
             return "Token Plan 到期时间"

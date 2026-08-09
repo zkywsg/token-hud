@@ -1,0 +1,313 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Settings Layout Options</title>
+  <style>
+    body {
+      margin: 0;
+      background: #f4f5f7;
+      color: #1f2328;
+      font: 14px/1.45 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", Arial, sans-serif;
+    }
+    main {
+      max-width: 1180px;
+      margin: 0 auto;
+      padding: 34px 28px 48px;
+    }
+    h1 {
+      margin: 0 0 8px;
+      font-size: 26px;
+      letter-spacing: 0;
+    }
+    .subtitle {
+      margin: 0 0 24px;
+      color: #626b77;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 18px;
+    }
+    .card {
+      background: white;
+      border: 1px solid #dde1e7;
+      border-radius: 8px;
+      overflow: hidden;
+      box-shadow: 0 10px 24px rgba(31, 35, 40, 0.08);
+    }
+    .card-body {
+      padding: 16px;
+      border-top: 1px solid #e7ebf0;
+    }
+    .card h2 {
+      margin: 0 0 6px;
+      font-size: 17px;
+    }
+    .card p {
+      margin: 0;
+      color: #66707c;
+      font-size: 13px;
+    }
+    .mock {
+      height: 360px;
+      padding: 14px;
+      background: #fbfcfd;
+    }
+    .mock-header {
+      height: 26px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      margin-bottom: 12px;
+      color: #59636f;
+      font-size: 12px;
+      font-weight: 650;
+    }
+    .dot {
+      width: 9px;
+      height: 9px;
+      border-radius: 999px;
+      background: #ff5f57;
+      box-shadow: 16px 0 #ffbd2e, 32px 0 #28c840;
+      margin-right: 40px;
+    }
+    .shell {
+      height: 302px;
+      display: grid;
+      grid-template-columns: 150px 1fr;
+      gap: 12px;
+    }
+    .sidebar, .panel, .block {
+      border: 1px solid #d8dde5;
+      background: #fff;
+      border-radius: 8px;
+    }
+    .sidebar {
+      padding: 10px;
+    }
+    .nav {
+      height: 30px;
+      display: flex;
+      align-items: center;
+      padding: 0 9px;
+      margin-bottom: 7px;
+      border-radius: 6px;
+      color: #5b6571;
+      background: #f2f4f7;
+      font-size: 12px;
+    }
+    .nav.active {
+      color: #0b57d0;
+      background: #e8f1ff;
+      font-weight: 700;
+    }
+    .panel {
+      padding: 12px;
+    }
+    .toolbar {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .input {
+      flex: 1;
+      height: 32px;
+      border: 1px solid #d4dae2;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      padding: 0 10px;
+      color: #88919c;
+      background: #fff;
+      font-size: 12px;
+    }
+    .chip {
+      height: 32px;
+      border-radius: 6px;
+      border: 1px solid #d4dae2;
+      padding: 0 10px;
+      display: flex;
+      align-items: center;
+      font-size: 12px;
+      background: #fff;
+      white-space: nowrap;
+    }
+    .cards2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+    .platform {
+      min-height: 68px;
+      padding: 10px;
+      border: 1px solid #dce2ea;
+      border-radius: 7px;
+      background: #fff;
+    }
+    .platform b {
+      display: block;
+      margin-bottom: 4px;
+    }
+    .ok { color: #238636; }
+    .warn { color: #bf6a02; }
+    .muted { color: #68727e; }
+    .mini {
+      font-size: 11px;
+      color: #6d7783;
+    }
+    .tabs {
+      display: flex;
+      gap: 8px;
+      margin-bottom: 12px;
+    }
+    .tab {
+      padding: 7px 12px;
+      border-radius: 18px;
+      background: #edf0f4;
+      font-size: 12px;
+      color: #59636f;
+    }
+    .tab.active {
+      background: #dcecff;
+      color: #0b57d0;
+      font-weight: 700;
+    }
+    .wideblock {
+      height: 52px;
+      border-radius: 7px;
+      border: 1px solid #dce2ea;
+      background: #fff;
+      margin-bottom: 9px;
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+      color: #66707c;
+      font-size: 12px;
+    }
+    .steps {
+      display: flex;
+      justify-content: space-between;
+      margin-bottom: 24px;
+      color: #66707c;
+      font-size: 12px;
+    }
+    .wizard {
+      height: 206px;
+      border: 1px solid #dce2ea;
+      border-radius: 8px;
+      background: #fff;
+      padding: 20px;
+    }
+    .actions {
+      display: flex;
+      gap: 8px;
+      margin-top: 16px;
+    }
+    .button {
+      height: 32px;
+      border-radius: 6px;
+      padding: 0 12px;
+      border: 1px solid #cdd5df;
+      display: inline-flex;
+      align-items: center;
+      font-size: 12px;
+      background: #f7f9fb;
+    }
+    .recommended {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-radius: 8px;
+      background: #e8f1ff;
+      color: #164a8b;
+      border: 1px solid #c9defc;
+    }
+    @media (max-width: 980px) {
+      .grid { grid-template-columns: 1fr; }
+      .mock { height: auto; }
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Settings 页面重构方向</h1>
+  <p class="subtitle">目标：把配置、认证状态、查询结果、重置和模型筛选拆成清晰的工作台。</p>
+
+  <div class="grid">
+    <section class="card">
+      <div class="mock">
+        <div class="mock-header"><span class="dot"></span>A. 左侧导航 + 右侧详情</div>
+        <div class="shell">
+          <div class="sidebar">
+            <div class="nav active">Platforms</div>
+            <div class="nav">Widgets</div>
+            <div class="nav">Appearance</div>
+            <div class="nav">General</div>
+          </div>
+          <div class="panel">
+            <div class="toolbar">
+              <div class="input">Search platform or model...</div>
+              <div class="chip">All</div>
+              <div class="chip">Needs action</div>
+            </div>
+            <div class="cards2">
+              <div class="platform"><b>Codex</b><span class="warn">Auth expired</span><br><span class="mini">Reset / Re-login / Refresh</span></div>
+              <div class="platform"><b>OpenAI</b><span class="ok">Configured</span><br><span class="mini">Usage API / Costs API</span></div>
+              <div class="platform"><b>Gemini</b><span class="muted">Validated only</span><br><span class="mini">Cloud billing path</span></div>
+              <div class="platform"><b>MiniMax</b><span class="ok">Token plan</span><br><span class="mini">Remaining / plan / fallback</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <h2>A. 平台工作台（推荐）</h2>
+        <p>统一展示认证、过期、重置、刷新、查询能力；右侧详情可放 API key、模型筛选和最近查询结果。</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="mock">
+        <div class="mock-header"><span class="dot"></span>B. 保留 Tab，整理内容</div>
+        <div class="tabs">
+          <div class="tab active">小组件</div>
+          <div class="tab">平台</div>
+          <div class="tab">通用</div>
+        </div>
+        <div class="wideblock"><b>平台概览</b>&nbsp; Configured 3 / Expired 2 / Unsupported usage 2</div>
+        <div class="wideblock">Codex row + reset</div>
+        <div class="wideblock">API group + selected detail</div>
+        <div class="wideblock">Claude row + extractor</div>
+      </div>
+      <div class="card-body">
+        <h2>B. 低风险整理</h2>
+        <p>改动较小，沿用现有 TabView；但平台页会继续变长，后续模型筛选和状态说明容易拥挤。</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <div class="mock">
+        <div class="mock-header"><span class="dot"></span>C. 连接向导</div>
+        <div class="steps"><span>1 Select</span><span>2 Auth</span><span>3 Verify</span><span>4 Widgets</span></div>
+        <div class="wizard">
+          <b>Connect OpenAI</b>
+          <div class="input" style="margin-top:18px">Paste API key</div>
+          <div class="actions">
+            <div class="button">Verify key</div>
+            <div class="button">Reset</div>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <h2>C. 连接向导</h2>
+        <p>适合首次配置，但不适合频繁管理多个平台；建议作为“添加平台”的子流程，不作为主 Settings。</p>
+      </div>
+    </section>
+  </div>
+
+  <div class="recommended">
+    建议：选 A。它最适合容纳重置、认证状态、模型搜索筛选、查询诊断和后续 provider 扩展。
+  </div>
+</main>
+</body>
+</html>

@@ -58,7 +58,7 @@ enum NotchCollapsedSourceStore {
 
     private static func title(for widget: WidgetConfig) -> String {
         if widget.service == "codex", widget.metric == .remainingTime {
-            return widget.quotaIndex == 1 ? "7 天剩余量" : "5 小时剩余量"
+            return "限额剩余量"
         }
         if widget.service == "mimo", widget.metric == .resetCountdown {
             return "Token Plan 到期时间"

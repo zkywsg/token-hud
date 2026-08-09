@@ -81,9 +81,7 @@ public enum WidgetRecommendationEngine {
 
         if includeCodexLocalAuth {
             result.append(contentsOf: [
-                WidgetDescriptor(service: "codex", metric: "remaining_time", style: "bar", quotaIndex: 0),
-                WidgetDescriptor(service: "codex", metric: "remaining_time", style: "bar", quotaIndex: 1),
-                WidgetDescriptor(service: "codex", metric: "subscription_status", style: "text")
+                WidgetDescriptor(service: "codex", metric: "remaining_time", style: "bar", quotaIndex: 0)
             ])
         }
 
@@ -100,9 +98,7 @@ public enum WidgetRecommendationEngine {
 
         if snapshot.hasMiMoTokenPlanCredential {
             result.append(contentsOf: [
-                WidgetDescriptor(service: "mimo", metric: "credits_used", style: "bar"),
-                WidgetDescriptor(service: "mimo", metric: "plan_name", style: "text"),
-                WidgetDescriptor(service: "mimo", metric: "reset_countdown", style: "text")
+                WidgetDescriptor(service: "mimo", metric: "credits_used", style: "bar")
             ])
         }
 

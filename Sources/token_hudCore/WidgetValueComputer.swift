@@ -31,7 +31,7 @@ public enum WidgetValueComputer {
         case .time:
             return formatSeconds(remaining)
         case .money:
-            return String(format: "$%.2f", remaining)
+            return formatMoney(remaining, unit: quota.unit)
         case .tokens:
             return formatTokens(remaining)
         case .requests:
@@ -102,11 +102,34 @@ public enum WidgetValueComputer {
         return "limit"
     }
 
+    /// Chinese name for a rate-limit window, derived from the quota's actual
+    /// duration. Callers must not infer the window from a widget's
+    /// `quotaIndex` — Codex dropped its 5-hour window, so index 0 now addresses
+    /// the 7-day quota and any index→name table silently mislabels it.
+    public static func rateLimitWindowDisplayName(_ quota: Quota?) -> String {
+        guard let seconds = quota?.total.map({ Int($0) }) else { return "剩余量" }
+        if seconds >= 604_800 { return "7 天剩余量" }
+        if seconds >= 86_400 { return "每日剩余量" }
+        if seconds >= 18_000 { return "5 小时剩余量" }
+        return "剩余量"
+    }
+
+    /// Formats money using the quota's own currency. Hardcoding "$" mislabels
+    /// providers that bill in another currency (DeepSeek reports CNY).
+    public static func formatMoney(_ amount: Double, unit: String) -> String {
+        switch unit.uppercased() {
+        case "CNY", "RMB", "\u{00A5}":  return String(format: "\u{00A5}%.2f", amount)
+        case "EUR":                      return String(format: "\u{20AC}%.2f", amount)
+        case "", "USD", "$":             return String(format: "$%.2f", amount)
+        default:                         return String(format: "%.2f %@", amount, unit)
+        }
+    }
+
     /// Format the used amount (for quotas with no hard cap).
     public static func formattedUsed(quota: Quota) -> String {
         switch quota.type {
         case .time:     return formatSeconds(quota.used)
-        case .money:    return String(format: "$%.2f", quota.used)
+        case .money:    return formatMoney(quota.used, unit: quota.unit)
         case .tokens:   return formatTokens(quota.used)
         case .requests: return String(Int(quota.used))
         case .inputTokens, .outputTokens, .dailyTokens, .monthlyTokens:
@@ -202,6 +225,10 @@ public enum WidgetValueComputer {
         if h > 0 { return "\(h)h \(m)m" }
         return "\(m)m"
     }
+
+    /// Public alias so callers outside this type can format projections with
+    /// the same abbreviations the cards use.
+    public static func formatTokensPublic(_ t: Double) -> String { formatTokens(t) }
 
     private static func formatTokens(_ t: Double) -> String {
         if t >= 1_000_000 { return String(format: "%.1fM", t / 1_000_000) }

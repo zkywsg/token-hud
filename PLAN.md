@@ -2,6 +2,1280 @@
 
 这个文件跟踪当前项目正在进行的实现工作。保持内容小而可执行；可长期保留的决策沉淀到 `docs/`。
 
+## 当前重点：每日用量统计（E 版本，已确认范围，实施中）
+
+### 背景
+
+只有「重置倒计时 + 用量」两个数据的平台，单看用量没有参照。经 mockup 确认走 **E 版本**：每日柱状图 + 周期预测。
+**上游不提供按天数据**（`state.json` 只有本周期累计值；唯一按天的接口是 OpenAI Admin 费用接口，与套餐用量无关），因此必须本地采样差分。
+
+### 平台适用性（按真实 state.json 核对）
+
+| 平台 | 数据 | 结论 |
+|---|---|---|
+| Codex | tokens 累计 + 7 天窗口 + `resets_at` | ✅ 第一批（柱状 + 预测 + 倒计时全成立） |
+| MiMo | monthly_tokens 有 **total 上限** + `resets_at` | ✅ 第一批（有上限，预测最有价值） |
+| Claude | tokens 累计，**无 total、无 resets** | ✅ 第二批（只做柱状，隐藏预测/倒计时） |
+| DeepSeek | `used` 实为**余额**（`total_balance`），随消费**下降** | ⏸ 暂不做（需反向逻辑，且充值会造成上升） |
+| MiniMax | `error=usageUnsupported` | ❌ 不做 |
+
+### 本轮目标
+
+1. **core 纯逻辑 + 测试**：累计采样 → 每日差分，处理周期重置（累计值下降 ⇒ 新周期，该区间消耗按新值计），输出最近 N 天（缺失日补 0）。
+2. **本地存储**：`~/.token-hud/usage-history.json`，按 `服务:配额类型` 分组存 `(时间, 累计值)`；写入节流（≥5 分钟一条）、保留 30 天。
+3. **采样挂载**：`StateWatcher` 每次解析出新 state 时记录一次。
+4. **卡片渲染**：历史 ≥3 天显示柱状图（今日高亮、周期内未到的日子灰显）；不足 3 天回退到"预测版"并提示"正在积累"。Claude 无周期 ⇒ 隐藏预测与倒计时。
+
+### 风险
+
+- **无法回填**：只能从开启记录起算，头几天必然稀疏 → UI 必须诚实说明。
+- **App 未运行**：累计差额会全部落到下次开机当天，该日偏高；文档记录，不做伪造平摊。
+- **周期重置**：必须靠"累计值下降"识别，否则出现负数。DeepSeek 因语义相反被排除在外，避免误判。
+
+### 本轮实现结果（2026-08-03）
+
+- **core** `Sources/token_hudCore/UsageHistory.swift`：`UsageSample` / `DailyUsage` / `UsageHistoryCalculator`
+  - `dailyUsage(from:days:now:calendar:)`：相邻采样差分归入较晚一天；**差值为负 ⇒ 周期重置**，该区间消耗按新累计值计（不产生负数）；范围内无消耗的日子补 0。
+  - `recordedDayCount`：判断是否够画图（阈值 `minimumDaysForChart = 3`）。
+  - `pruned`：保留 30 天，且同一 5 分钟窗口内只留最新一条。
+  - `projectedCycleTotal(used:cycleElapsedFraction:)`：周期进度 >2% 才给预测。
+  - `UsageHistoryTests` 6 个用例（差分 / 重置 / 补零 / 天数统计 / 裁剪 / 预测边界）。
+- **存储** `token_hud/State/UsageHistoryStore.swift`（`@Observable`）：写 `~/.token-hud/usage-history.json`，按 `服务:配额类型` 分组；`trackedServices = [codex, mimo, claude]`；优先选有 `total` 的配额（便于叠加余量），否则取 token 类计数器；写盘按 5 分钟节流。
+- **采样挂载**：`StateWatcher.readNow()` 每次成功解析后调用 `usageHistory?.record(from:)`；`AppDelegate` 创建并注入到浮窗与设置页环境。
+- **卡片渲染**：`DailyUsageChart`（今日高亮 + 发光、周期内未到的日子灰显、按峰值归一）；历史 ≥3 天显示柱状图，否则回退 gauge/计数条。副标题显示「按此节奏 · 周期约 X」；数据不足时显示「正在积累每日数据 · 已记录 N 天」。Claude 无 time 配额 ⇒ 自动无预测（`projectedCycleTotal` 返回 nil）。
+- **DeepSeek 排除**：其 `used` 实为 `total_balance`（余额，随消费下降、充值上升），差分会把每天误判为周期重置；代码注释已记录原因。
+
+### 验证结果（2026-08-03）
+
+- `swift test`：通过，175 个测试（+6）。
+- `xcodegen generate` 后 `xcodebuild ... build`：通过。
+- **端到端实测**：删除历史文件后重启，`~/.token-hud/usage-history.json` 正确生成三条序列——
+  `codex:tokens`、`mimo:monthly_tokens`、`claude:tokens`，均含最新累计值；DeepSeek/MiniMax 未被记录（符合预期）。
+
+### 追加修正：功能不可见（2026-08-03）
+
+用户反馈"看不到任何变化，也找不到入口"。复查发现**是我写错了逻辑，导致全部不显示**：
+
+1. **`paceText` 提前 return 挡掉了预测**：只有 1 条采样时 `dailyUsage == nil` → `recorded == 0` → `guard recorded > 0 else { return nil }`。
+   而预测（C 版）本来就只依赖周期进度、**开箱即用**，却被历史数据的判断挡在门外。
+   → 改为：预测独立判断，`projectedCycleTotal` 有值就显示。
+2. **图表阈值过高**：`minimumDaysForChart = 3` 意味着安装后 3 天内完全看不到东西，也没有任何"正在工作"的迹象。
+   → 降为 **1**：有 1 天真实消耗即出图，其余日子显示 0 柱，读起来正确且立刻有反馈。
+3. **缺少可发现入口**：新增 `UsageHistoryStatusRows`，位于小组件页右栏「显示」面板——列出正在记录的平台、各自已记录天数与图表是否启用，并说明"上游只给累计值、历史无法回填"。
+   新增 `UsageHistoryStore.daysSinceFirstSample(for:)`（按自然日跨度算，区别于只统计"有消耗的天数"的 `recordedDayCount`，否则空闲日会显示 0 天）。
+
+**验证**：以注入的 3 天采样推演，`有消耗天数=2 ≥ 阈值1 → 图表显示 ✅`；随后**删除注入的测试数据**，重启确认恢复为三条真实序列各 1 条。`swift test` 175 通过；`xcodebuild` 通过。
+
+### 待手动验证
+
+- 出现真实消耗后柱状图是否当天即出现（阈值已降为 1 天）。
+- 周期重置（Codex 8/8、MiMo 月初）当天是否正确记为新周期而非负值。
+- App 关闭一段时间后重开，差额集中落在当天导致该日偏高——属已知取舍，观察是否可接受。
+
+## 预览高度 + 刘海 header 跟随翻页（2026-08-02，已实现）
+
+**1. 设置页实时预览显示不全**
+`previewHeight` 仍按已退役的堆叠列表公式算（hero 62 + 每行 40，cap 300），但预览现在渲染的是聚焦卡；3 个组件时只有 166pt，卡片被裁。
+改为与卡片自身高度对齐：`NotchGeometryCalculator.focusCardHeight (172) + 圆点行 + padding`，**与组件数量无关**（轮播一次只显示一张）。
+
+**2. 刘海 header 不随翻页变化**
+`expandedHeader` 取 `store.widgets.first`，写死第一条；左右滑动切卡时菜单栏那行不动。
+- `NotchHostState` 新增 `focusedWidgetID: UUID?`。
+- `OverlayFocusView` 在 `onAppear` / `onChange(of: currentID)` 时写入（`@Environment(NotchHostState.self) private var hostState: NotchHostState?` **可选读取**——设置页预览里没有该环境对象）。
+- `headlineMetric` 改为按 `focusedWidgetID` 查找，回退 `first`。
+
+**验证**：`swift test` 169 通过；`xcodebuild` 通过；重启后进程存活（确认设置页缺少 `NotchHostState` 时可选环境读取不崩）。
+
+**待手动验证**：浮窗展开后左右滑动，刘海两侧的平台名与数值应随卡片同步变化。
+
+## 接口现状核对（2026-08-02，已实现）
+
+以真实 `~/.token-hud/state.json` 为准逐个平台核对代码期望。
+
+### 已修
+
+**1. Codex 取消 5 小时窗口**
+真实数据只剩一个 time 配额：`total=604800`（7 天）。但 UI 三处写死 `quotaIndex == 1 ? "7 天" : "5 小时"`，而 `quotaFor` 对越界 index 回退 `first` → **两个 widget 显示同一份 7 天数据，其中一个被标成「5 小时」**。
+- 新增 `WidgetValueComputer.rateLimitWindowDisplayName(_:)`，从配额真实时长推导窗口名（≥7d / ≥1d / ≥5h），**禁止再用 quotaIndex 猜**。
+- `WidgetMetricComputer.metricTitle` 对 codex remainingTime 改用推导值（原先返回空串）。
+- 移除所有 `quotaIndex: 1` 的 codex 来源：默认 widgets、设置页预设、core 推荐引擎。
+- 新增迁移 `collapseCodexRateLimitWindows`：把已保存的多条 codex `remaining_time` 合并为一条并把 quotaIndex 归零。
+- **实测**：迁移后存储由 `codex×2` 变为 `codex×1`。
+
+**2. DeepSeek 货币显示错误**
+配额 `unit=CNY, used=11.48`，但 `formattedRemaining` / `formattedUsed` 写死 `$` → 把 ¥11.48 显示成 **$11.48**。
+新增 `formatMoney(_:unit:)` 按 `quota.unit` 选符号（CNY/RMB→¥、EUR→€、USD/空→$、其他→`数值 单位`）。
+
+### 待用户决定（未改）
+
+- **MiMo 重置时间过期**：`resets_at=2026-07-02T23:59:59Z`，而当前为 2026-08-02 —— 已过期一个月。可能是上游字段变更或解析取错字段，需要抓一次真实响应确认。
+- **Claude 无 time 配额**：只有 tokens/input/output 且 `total` 全为 `nil`。用户列表里的 `claude/remaining_time` 因此恒为「—」（现在会显示「无数据」徽章）。建议从 claude 能力表移除 `remainingTime`。
+- **Claude `tokensRemaining` 语义**：无 total 时 `formattedRemaining` 回退成显示**已用量**，但标签仍是「剩余量」，语义相反。
+- **MiniMax `error=usageUnsupported`**：无配额无会话，4 个预设全是死项（现已收进「暂无数据」）。
+- **`formattedCostSpent` 仍写死 `$`**：它接收 session 而非 quota，拿不到 unit；如需按币种显示要先让 session 带上货币字段。
+
+## 当前重点：指标重新归类（配额型 vs 计数型）+ 裁剪（待确认）
+
+### 问题
+
+所有指标目前共用同一张"环 + 百分比 + 进度条"的媒体卡，但只有一部分指标真的有分母：
+
+- **有真分母**（`quota.total` 来自 state.json）：`tokensRemaining` `balance` `usagePercent` `dailyTokens` `monthlyTokens` `dailyRequests` `monthlyRequests` `creditsRemaining` `creditsUsed` `rateLimitStatus` `remainingTime`。
+- **无分母的纯计数**：`sessionTokens` `inputTokens` `outputTokens` `costSpent`。无配额时 `fraction` 返回 0 → 进度条画成空的，看着像"还没用"，实为"没数据"，**误导**。
+- **合成分母（写死常量，百分比是编的）**：`sessionDuration` ÷ 28800（8h）、`tokensPerMinute` ÷ 200、信用额度 `resetCountdown` ÷ 2_592_000（30 天）。
+- **状态/标签**：`subscriptionStatus`（二值）、`planName`（纯文本）、`inputOutputRatio`（比例非用量）。二值指标做成整张媒体卡（环停在 0/100%）不合理。
+
+### 本轮目标
+
+**1. 卡片形态在运行时决定，而非按指标写死**
+
+同一个 `costSpent`，配了额度就该有进度条、没配就只能显示数字。新增 `MetricPresentation`：
+- `.quota(fraction)` — 存在真实 `total` → 环 + 百分比 + 进度条/波形（现状）。
+- `.counter` — 无 total → **去掉环与进度条**，大数字 + 单位 + 一行上下文，底部用静态强调色细线代替，不谎报比例。
+
+**2. 裁剪（用户已确认"全部按建议来"）**
+
+- 降级、不再单独成卡：`subscriptionStatus`（→ 卡片副标题徽章）、`planName`（→ 副标题，已重复）、`resetCountdown`（→ 卡片右上重置胶囊，已重复）。
+- 删除：`sessionDuration`、`tokensPerMinute`、`inputOutputRatio`、`costPerRequest`。
+- 可选指标 23 → 16。
+
+**3. 兼容性（关键约束）**
+
+`WidgetConfig` 解码 `WidgetMetric` 失败会让整个 widget 数组解码失败。因此**保留 enum case**（不物理删除），改为标记 `isSelectable == false` 并从所有 UI（可添加列表、预设、收起态来源）过滤；`WidgetStore` 载入时丢弃已退役指标的 widget。这样旧配置永不崩，用户侧等同于"删掉了"。
+
+**4. 收起态条同步**
+
+刘海收起条左槽是进度条；来源若是 `.counter` 指标，改为显示数值文本而不是空进度条。
+
+### 实施步骤
+
+1. `Sources/token_hudCore`：新增 `MetricPresentation` 枚举 + `WidgetMetric.isSelectable`（退役标记），补 Swift Testing（退役集合、`isSelectable` 覆盖）。
+2. `WidgetMetricComputer` 新增 `presentation: MetricPresentation`：先判状态类，再判是否存在真实 total，否则 `.counter`；同时**删除三处写死分母**的 fraction 分支。
+3. `OverlayFocusCard` 按 `presentation` 分支渲染：`.quota` 保持现状；`.counter` 隐藏 `ProgressRing` 与 `FocusGauge`，改大数字 + 上下文 + 静态细线。
+4. `WidgetStore` 载入时过滤退役指标；设置页可添加列表 / 预设 / 收起态来源均按 `isSelectable` 过滤。
+5. `NotchCollapsedStatusEngine`：来源为 counter 时输出文本而非 fraction。
+6. 验证（见下）。
+
+### 验证
+
+- `swift test`：新增 `MetricPresentation` / 退役指标用例；更新受影响的既有用例。
+- `xcodebuild ... build`。
+- 手动：配了额度的平台显示进度条卡；未配额度的（如仅有消耗数据的 API）显示计数卡且无空进度条；旧配置含已退役指标时能正常加载并被静默丢弃。
+
+### 风险
+
+- 退役指标采用"保留 case + 过滤"而非物理删除，是为了解码兼容；需确保**所有** UI 入口都过滤，否则会出现"能选但没意义"的残留。
+- `.counter` 卡去掉环和进度条后视觉重量下降，需确认与配额卡并排（翻页切换）时不显得残缺。
+- 删除写死分母会改变既有指标的显示（如会话时长不再有百分比），属预期变化。
+
+### 本轮实现结果（2026-08-02）
+
+- **core 新增** `Sources/token_hudCore/MetricPresentation.swift`：`MetricPresentation`（`.quota(Double)` / `.counter` / `.status`，带 `fraction` 与 `showsGauge`）+ `RetiredMetrics`（7 个退役 rawValue + `isRetired`）。`MetricPresentationTests` 4 个用例。
+- **运行时判定形态**：`WidgetMetricComputer.presentation` —— 状态类直接 `.status`；`remainingTime` / `sessionTokens` / `inputTokens` / `outputTokens` / `costSpent` / `sessionCredits` 按 `hasTotal(for:)` 决定 `.quota` 还是 `.counter`；其余默认 `.quota`。
+- **清除全部写死分母**：
+  - `sessionDuration` ÷28800、`tokensPerMinute` ÷200、`inputOutputRatio`、`costPerRequest` → 统一返回 0（已退役，按计数渲染）。
+  - `resetCountdown` 的 ÷2_592_000 → 返回 0（时间点，非量级）。
+  - `remainingTime` 的信用额度回退 ÷2_592_000 → 删除，仅真实 time quota 才有 fraction。
+- **卡片按形态渲染**：`OverlayFocusCard` 在 `.showsGauge == false` 时隐藏 `ProgressRing` 与 `FocusGauge`，改用 `counterRule`（"累计用量 · 无额度上限" + 渐隐强调色细线），保持视觉重量但不谎报比例。
+- **退役指标全链过滤**：`WidgetMetric.isSelectable` / `selectableCases`（委托 `RetiredMetrics`）；`WidgetStore` 载入时 `dropRetired` 静默丢弃；设置页预设、能力表、自定义 sheet 选项、core 推荐结果均按 `isSelectable` 过滤。enum case 保留，旧配置解码不会失败。
+- **收起条**：`progressBar` 在 `fraction <= 0` 时改画中性细线，不再显示"看起来还剩很多"的空进度条。
+
+### 验证结果（2026-08-02）
+
+- `swift test`：通过，169 个测试（+4）。
+- `xcodegen generate` 后 `xcodebuild ... build`：通过。
+
+### 待手动验证
+
+- 有额度的平台（Codex/MiniMax/MiMo）仍显示环 + 进度条；仅有消耗数据的（如 OpenAI costSpent 无额度）显示计数卡、无空进度条。
+- 「可添加」列表与自定义面板中不再出现订阅状态/计划名/重置倒计时/会话时长/每分钟 token/输入输出比/单次成本。
+- 若此前添加过上述指标，重启后应被静默移除且不报错。
+
+### 追加修正：按"真实有无数据"过滤（2026-08-02）
+
+**问题**：上一步只按"是否退役"过滤，「可添加」里仍堆着大量加了也只显示「—」的项。核对真实 `state.json` 后确认：`openai` / `gemini` / `anthropic` **根本不在文件里**（能力表却仍在提供它们的指标）；`minimax` 存在但 `error=usageUnsupported`、无配额无会话；`claude` 的 quota `total` 全为 `None`。
+
+**修法**：可用性用**卡片真实取值**判断，而不是维护一张静态表——
+`WidgetContentColumn.hasData(config:state:)` 直接调 `WidgetMetricComputer(...).formattedValue`，非「—」且非空才算可用。与卡片同一条代码路径，不会出现"表说有、卡片显示—"的偏差。
+
+- 「可添加」拆成 `available`（默认展示）与 `unavailable`（折叠在「暂无数据 N」里，行半透明，附说明"在「平台」页配置后会自动出现在上面"）。
+- 「已添加」行在取不到值时显示 `无数据` 警示胶囊，解释卡片为何是空的。
+- `state` 经 `WidgetContentColumn` / `ActiveWidgetsPanel` / `WidgetRow` 传递。
+
+**验证**：`swift test` 169 通过；`xcodebuild` 通过。
+
+### 追加修正 2：在源头与唯一收口处过滤（2026-08-02）
+
+**问题**：「已添加」里仍出现订阅状态。根因是前两轮**在各调用点分别打补丁，却漏了产生数据的源头**。全链路排查后找到 3 个漏口：
+
+1. `WidgetStore.defaultWidgets` 本身含 `.subscriptionStatus` —— 列表为空或「恢复默认」时会重新写回。
+2. `WidgetRecommendationEngine`（core）仍产出 `subscription_status` / `plan_name` / `reset_countdown` 三个描述符。
+3. `dropRetired` 只在 `init` 调用；`resetToDefaults()` 与 `populateEmptyWidgetListIfNeeded()` 直接赋值绕过了它。
+
+**修法（改为单一收口，不再逐点过滤）**：
+
+- `WidgetStore.widgets` 的 `didSet` 内做净化：任何写入（默认值、恢复默认、迁移、编辑器、拖拽）都会被过滤，再赋值一次触发二次 `didSet` 后落盘。**这是唯一必须正确的地方**。
+- 源头数据清理：`defaultWidgets` 去掉 `.subscriptionStatus`；core 推荐引擎去掉 3 个退役描述符；`widgetCapabilities` 的 `metrics`/`presets` 去掉退役项。
+- `init` 的 v3 分支在确实丢弃了条目时补 `save()`（`didSet` 在 init 中不触发，否则清理不会落盘）。
+
+**验证（对真实用户数据）**：重启后读取 `widgets_v3` 实际内容 →
+`codex/remaining_time`、`claude/remaining_time`、`claude/session_tokens`、`codex/remaining_time`，**退役指标残留：无**。
+`swift test` 169 通过；`xcodebuild` 通过。
+
+## 当前重点：设置页方案 B — 双栏工作台 + 常驻预览（mockup 已选定，待代码确认）
+
+### 问题
+
+小组件页是四块面板竖向堆叠（推荐 / 预览 / 已添加+添加），要来回滚动才能"改一下看一眼"；「已添加」用原生 `List(.bordered)` + `minHeight 180`，既有表格观感又在内容少时留白；且外观类设置（进度条样式、内容大小、刘海收起态）在通用页，与它们影响的预览分处两页——用户连续两轮反馈"找不到"。
+
+### 本轮目标（方案 B）
+
+**小组件页重构为双栏**
+- 左栏（约 1.15 份）：搜索框（按平台名/指标名过滤）→「已添加」（拖拽排序、可删）→「可添加」（推荐 + 预设，点击即加）。两个列表合并为一栏连续内容，取代现在的「已添加/添加」分段切换。
+- 右栏（约 0.95 份）：**常驻实时预览**（媒体卡）+「显示」设置卡——进度条样式、内容大小、刘海收起态（左/右）。改设置立刻在上方预览看到效果。
+- 移除顶部独立的「推荐组件」面板（并入左栏「可添加」）与「已添加/添加」分段控件。
+
+**通用页收敛**
+- 只保留：数据源、系统、应用过滤。原「HUD 外观」「刘海收起态」两组迁至小组件页右栏。
+
+**统一观感**
+- 「已添加」保留 `List` + `.onMove`（拖拽排序依赖它，重写风险高），但改 `.listStyle(.plain)` + `.scrollContentBackground(.hidden)` + 透明行背景，去掉表格边框与固定 `minHeight`，高度随内容。
+
+不改：数据模型、fetcher、凭据、HUD 渲染与刘海几何。
+
+### 实施步骤
+
+1. `WidgetListEditor` 拆成 `WidgetContentColumn`（左）与 `WidgetInspectorColumn`（右）两个子视图，`body` 改为 `HStack`。
+2. 左栏：新增 `@State searchText` + 过滤；合并「推荐 + 预设」为「可添加」列表；「已添加」List 去边框化。
+3. 右栏：预览面板（复用现有 `WidgetPreviewPanel`）+ 新建「显示」设置卡，承载 `focusGaugeStyle` / `widgetSizeScale` / 收起态左右来源（从 `SettingsWindow` 的 `HUDAppearanceSection` 迁出）。
+4. `SettingsWindow`：删除 `HUDAppearanceSection` 与「刘海收起态」分组，通用页只留数据源/系统/应用过滤。
+5. 窗口最小宽度复核：双栏需要更宽，`minWidth` 由 760 视情况上调（若不足则左右栏用 `ViewThatFits` 回退单栏）。
+6. 验证（见下）。
+
+### 验证
+
+- `swift test`（应为纯 UI 改动，无核心逻辑变化）。
+- `xcodebuild ... build`。
+- 运行截图：小组件页双栏布局、搜索过滤生效、拖拽排序仍可用、改右栏设置预览实时变化；通用页只剩三组。
+
+### 风险
+
+- 拖拽排序依赖 `List.onMove`，去边框化时若样式覆盖不当可能破坏重排手感 → 保留 List 本体，只改样式，不自造拖拽。
+- 双栏在窄窗口会挤压 → 设置合理 `minWidth` 并在过窄时回退单栏。
+- 设置项跨页迁移会改变用户已有的心智位置，但正是本轮要解决的问题；`@AppStorage` key 不变，配置不受影响。
+
+### 本轮实现结果（2026-08-02）
+
+- **小组件页双栏**：`WidgetListEditor.body` 改为 `ViewThatFits`（宽 → `HStack` 双栏；窄 → 单栏堆叠，预览在上）。
+  - 左栏 `WidgetContentColumn`（新）：搜索框（按平台名/指标名过滤）→ `ActiveWidgetsPanel`（已添加，拖拽排序）→「可添加」（推荐 + 预设去重合并，`AddableWidgetRow` 点击即加，带「自定义」入口）。
+  - 右栏：`WidgetPreviewPanel`（常驻预览）+ `WidgetDisplaySettingsPanel`（新）——进度条样式 / 内容大小 / 刘海收起态左右来源。
+- **已添加列表去表格化**：保留 `List` + `.onMove`（拖拽排序不自造），改 `.listStyle(.plain)` + `.scrollContentBackground(.hidden)` + 透明行/无分隔线；固定 `minHeight: 180` 改为随内容的 `listHeight`（clamp 76...320）。
+- **删除被取代的面板**：`ConfiguredWidgetRecommendationPanel`、`RecommendationChip`、`WidgetManagementPanel`（已添加/添加分段）、`AddWidgetsPanel`、`PresetCard`，及随之失效的 `prependWidget` / `prependMissingRecommendations` / `configuredProviderCount`。
+- **通用页收敛**：删除 `HUDAppearanceSection`（含刘海收起态），现只剩 数据源 / 系统 / 应用过滤。
+- **窗口尺寸**：`minWidth` 760 → 820、`idealWidth` 900 → 1000，保证双栏成立；不足时自动回退单栏。
+
+### 验证结果（2026-08-02）
+
+- `swift test`：通过，165 个测试。
+- `xcodebuild ... build`：通过。
+- 累计（本会话设置重构全部轮次）：**+1576 / -3000 行**。
+
+### 待手动验证
+
+- 双栏在默认窗口宽度下的排布；缩窄窗口时回退单栏是否自然。
+- 搜索过滤、点击添加、拖拽排序、删除是否都正常。
+- 右栏改「进度条样式 / 内容大小」时，上方预览是否实时变化。
+
+## 当前重点：刘海展开 header + 设置页信息架构重构与清死代码（待确认）
+
+### 问题
+
+**1. 刘海展开时状态栏两侧看不到内容**
+
+根因（读 `NotchGeometryCalculator.hostedSurfaceLayout` 确认）：状态槽是给**收起药丸**设计的——
+`collapsedStatusWidth = min(compactStatusSlotWidth(56), maxSideExpansion, screenLeftRoom, screenRightRoom)`，
+`leftStatusSlot.x = topCap.minX`、`rightStatusSlot = topCap.maxX - statusWidth`。
+展开后 `topCapWidth = bodyWidth` 被拉到 `expandedBodyMaxWidth`，两个 56pt 的窄槽被推到**宽卡片的最外侧边缘**，既窄又远离刘海，视觉上等于没有。上一轮我只是把它们的 opacity 打开，位置没变，所以没效果。
+
+**2. 设置页逻辑混乱（代码审计结果，问题比反馈更严重）**
+
+- **整条 widget 渲染链已死**：`WidgetRenderer` **0 处外部引用**；8 个 widget 视图（Bar/Ring/Text/Aggregate/Multi/Status/Countdown/ModelBreakdown）**仅被 WidgetRenderer 引用** → 全链死代码。另 `PlatformRowView.swift`（**1183 行**）无任何引用。
+- **UI 在显示无效设置**：`WidgetConfig.style` 渲染早已忽略，但小组件页仍显示样式图标/名称（`styleIcon`、`style.displayName`），自定义 sheet 仍有样式选择器 → **用户改了完全没反应**。
+- **两套缩放互相冲突**：`floatingPanelScale`（通用→浮动面板→缩放 0.5–2x，只作用 detached，且和捏合手势同源）与 `widgetSizeScale`（通用→外观→小组件大小 小/中/大，作用全部 HUD）。
+- **布局设置位置错误**：「布局」放在"浮动面板"分组下，但它同时控制刘海展开面板 → 命名误导，用户找不到（本次反馈第 2 点）。
+- **相关设置被拆散**：「刘海收起态」在小组件页，布局/外观在通用页。
+- **`hudOpacity` 语义冲突**：focus 布局在刘海内是纯黑，透明度滑块无效果。
+- **布局选项冗余**：`paged`（一屏一个 + 翻页）与 `focus`（一屏一个 + 翻页）功能高度重合。
+
+### 本轮目标
+
+**A. 刘海展开 header（修问题 1）**
+- 展开态不再复用收起态窄槽：按 `topCap` 实际宽度重新排布，左右各留内边距，中间避开刘海缺口。
+- 内容：左＝平台图标 + 名称，右＝数值 +（有则）重置倒计时；收起态维持现状（进度条 + 文本）不变。
+
+**B. 清死代码**
+- 删除 `WidgetRenderer.swift` + 8 个 widget 视图 + `PlatformRowView.swift`（合计约 2000+ 行）。
+- 保留 `WidgetConfig.style` **存储字段**（旧配置解码兼容），但移除所有 style 相关 UI。
+
+**C. 设置页信息架构重构**
+- 三页保持（小组件 / 平台 / 通用），但重排分组：
+  - 「小组件」：只管**内容**——推荐、实时预览、已添加/添加、排序。移除样式相关 UI。
+  - 「通用」→ 重组为：**HUD 外观**（布局、进度条样式、小组件大小、透明度、刘海收起态左右来源）、**数据**（state.json 路径、刷新间隔）、**系统**（登录启动、全局快捷键、应用过滤）。
+  - 「刘海收起态」从小组件页移入通用页 HUD 外观分组，与布局并列。
+- 「布局」分组名从"浮动面板"改为"HUD 外观"，消除"只影响浮窗"的误导。
+- 合并缩放：**保留 `widgetSizeScale`**（统一 HUD 内容缩放），删除 `floatingPanelScale` 设置项与其 UI；detached 捏合手势改写 `widgetSizeScale`。
+- 布局选项去掉 `paged`（与 focus 重合），保留 focus / summary / drawer。
+- `hudOpacity` 仅在会用到玻璃的场景显示（非 focus 布局），并在说明里写清作用范围。
+
+不改：数据模型 `state.json`、fetcher 抓取逻辑、凭据、刘海吸附/脱离几何策略。
+
+### 实施步骤
+
+1. **A**：`NotchHostedSurfaceView` 增加展开态 header 分支（按 topCap 排布，避开 notchGap），收起态走原路径；必要时几何层补一个 `expandedHeaderSlots` 计算并加测试。
+2. **B**：删除死文件 → `xcodegen generate` → 构建验证。
+3. **C1**：移除 style UI（`styleIcon`、显示名、自定义 sheet 的样式选择器），`WidgetConfig` 存储字段与解码保持不变。
+4. **C2**：删 `floatingPanelScale`，捏合手势改写 `widgetSizeScale`。
+5. **C3**：`OverlayLayout` 移除 `paged`（含 `OverlayPagedView`、`pagedExpandedHeight` 及其测试），`from()` 对旧值 `"paged"` 回落到 `focus`。
+6. **C4**：重排 `SettingsWindow` 分组 + 把刘海收起态面板从 `WidgetListEditor` 移入通用页。
+7. 验证（见下）。
+
+### 验证
+
+- `swift test`（更新受影响的几何/枚举用例）。
+- `xcodegen generate` 后 `xcodebuild ... build`。
+- 运行截图：通用页新分组清晰、布局选择器一眼可见；小组件页无失效的样式 UI；旧配置（含 `paged`、含 style 字段）能正常加载不崩。
+- 手动：刘海展开时 header 左右有内容且不压刘海。
+
+### 风险
+
+- 删除 `paged` 会让已选该布局的用户配置失效 → `from()` 必须容错回落，且保留 `WidgetConfig.style` 解码，避免破坏已保存数据。
+- 删除 `floatingPanelScale` 后旧值残留无害（不再读取），但捏合手势改写 `widgetSizeScale` 会影响刘海内容大小，需确认可接受。
+- 一次删约 2000 行死代码，必须靠构建 + 全量测试兜底，分步提交便于回滚。
+- 展开 header 涉及刘海几何（历史多次回归），只新增展开分支，不动收起态与吸附/脱离逻辑。
+
+### 本轮实现结果（2026-08-02）
+
+- **A 展开 header**：`NotchHostedSurfaceView` 增加 `expandedHeader(layout:)`，展开态（`body.height > 0.5`）走它、收起态仍走原 `statusSlot`。按 `topCap` 实宽排布：左侧 = 平台图标 chip + 名称，右侧 = 主数值（强调色）；两侧各留 14pt 边距并距 `notchGap` 再留 10pt，避免压到摄像头；宽度不足 40pt 时自动隐藏该侧。数据取 `store.widgets.first`（与聚焦卡 hero 同源）。
+- **B 死代码清理（-1669 行）**：删除 `WidgetRenderer.swift` + 8 个 widget 视图（Bar/Ring/Text/Aggregate/Multi/Status/Countdown/ModelBreakdown）+ `PlatformRowView.swift`。
+  - 注意：`PlatformRowView.swift` 内另含仍被使用的 `CodexAuthStatus`，已迁到其唯一使用者 `PlatformListView.swift` 的 `CodexAuthReader` 旁（`PlatformConfig`/`APIKeyGroupView` 确认零引用，随文件删除）。
+- **C1 移除无效 style UI**：删 `styleIcon`、`availableStyles`、自定义 sheet 的样式选择器、已添加行/预设卡上的样式图标与名称（改显示平台名）。`WidgetConfig.style` 存储与解码保持不变，旧配置不受影响。
+- **C2 合并缩放**：删除 `floatingPanelScale` 及其设置项；`FloatingPanelView` 的捏合手势改写 `widgetSizeScale`（clamp 0.6...2.0），去掉重复的 `scaleEffect`。
+- **C3 移除 paged**：`OverlayLayout` 去掉 `.paged`，删 `OverlayPagedView`、`NotchGeometryCalculator.pagedExpandedHeight()` 及其测试、manager 分支；`from()` 对旧值 `"paged"` 回落 `.focus`。`PageDots` 迁到 `OverlayFocusCard.swift`（focus 仍在用）。
+- **C4 设置页信息架构**：通用页重组为 **HUD 外观**（布局 / 进度条样式(focus 时) / 内容大小 / 透明度(非 focus 时)）→ **数据源** → **系统**（启用浮动面板、呼出快捷键 + 辅助功能授权、登录时启动）→ **应用过滤**。
+  - 「布局」从"浮动面板"组移到最顶部，并注明"同时作用于刘海展开面板和脱离的浮动面板"（原命名误导，用户找不到）。
+  - `hudOpacity` 仅在非 focus 布局显示（focus 在刘海内是纯黑，滑块无作用）。
+
+### 与计划的偏差
+
+- **「刘海收起态」未从小组件页移出**。原因：其选择器需要 `recommendedWidgets`（依赖凭据快照 + 推荐引擎），移到通用页要么丢掉"已配置推荐"分组、要么重复一份推荐逻辑。且该设置本质是选*哪个 widget* 供给收起条＝内容语义，留在小组件页更贴合。功能未削减。
+
+### 验证结果（2026-08-02）
+
+- `swift test`：通过，173 个测试（因删除 paged 高度用例，由 174 → 173）。
+- `xcodegen generate` 后 `xcodebuild ... build`：通过。
+- 通用页运行截图核对：三组结构清晰，布局选择器位于首屏首项。
+
+### 待手动验证
+
+- 刘海展开时 header 左右是否有内容且不压刘海（本轮无法自动触发展开态）。
+- 浮动面板双指捏合改写内容大小的手感（现在会同时影响刘海内容）。
+- 旧配置（曾选 `paged`、含 style 字段）加载后是否正常回落到聚焦布局。
+
+## 追加：收敛为单一媒体卡 + 设置可发现性（2026-08-02，已实现）
+
+### 问题
+
+用户体验后提出：既然只保留媒体卡，「聚焦/摘要/列表」三选一已无意义；且**仍找不到布局切换与刘海收起态样式的入口**——因为布局选项本身已无实际选择价值，而刘海收起态上一轮被我留在了小组件页。
+
+### 实施
+
+- **删除多布局，收敛为单一媒体卡**：
+  - 删除 `OverlayLayout` 枚举、`OverlayContentView` 分发、`OverlaySummaryView` / `OverlayListView` / `OverlayHeroRow` / `OverlayListRow` / `UsageBar` / `ValueColumnFrame`（整个 `OverlayListView.swift`）。
+  - 三处调用点（`NotchHostedSurfaceView` / `FloatingPanelView` / 设置页实时预览）直接渲染 `OverlayFocusView`。
+  - `ServiceIconChip` 迁入 `OverlayFocusCard.swift`（focus 与展开 header 仍在用）。
+  - core 侧连带删除已死的 `SummaryEntranceAnimation`（+测试）与 `adaptiveExpandedHeight`（+3 个测试）；`computeFrames` 简化为恒用 `focusExpandedHeight()`。
+- **删除随之失效的设置**：布局选择器、`hudOpacity`（媒体卡自绘背景，滑块无作用）及其读取点。
+- **刘海收起态移入通用页**：`HUDAppearanceSection` 之后新增「刘海收起态」分组（左/右来源菜单），从 `WidgetListEditor` 删除原 `NotchCollapsedSettingsPanel`。
+  - 取舍：新选择器只提供「自动 + 当前小组件」，不再有原来的「已配置推荐」子分组——该分组依赖凭据快照 + 推荐引擎，移到通用页需重复一份逻辑；收起条本就应从已添加的小组件里选，功能损失可接受。
+
+### 结果
+
+- 通用页最终结构：**HUD 外观**（进度条样式 / 内容大小）→ **刘海收起态**（左侧 / 右侧）→ **数据源** → **系统** → **应用过滤**。
+- `swift test` 165 通过；`xcodebuild` 通过。
+- 本轮（含前一段）累计 **-2720 行 / +1365 行**。
+
+## 当前重点：聚焦卡进度条样式可选（待确认）
+
+### 问题
+
+聚焦卡当前的主视觉是硬边分段柱状波形，与卡片"流光/水光"质感冲突（用户反馈"一格一格的不搭"）。经 mockup 出了 8 个替代方案，用户希望**全部保留**并在设置里由用户选择。
+
+### 本轮目标
+
+- 新增 `FocusGaugeStyle` 枚举（9 项：现有 `classicBars` + 以下 8 项），作为聚焦卡主视觉的可选样式：
+  - `glowBar` 连续流光条：胶囊轨道 + 渐变填充 + 高光扫过。
+  - `wave` 流动波浪：连续正弦线 + 下方光晕填充，缓慢流动。
+  - `aurora` 极光 band：无边缘光雾，漂移。
+  - `softDots` 柔化光点：圆润发光柱 + 亮波流过。
+  - `liquid` 液态水银条：胶囊内液面晃动。
+  - `particles` 粒子流：发光粒子沿轨道流动。
+  - `arc` 光弧地平线：弧形光带 + 光点滑行。
+  - `fiber` 光纤束：多条细光线并行交错流动。
+- 所有样式统一接口：输入 `fraction`(0...1) + `accent`，输出等高视图；用量以填充范围/密度/亮度体现。
+- 设置页新增选择器（菜单式，9 项），仅在布局为「聚焦」时显示；小组件页「实时预览」自动反映。
+- 默认样式 `wave`（流动波浪）。
+- 尊重 `accessibilityReduceMotion`：所有样式退回静态帧，不做循环动画。
+
+### 实施步骤
+
+1. `Sources/token_hudCore/FocusGaugeStyle.swift`：枚举 + `displayName` + `from(_:)` 容错解析；补 Swift Testing（未知值回落默认、`allCases` 覆盖）。
+2. `token_hud/Overlay/FocusGauges.swift`：9 个样式视图，统一 `FocusGauge(style:fraction:accent:)` 入口分发；动画一律 `TimelineView(.animation)` + `Canvas`，Reduce Motion 走静态分支。
+3. `OverlayFocusCard` 用 `@AppStorage("focusGaugeStyle")` 取样式，替换现在写死的 `WaveformView`。
+4. `SettingsWindow` 浮动面板区块：布局为 focus 时显示「进度条样式」菜单选择器。
+5. 验证（见下）。
+
+### 验证
+
+- `swift test`（含新增枚举用例）。
+- `xcodegen generate`（新增文件）后 `xcodebuild ... build`。
+- 运行截图：设置页切换 9 种样式，实时预览逐一正确渲染、无布局跳动；Reduce Motion 下静态。
+
+### 风险
+
+- 9 个动画视图若同时存在会耗性能；实际同一时刻只渲染一个，且 `TimelineView` 仅在可见时驱动，风险可控。
+- 各样式高度需一致（32–40pt），否则切换时卡片高度跳动——统一固定高度。
+- 粒子/光纤等样式在低 fraction 时要能看出差异，避免"看起来都一样"。
+
+### 本轮实现结果（2026-07-29）
+
+- **用户决定**：去掉经典硬边波形，只保留 8 种新样式；默认 `wave`（流动波浪）。
+- 新增 `Sources/token_hudCore/FocusGaugeStyle.swift`：8 个 case + `displayName`（中文）+ `from(_:)` 容错 + `default`；`FocusGaugeStyleTests` 3 个用例（round-trip / 未知回落 / 8 项且名称唯一）。
+- 新增 `token_hud/Overlay/FocusGauges.swift`：`FocusGauge(style:fraction:accent:)` 单一入口，内部 `Canvas` 绘制 8 种样式，全部是 `(t, fraction, size)` 的纯函数；动画由单个 `TimelineView(.animation)` 驱动，Reduce Motion 时 `t = 0` 渲染静态帧。
+  - glowBar（渐变填充 + `clip` 内高光扫过）、wave（正弦线 + 下方光晕，超出 fraction 的部分只留暗基线）、aurora（`.blur` + `plusLighter` 漂移光斑）、softDots（圆润柱 + 行进亮波）、liquid（胶囊 clip + 波动液面，末端有张力收拢）、particles（26 个确定性粒子，速度/相位由 index 推导，无状态）、arc（二次贝塞尔弧 + 沿弧滑行光点）、fiber（4 条正弦光带，两端向中线收拢）。
+- `OverlayFocusCard` 改用 `@AppStorage("focusGaugeStyle")` + `FocusGauge`，删除写死的 `WaveformView`（已无引用的死代码）。
+- `SettingsWindow` 浮动面板区块：布局为 `focus` 时显示「进度条样式」菜单选择器（8 项），并提示可在小组件页实时预览查看。
+
+### 验证结果（2026-07-29）
+
+- `swift test`：通过，174 个测试（+3）。
+- `xcodegen generate` 后 `xcodebuild ... build`：通过。
+- 逐一切换 8 种样式启动：**全部存活无崩溃**；截图确认 `wave`（连续发光线 + 光晕）与 `particles`（沿轨道流动的发光粒子）渲染正确。
+
+### 待手动验证
+
+- 在设置里逐个切换 8 种样式，确认观感与预期一致、卡片高度不跳动。
+- 低用量（fraction 很小）时各样式是否仍能区分。
+- Reduce Motion 开启时全部为静态帧。
+
+## 当前重点：浮窗「聚焦卡」媒体卡风格（brainstorming + mockup 已确认，待代码确认）
+
+### 背景与已确认方向
+
+用户给了一张"灵动岛/Live Activity 媒体卡"参考图，要求把浮窗做成那种效果。经问答 + mockup 确认：
+
+- **单指标聚焦卡**：一次放大展示一个 provider/指标，多平台靠左右翻页（圆点指示）。
+- **波形 = 用量趋势**：中间波形柱表现当前 hero 指标的占用——已用部分用平台强调色点亮（左→右渐暗），剩余暗灰。不依赖历史数据。
+- **辉光跟随平台色**：卡片外发光用各 provider 强调色（Claude 橙 / Codex 紫…）。
+- **控件映射真实操作**：底部 收起 ▾ / 刷新 ↻ / 更多 ···，接真实动作。
+- 深色玻璃卡（透出桌面）+ 强调色内晕 + 大圆角。
+
+参考图元素 → 映射：圆环+大数字=强调色进度环+hero 用量%；右上标签+图标=指标名(强调色)+平台图标 chip；副标题=平台·计划·已用%；右侧胶囊=重置倒计时；波形=用量趋势；底部控件=收起/刷新/更多；绿色辉光=平台色外发光。
+
+### 本轮目标
+
+- 新增聚焦卡视图与波形，作为新的浮窗布局 `.focus`，可在 Settings「布局」里选择；默认仍由用户切换（不强制替换现有摘要/列表/分页）。
+- 控件接真实操作（低耦合，用 NotificationCenter，避免改浮窗生命周期与 fetcher 构造）：
+  - 刷新 ↻ → post `TokenHUD.refreshNow`；`CodexFetcher`/`APIPlatformFetcher` 加观察者调用 `fetchAll(allowUserInteraction: false)`。
+  - 更多 ··· → post `TokenHUD.openSettings`；`AppDelegate` 观察后调 `openSettings()`。
+  - 收起 ▾ → post `TokenHUD.collapseHUD`；`NotchHostPanelManager` 观察后折叠/隐藏（复用现有 toggle/collapse 路径）。
+- 几何：hosted 展开态为 focus 布局提供合适高度（新增 `focusExpandedHeight`，比列表高、固定单卡高）；detached 浮窗按窗口自适应缩放。
+- 不改数据模型、fetcher 抓取逻辑、凭据、刘海吸附/脱离几何策略。
+
+### 实施步骤
+
+1. 新增 `token_hud/Overlay/OverlayFocusCard.swift`：单卡（强调色进度环 + hero 大数值 + 指标名/图标 + 重置胶囊 + 副标题 + 波形 + 控件）。用 `WidgetMetricComputer` 取值，`serviceAccentSwiftUIColor` 取强调色。
+2. 波形：`Canvas` 画 N 根柱，高度按确定性包络（sin+jitter），`index/N < fraction` 的柱用强调色渐亮，其余暗灰。
+3. 卡片背景：玻璃 + 强调色外发光（`shadow(color: accent...)` 叠加）+ 强调色内晕；复用/扩展 `GlassPanelBackground` 或新建 `FocusCardBackground`。
+4. 分页容器 `OverlayFocusView`：横向 `scrollTargetBehavior(.paging)` + `PageDots`（复用现有），每页一张聚焦卡。
+5. `OverlayLayout` 增加 `.focus`；`OverlayContentView` 分发；Settings「布局」Picker 增加「聚焦」。
+6. 几何：`NotchGeometryCalculator` 增加 focus 单卡高度分支；`NotchHostPanelManager` 布局为 focus 时用它；补/更新几何测试。
+7. 控件接线：定义 `Notification.Name` 常量；fetcher/AppDelegate/manager 加观察者；卡片按钮 post。
+8. 验证（见下）。
+
+### 验证
+
+- `swift test`（含 focus 几何用例）。
+- `xcodegen generate`（新增文件）后 `xcodebuild ... build`。
+- 运行截图：detached 浮窗 focus 卡观感（辉光跟随平台色、波形、控件），左右翻页 + 圆点；hosted 展开 focus 高度合适；刷新/更多/收起按钮真实生效。
+
+### 风险
+
+- Canvas 波形在频繁数据刷新时避免重算过重；柱高包络用纯函数、只在 fraction 变化时动画。
+- 控件用 NotificationCenter 解耦，避免动浮窗生命周期（该模块历史多次回归）；observer 记得在合适时机移除。
+- focus 单卡较高，hosted 刘海几何要给合理固定高度，别撑破；detached 靠窗口缩放。
+- `.focus` 为可选布局，不强制替换现有布局，控制影响面。
+
+### 本轮实现结果（2026-07-29）
+
+- **新增聚焦卡** `token_hud/Overlay/OverlayFocusCard.swift`：`OverlayFocusCard`（进度环 + hero 大数值 + 指标名/图标 chip + 重置胶囊 + 斜体副标题 + 波形 + 控件）、`ProgressRing`、`WaveformView`（`Canvas` 画 44 根柱，确定性包络，已用部分强调色渐亮）、`FocusCardBackground`（玻璃 + 强调色外发光 + 内晕，Reduce Transparency 回落）、`OverlayFocusView`（翻页容器 + 圆点）。
+- **环/波形与大数字同步**：`gaugeFraction` 优先解析 hero value 里的百分比（`percentage(in:)`），解析不到才回落 `metric.fraction`——解决"环 11% 但数字 89%"的矛盾。
+- **新增布局 `.focus`**：`OverlayLayout` 增加 `focus` 且设为 `from()` 默认；`OverlayContentView` 分发；`PageDots` 改 internal 复用。**focus 设为出厂默认布局**（4 处 AppStorage 默认值 + manager fallback 全改 focus）；Settings「布局」Picker 增加「聚焦」。
+- **几何**：`NotchGeometryCalculator.focusExpandedHeight()`（固定 ≥172）；manager `computeFrames` focus 分支用它；测试 `focusHeightIsFixedAndTallEnoughForCard`。
+- **控件接真实操作（NotificationCenter 解耦）**：`Notification.Name` 常量（`hudRefreshNow`/`hudOpenSettings`/`hudCollapse`）于 `HUDActions.swift`；`CodexFetcher`/`APIPlatformFetcher` init 加 `hudRefreshNow` 观察者调 `fetch/fetchAll(allowUserInteraction:false)`（stop 里移除）；`AppDelegate` 观察 `hudOpenSettings` → `openSettings()`；`NotchHostPanelManager` 观察 `hudCollapse` → 折叠展开态/隐藏 detached。
+- **detached 浮窗 focus 去双层玻璃**：`FloatingPanelView` focus 时不画自身 `GlassPanelBackground`、padding 归零，让聚焦卡本身即浮窗。
+- **已知限制**：hosted 刘海展开态里聚焦卡带自身圆角+辉光，与刘海方形顶未完美融合（本轮以 detached 浮窗为主，notch 融合留后续）；`percentage(in:)` 在 app target，未走 core 单测。
+
+### 验证结果（2026-07-29）
+
+- `swift test`：通过，171 个测试（+1 focus 高度用例）。
+- `xcodegen generate` 后 `xcodebuild ... build`：通过。
+- 运行截图（Settings 实时预览，与 detached/hosted 同一渲染路径）：聚焦卡观感贴合参考图——进度环 + 大数值 + 波形（已用渐亮）+ 重置胶囊 + 控件；环/波形与 89% 数字一致。
+
+### 待手动验证
+
+- 脱离浮窗（快捷键呼出）实际观感：单卡玻璃 + 强调色外发光、左右翻页 + 圆点、无双层玻璃。
+- 控件真实生效：刷新 ↻ 触发抓取、更多 ··· 打开设置、收起 ▾ 折叠/隐藏。
+- 不同平台切换时辉光/环/波形颜色跟随强调色（Claude 橙、Codex 紫等）。
+- hosted 刘海展开态 focus 卡观感（已知未完美融合，评估是否需要单独适配）。
+
+## 当前重点：Settings UI 适配排查与修复（已完成，见下）
+
+### 问题（已通过运行截图 + 代码核实）
+
+用户反馈整个设置窗有大量"不适配"。当前系统为深色外观，问题集中在**布局贴合/材质一致性**，不是亮/暗色配色。已确认：
+
+**小组件页（已看到实物）**
+1. 「实时预览」面板固定 `240px` 高、内容顶对齐（`WidgetListEditor.swift:622`），单/少组件时下方一大片黑色空洞。
+2. 「主指标 (hero)」标注放在 `.topTrailing`（`:611-618`），与 hero 右上角的大号数值**重叠**。
+3. 预览面板底仍是实心深色 `SurfaceLevel.raised.gradient`（`:582`），但真实 HUD 本轮已改玻璃——预览与实物质感不再一致。
+4. `NotchCollapsedSettingsPanel.progressColor`（`:554-558`）是**第 4 套**重复的严重度配色，阈值/色值与 `Theme.severityColor` 不统一。
+5. 默认窗口高度下详情底部被裁（预览吃掉 240px 是主因，修 1 缓解）。
+
+**通用页（代码核实）**
+6. 原生 `Form(.grouped)`（`SettingsWindow.swift:142`）在磨砂玻璃底上违和（历史已知欠债）。
+
+**平台页（待审计）**
+7. 结构较统一（sidebar 260 + 玻璃卡片），但需按同一套 lens 过一遍：重复色值、卡片层级/间距、固定宽度截断。
+
+### 本轮目标
+
+- 小组件页：预览面板高度自适应内容（clamp 上下限、去黑洞）；hero 标注移到不遮挡位置；预览质感与真实 HUD 对齐；`progressColor` 收敛到 `Theme.severityColor`（消除第 4 套）。
+- 通用页：让原生 Form 在玻璃底上协调（统一背景/分组样式，不整体重写）。
+- 平台页：代码审计后修掉发现的固定宽截断、重复色值、间距不一致。
+- 不改功能、数据模型、fetcher；纯 UI 布局/材质对齐。
+
+### 实施步骤
+
+1. 修 `WidgetPreviewPanel`：高度改为自适应（`fixedSize`/内容测量 + clamp），内容对齐调整，hero 标注移位，面板材质与 HUD 对齐。
+2. `NotchCollapsedSettingsPanel.progressColor` → `Theme.severityColor(forFraction:)`。
+3. 平台页/通用页按审计结果逐项修（小步、范围集中）。
+4. 逐页运行截图核对。
+
+### 验证
+
+- `swift test`（应为纯 UI 改动，无逻辑回退）。
+- `xcodebuild ... build`。
+- 逐页运行截图：小组件预览无黑洞/无重叠、底部不裁切；通用页 Form 与玻璃协调；平台页无截断。
+
+### 风险
+
+- 预览自适应高度若用 `OverlayContentView` 实测高度，需注意其内部 ScrollView 不能塌成 0；给合理 min/max。
+- 通用页 Form 协调不整体重写，控制范围避免蔓延。
+- 平台页审计可能牵出较多小项；按优先级只修"看得见的不适配"，不做无关重构。
+
+### 本轮实现结果（2026-07-29）
+
+- **小组件页（重灾区，已修）**：
+  - `WidgetPreviewPanel` 高度从固定 `240` 改为 `previewHeight`（hero 62 + 每多一条 40 + padding，clamp 300），单/少组件不再有黑洞；`.frame(height: previewHeight)`。
+  - 移除与 hero 大数值重叠的「主指标 (hero)」浮标注（信息已由 `summaryText` 表达），ZStack 对齐从 `.topTrailing` 改回默认居中。
+  - 预览面板底改用 `GlassPanelBackground(opacity: 0.6)`，与真实 HUD 玻璃质感一致（替换原 `SurfaceLevel.raised.gradient` 实心深色）。
+  - `NotchCollapsedSettingsPanel.progressColor` 收敛到 `Theme.severityColor(forFraction:)`（消除第 4 套重复严重度配色）。
+- **平台页 / 通用页审计结论**：逐页临时改默认 section 截图核对后，两页布局/材质基本协调，无明显黑洞/重叠/截断；本轮未改（`Form(.grouped)` 在玻璃上可接受）。
+- **已知剩余小项（未做，待用户确认是否处理）**：`ActiveWidgetsPanel` 用原生 `List(.bordered)` + `minHeight: 180`，单组件时下方留空、表格质感与玻璃卡片略不搭；改造涉及拖拽重排，范围较大，暂留。
+
+### 验证结果（2026-07-29）
+
+- `swift test`：通过，170 个测试。
+- `xcodebuild ... build`：通过。
+- 逐页运行截图核对：小组件预览贴合内容/无重叠/质感一致；平台、通用页协调。
+
+## 当前重点：HUD 玻璃透明化 + Lv1 减法 + token 统一（brainstorming 已确认，待实现）
+
+### 背景与已确认方向
+
+用户要求做较大的前端调整，两个轴：(1) 布局更简洁；(2) 质感更透明、更像工具类 App。经 brainstorming 可视化对比后确认：
+
+- **以现状 A 布局为底做减法**（不是推翻重来）。
+- **质感转向半透明毛玻璃**（透出桌面），替换现在的实心深色卡。
+- **减法力度 = Lv1（保守）**：保留图标块与信息层级，只做轻量精简。
+- **范围 = HUD + 设置窗一致化**（设置窗已是玻璃风，本轮主要对齐 token，不改结构）。
+
+### 问题
+
+1. HUD 现在是实心深色卡（`SolidPanelBackground` 刻意不透明），与"透明工具感"诉求相反。
+2. 布局偏"厚重"：每行都有进度条 + 副标题 + 分隔线，信息密度高、表格感强。
+3. 视觉语言仍有历史欠债，玻璃化后会更显眼：
+   - 严重度绿/黄/红颜色 + 阈值在 `progressColor`（折叠条，阈值 0.85/0.65）、`UsageBar.barColor`（阈值 0.5/0.8）、`Theme.Palette.status*` 三处各定义一套，值和阈值都不一致。
+   - 进度方向矛盾：折叠条 `progressBar` 画"已用 fraction"，`UsageBar` 画"剩余 1-fraction"。
+   - 字号 30/26/18/12/9 等散落硬编码，无统一 ramp。
+   - 设置窗 `SettingsWindow.swift` 侧栏画了两条重复分隔线（:20 与 :71）。
+
+### 本轮目标
+
+**A. 质感玻璃化（展开面板主体 + 脱离浮动面板）**
+- 新增 `GlassPanelBackground`：`.ultraThinMaterial` 打底 + 极淡深色 tint + 0.5px 高光描边，透出桌面。`SolidPanelBackground` 保留但 HUD 不再默认使用。
+- `NotchHostedSurfaceView.bodyPanel` 与 `FloatingPanelView` 背景改用玻璃。
+- 刘海折叠态"黑帽子"（`topCap`）保持纯黑不变，保证与物理刘海无缝融合；玻璃只作用于展开后主体。
+- 现有 `hudOpacity` 语义改为调节玻璃 tint 浓淡（低=更浓深色玻璃，高=更清透），而非整体 alpha。先定位 `hudOpacity` 当前作用点再改。
+
+**B. Lv1 减法布局（`OverlaySummaryView` / `OverlayHeroRow` / `OverlayListRow`）**
+- Hero（第一条）：保留 图标块 + 名称 + 副标题 + 放大数字 + 进度条（唯一保留进度条的行）。
+- 次要行：收成单行——小图标块 + 名称 + 百分比，去掉进度条，副标题默认隐藏。
+- 分隔线变淡（白 0.05）或改为纯间距分组，弱化表格感。
+- 同时作用于刘海展开面板与脱离浮动面板（共用 summary）。
+
+**C. token 统一（顺手修历史欠债）**
+- `Theme.severity(for: fraction) -> Color`（含统一阈值）作为绿/黄/红唯一来源，替换 `progressColor` 与 `UsageBar.barColor` 的两套内联值。
+- 统一进度方向：折叠条与 `UsageBar` 统一表示同一语义（与百分比数字一致），先读 `WidgetMetricComputer.fraction` 语义再定"已用/剩余"。
+- 新增 `Theme.Typography`：hero/value/title/caption/mono 几档，替换 HUD 内散落字号。
+
+**D. 设置窗一致化**
+- 用统一后的 severity 色 / 字号档 / 间距对齐设置窗；去掉 `SettingsWindow.swift` 侧栏重复分隔线。不改结构。
+
+不改：`state.json` schema、fetcher、凭据、刘海吸附/脱离几何与生命周期、`WidgetConfig` 存储。
+
+### 实施步骤
+
+1. **Theme 扩展**：`Theme.severity(for:)` + `Theme.Typography`；保留现有 Palette/Radius/Spacing。补 `Sources/token_hudCore` 可测的 severity 阈值纯逻辑（若阈值/取色可下沉），加 Swift Testing。
+2. **玻璃背景**：新增 `GlassPanelBackground`（material + tint + 高光描边），`hudOpacity` 驱动 tint。先验证当前 NSPanel 上 `.ultraThinMaterial` 能否产生 behind-window 模糊；不行则回退 `NSVisualEffectView` representable。
+3. **接入 HUD**：`NotchHostedSurfaceView.bodyPanel` 与 `FloatingPanelView` 换玻璃背景；`topCap` 保持纯黑；`progressColor` 改走 `Theme.severity`。
+4. **Lv1 布局**：改 `OverlayHeroRow.summaryBody`（保留 bar）、`OverlayListRow`（次要行单行、去 bar、隐副标题）、`OverlaySummaryView` 分隔线变淡；`UsageBar` 颜色走 `Theme.severity`、方向与折叠条统一。
+5. **设置窗对齐**：severity/typography/spacing token 化；删重复分隔线。
+6. **验证**（见下）。
+
+### 验证
+
+- `swift test`（含新增 severity 阈值用例）。
+- `xcodegen generate`（若新增文件）后 `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`。
+- 手动：亮/暗桌面 + 亮/暗系统外观 + Reduce Transparency 下玻璃可读性；折叠态仍纯黑融合刘海；`hudOpacity` 滑块调玻璃浓淡；Lv1 布局在 1 条/多条/超多条下的层级与滚动；severity 颜色折叠态与展开态一致。
+
+### 风险
+
+- **玻璃透出桌面依赖宿主窗口非不透明 + behind-window 混合**。若 SwiftUI material 不生效需回退 `NSVisualEffectView`，属本轮主要不确定点，先验证再铺开。
+- 折叠态必须保持纯黑；玻璃只能在展开主体，避免破坏刘海融合（该模块历史多次回归）。
+- `hudOpacity` 语义变更需先定位其现有作用点，避免与玻璃 tint 双重叠加导致过暗/过淡。
+- token 统一（severity 方向/阈值）会改变现有配色观感，需手动确认警示语义仍正确（高占用=红）。
+- Reduce Transparency 下玻璃退化的兜底（回落到接近实心深色）要一并处理，避免文字发灰不可读。
+
+### 本轮实现结果（2026-07-29）
+
+- **A 玻璃化**：
+  - 新增 `token_hud/Overlay/GlassPanelBackground.swift`：`.ultraThinMaterial`（宿主窗口 `isOpaque=false`/`backgroundColor=.clear`，真透出桌面）+ `hudOpacity` 驱动的深色 tint 渐变 + 0.5px 高光描边 + 柔和阴影；`accessibilityReduceTransparency` 下回落到 `SurfaceLevel.raised.gradient` 近实心深色保证可读。
+  - `NotchHostedSurfaceView.bodyPanel`、`FloatingPanelView` 背景改用 `GlassPanelBackground`；两者新增 `@AppStorage("hudOpacity")` 传入。
+  - 折叠态 `topCap` 保持纯黑不变（刘海融合无回归）。
+  - **删除死代码** `SolidPanelBackground.swift`（玻璃化后完全无引用）。
+- **B Lv1 减法**：
+  - `OverlayListRow`：summary 次要行收成单行——隐藏 metricTitle 副标题、`showsBar` 在 summary 下恒 false（去进度条）；hero 仍保留进度条。
+  - `OverlaySummaryView` 分隔线统一淡化到白 0.05。
+  - 字号走新 `Theme.Typography`（title/value/caption/mono/hero）。
+- **C token 统一**：
+  - 新增 `Sources/token_hudCore/UsageSeverity.swift`（`.ok/.warn/.critical`，阈值 0.65/0.85，clamp 越界）+ `UsageSeverityTests`（4 用例）。
+  - `Theme.severityColor(for:)` / `severityColor(forFraction:)` 复用 `Palette.status*` 作为绿/黄/红唯一来源；`NotchHostedSurfaceView.progressColor` 与 `UsageBar.barColor` 均改走它，删除两处内联 RGB。
+  - **进度方向统一为"已用填充"**：`UsageBar` 由原来填充 `1-fraction`（剩余）改为填充 `fraction`（已用），与折叠条和百分比数字一致；glow 触发改用 `UsageSeverity == .critical`。
+  - 新增 `Theme.Typography` ramp。
+- **D 设置窗对齐**：删除 `SettingsWindow.swift` 侧栏 trailing 处与父 HStack 重复的第二条分隔线。
+- **实现约束发现**：Xcode app target（project.yml）把 `token_hud` + `Sources/token_hudCore` 编译进**同一 module**，app 侧引用 core 类型**不需要 `import token_hudCore`**（加了反而 Xcode 构建失败）；SwiftPM 测试侧 core 仍是独立 module。
+
+### 验证结果（2026-07-29）
+
+- `swift test`：通过，170 个测试（+4 UsageSeverity）。
+- 删除 `SolidPanelBackground.swift` 后 `xcodegen generate` + `xcodebuild ... build`：通过，无 error。
+
+### 待手动验证
+
+- 玻璃透出桌面观感：亮/暗桌面背景、亮/暗系统外观下是否清透且文字清晰；`hudOpacity` 滑块从 20%→100% 是否呈"浓烟玻璃→清透玻璃"渐变（该设置此前是死设置，本轮才真正生效）。
+- Reduce Transparency 开启时是否回落到近实心深色、文字不发灰。
+- 折叠态仍纯黑无缝融合刘海；展开/折叠切换无质感割裂或双浮窗回归。
+- Lv1 布局：hero 保留进度条、次要行单行无进度条无副标题；1 条/多条/超多条下层级与滚动正常。
+- severity 颜色在折叠条与展开 bar 上方向/配色一致（已用越多越偏红）。
+
+## 当前重点：HUD BC-L 摘要布局精修（待确认）
+
+### 问题
+
+摘要布局已具备 hero、普通指标行、数字滚动与高占用辉光，但 hero 的数值和辅助信息层级仍偏松散，普通行数值列在不同内容下不够稳定，展开过程也缺少克制的分层入场节奏。
+
+### 本轮目标
+
+- 只精修默认的 `summary` 摘要布局，采用已确认的 BC-L 方向：动态岛式轮廓与轻动效为主，吸收仪表式数字对齐和紧凑信息表达。
+- Hero 改为图标、名称、右侧数值三段式结构；只展示 `WidgetMetricComputer` 已提供的真实辅助信息。
+- 普通行统一等宽数字、固定最小宽度与右对齐。
+- hosted 展开时 hero 先进入，普通行按索引轻微错位淡入上移；实时数据刷新不重播整组动画。
+- 尊重 macOS“减少动态效果”，关闭位移与错位延迟。
+- 不修改列表、分页、收起态、provider 数据结构、拉取器或浮窗生命周期。
+
+### 实施步骤
+
+1. 实施前先把当前已完成但未提交的上一轮 HUD 改动提交为基线，避免 BC-L 与既有工作混入同一提交。
+2. 在 `token_hudCore` 新增可测试的摘要入场进度计算，按展开进度、行索引和 Reduce Motion 计算稳定的行可见进度，并限制总延迟；运行 `xcodegen generate` 同步工程。
+3. 给 `OverlayContentView` / `OverlaySummaryView` 增加默认完成态的 `entranceProgress`；hosted 传入 `hostState.expansionProgress`，detached 和 Settings 预览保持直接显示。
+4. 调整 `OverlayHeroRow` 为三段式层级，在右侧数值下显示可选 `formattedDetail`；调整普通行数值列稳定宽度。
+5. 普通行按纯函数结果应用低幅上移和透明度；Reduce Motion 下取消位移与错位。
+6. `UsageBar` 增加短促宽度动画并保留低强度静态高占用辉光，不增加循环动画。
+
+### 验证
+
+- `swift test --filter SummaryEntranceAnimationTests` 验证行顺序、完成态、延迟上限和 Reduce Motion。
+- 全量 `swift test`。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`。
+- 手动验证 hosted 展开节奏、实时刷新不重播、无辅助信息不留空白、不同缩放比例、Reduce Motion 和高占用辉光。
+
+### 风险
+
+- 行延迟随 widget 数量累积会拖慢展开；计算必须设置阈值上限，保证整组约 250ms 内结束。
+- 数值列过宽会压缩名称，过窄会截断长金额；使用缩放后的最小宽度并保留单行缩放。
+- 当前工作区已有未提交 HUD 改动；实现必须基于现状增量修改，不得重置或覆盖。
+- 视觉动画难以用稳定快照测试；只测试纯进度策略，视觉节奏依赖手动验收。
+
+## 当前重点：下一轮精修（动效 + C 分页 + Settings 招光 + 实时长高/清理）（已实现，待手动体验验证）
+
+### 背景
+
+上一轮布局/材质/token 地基已稳。用户确认下一轮四块全做，按风险从低到高分四部分推进，每部分独立可验证、独立可回滚。
+
+### 本轮目标（分四部分）
+
+**Part 1 · 实时长高 + 死代码清理（最低风险，先做）**
+- `NotchHostPanelManager` 观察 `widgetStore.widgets` 与 `overlayLayout` 变化：hosted 展开态下内容变化时重算自适应高度并 `reassertHostedFrame`，实现面板实时长高（不必等下次展开）。
+- 用 `withObservationTracking` 重注册模式观察 `@Observable` 的 widgetStore；防抖，避免与 `isRestoringState`/`isResettingHostedFrame` 守卫冲突或重复 setFrame。
+- 删除已无引用的 `CompactOverlayContent.swift`、`GroupedOverlayView.swift`；`xcodegen generate` 同步工程。
+
+**Part 2 · 浮窗动效精修（精美感主体）**
+- 数字滚动：hero/row 主数值 Text 加 `.contentTransition(.numericText())` + 按 `formattedValue` 的 `.animation`，数据更新时数字滚动过渡。
+- 展开错位渐入：展开时行按 index 轻微 stagger（基于 `expansionProgress` 的阈值或延迟）淡入上移，不与外层 spring 抢节奏。
+- collapsed 轻辉光：被追踪指标高占用（>0.85）时，collapsed 状态槽/进度条加极轻的语义色 glow。
+- 图标小圆底 chip：list row 图标也套 provider 强调色圆底（hero 已有），统一精致度。
+- 数值列右对齐 + 固定宽，`monospacedDigit` 保证多行数字/进度条右缘对齐。
+
+**Part 3 · 补齐 C 分页布局**
+- 新增 `OverlayPagedView`：一屏一个服务/指标（hero 尺寸），横向分页（`scrollTargetBehavior(.paging)`，macOS 14+）+ 圆点指示。
+- `OverlayContentView` 的 `.paged` 分支接入；Settings 布局选择器放出"分页"。
+- `adaptiveExpandedHeight` 为 paged 增加单页高度分支（固定较矮）。
+
+**Part 4 · Settings 深度招光**
+- 状态徽章统一：`StatusPill` / `StatusDot` / "已配置 N" 绿胶囊收敛为一套基于 `Theme.Palette.status*` 的组件。
+- 卡片抬升体系：平台详情各 section 统一 `.glassCard` 层级与间距节奏（8pt 栅格）。
+- 通用页原生 `Form(.grouped)` 违和：在磨砂底上确认可读性，必要时给 section 统一容器/透明背景，使其与自定义页风格一致（不重写为完全自定义，控制范围）。
+
+### 实施顺序与验证
+
+- 按 Part 1 → 2 → 3 → 4 顺序实现，每部分单独 `swift test` + `xcodebuild` + 手动验证后再进下一部分。
+- 新增文件（`OverlayPagedView` 等）后 `xcodegen generate`。
+- 几何/策略相关改动补或更新 Swift Testing。
+
+### 验证
+
+- 全量 `swift test` 无回退（含分页高度新用例）。
+- app 构建通过。
+- 手动：数字滚动/错位渐入/辉光观感；三种布局切换（摘要/列表/分页）正确；实时长高生效；Settings 状态徽章统一、通用页协调。
+
+### 风险
+
+- 数字滚动/动画在实时数据频繁更新时可能抖动或过度动效——需限制动画范围（只主数值）、必要时节流。
+- 实时长高观察若触发过频会与浮窗生命周期守卫竞争；必须防抖并复用既有 reassert 守卫路径。
+- macOS 分页 API（`scrollTargetBehavior`）行为与 iOS 有差异，需真机验证翻页与圆点同步。
+- Part 4 通用页只做协调，不重写 Form；避免范围蔓延。
+- 每部分独立提交式推进，任一部分有问题可单独回滚，不影响其余。
+
+### 本轮实现结果（2026-07-08）
+
+- **Part 1 · 实时长高 + 清理**：
+  - `NotchHostPanelManager` 用 `withObservationTracking` 观察 `widgetStore.widgets.count`，hosted 态内容变化时 `refreshGeometry` + `reassertHostedFrame` 实时重算面板高度（守卫 `isRestoringState`/`isDragging`，复用 `isResettingHostedFrame` 防误切）。
+  - 删除无引用的 `CompactOverlayContent.swift`、`GroupedOverlayView.swift`，`xcodegen` 已同步。
+- **Part 2 · 动效精修**：
+  - hero/row 主数值加 `.contentTransition(.numericText())` + `.animation(value: formattedValue)`，数据更新数字滚动。
+  - 新增 `ServiceIconChip`：list row 图标也套 provider 强调色圆底（与 hero 一致）。
+  - collapsed 进度条高占用（≥0.85）加语义色轻辉光。
+  - （错位渐入本轮未做：避免破坏已稳定的展开动画，留待后续。）
+- **Part 3 · C 分页布局**：
+  - 新增 `OverlayPagedView`（`scrollTargetBehavior(.paging)` + `scrollPosition` + `PageDots` 圆点），接入 `OverlayContentView.paged`。
+  - 新增 `NotchGeometryCalculator.pagedExpandedHeight()`（固定单页高度）；manager 分页时用它。
+  - Settings 布局选择器放出"分页"。
+- **Part 4 · Settings 招光**：
+  - `ProviderCredentialStatus.color` / `ProviderDataStatus.color` 及平台页内所有内联 `.green/.orange/.red/.yellow/.blue` 状态色统一走 `Theme.Palette.status*` / `brandAccent`。
+  - 卡片沿用上一轮 `.glassCard` 统一层级；通用页原生 `Form(.grouped)` 本轮按计划保持（不重写），仅确认在磨砂底可读。
+
+### 验证结果（2026-07-08）
+
+- `swift test`：通过，161 个测试通过（+1 `pagedHeightIsFixedAndAtLeastDefault`）。
+- 每部分均 `swift test` + `xcodebuild ... build` 通过；Part 1 删文件后 `xcodegen generate`。
+
+### 待手动验证
+
+- 数字更新时主数值滚动过渡是否自然、不抖。
+- 图标小圆底 chip 观感；collapsed 高占用轻辉光是否恰当（不过曝）。
+- 三种布局切换：摘要/列表/分页均正确；分页左右翻页与圆点同步（macOS `scrollTargetBehavior` 真机验证）。
+- 展开态下在 Settings 增删 widget，浮窗**实时长高/缩短**。
+- 平台页状态色统一（configured/expired/error/需授权）观感一致。
+
+## 当前重点：浮窗布局重构（B 摘要布局）+ 自适应高度 + Settings 磨砂恢复 + 去样式内容模型（已实现，待手动体验验证）
+
+### 问题
+
+用户体验后提出两类问题，并要求重新规划浮窗排布与对应 Settings 逻辑：
+
+1. 设计风格不统一：
+   - (a) Settings：应做成**半透明磨砂**质感（科技感），参考 Token Monitor。上一轮"设计 token 统一"把 Settings 也改成了实心深色，与此诉求冲突，需要修正。
+   - (b) 浮窗：尽量与刘海融为一体（深色、无缝）。
+2. 浮窗内容多时**显示不全**（当前 `expandedHeight = 110` 固定，body 装不下就溢出）。
+
+### 已确认的设计决策（brainstorming 结论）
+
+- **两套表面身份**：Settings = 半透明磨砂玻璃；HUD 浮窗 = 深色刘海融合。`Theme` 拆出 `glass`(Settings) 与 `notch`(HUD) 两个 surface family；brandAccent / status / 间距 / 圆角 / 字体仍共用。
+- **三种浮窗布局做成 Settings 可切换模式**：`summary`(B) / `drawer`(A) / `paged`(C)，共用同一份有序内容列表。**本轮只实现 B**，A/C 下一轮。
+- **内容模型去样式**：`WidgetConfig.style` 保留在存储里但渲染忽略（向后兼容，不清数据）；内容只按 (service, metric, quotaIndex) 管理。
+- **hero = 内容列表第一条**：B 布局把第一条放大为顶部 hero，其余条目列表滚动。
+- **溢出根治 = 自适应高度 + 超限滚动**：body 目标高度按内容测算，clamp 到 `[110, 屏幕可用高 × 0.6]`，超出内部滚动。
+- collapsed 刘海双槽（leading 进度条 / trailing 文字）保持现状。
+
+### 本轮目标
+
+- 修正表面身份：
+  - Settings 恢复半透明磨砂（撤回上一轮 `SettingsGlassBackground`、侧栏、`GlassPanel` 的实心深色改动）。
+  - HUD 浮窗保持深色刘海融合（沿用 `SolidPanelBackground` / notch surface）。
+- 浮窗布局：
+  - 新增布局模式 `overlayLayout`（AppStorage，默认 `summary`）。
+  - 实现 B 摘要布局：顶部 hero（第一条，大数字，贴合刘海）+ 下方其余条目滚动列表。
+  - A/C 本轮不实现，代码留出模式分支占位（非 summary 时暂时回退到现有列表）。
+- 自适应高度（解决溢出）：
+  - `NotchGeometryCalculator.notchFrames` 增加 `expandedHeight` 参数（默认保留常量）。
+  - `hostedSurfaceLayout` 的 body 高度改为从 `surfaceSize.height - menuBarHeight` 推导，不再依赖固定常量。
+  - `NotchHostPanelManager` 按内容条目数与模式估算 `expandedHeight`，clamp 到 `[110, 屏幕可用高 × 0.6]`，在展开/内容变化/屏幕变化时重算并 setFrame。
+- Settings 配合：
+  - 小组件页移除"样式"选择；预设/已添加只按 (service, metric) 管理；新增"布局模式"选择器；第一条标注"主指标 (hero)"。
+- 不破坏数据：不动 `state.json`、不清 `WidgetConfig` 存储、不改凭据/fetcher。
+
+### 实施步骤
+
+1. **Theme 拆双 surface family**
+   - `Theme` 增加 `glass`（Settings：material + 细边 + 轻高光）与 `notch`（HUD：深色渐变实底）两组表面定义。
+   - `SettingsGlassBackground`、Settings 侧栏、平台侧栏、`GlassPanel` 恢复/改用 `glass` 家族（半透明磨砂）。
+   - 浮窗 `SolidPanelBackground`、`NotchHostedSurfaceView` 用 `notch` 家族。
+   - brandAccent / status / spacing / radius / typography 保持共用。
+
+2. **内容模型去样式**
+   - 新增 `overlayLayout` AppStorage（`summary` / `drawer` / `paged`），默认 `summary`。
+   - HUD 内容仍取 `store.widgets`（有序）；渲染忽略 `WidgetConfig.style`。
+   - 保留存储字段，避免破坏已保存配置与解码。
+
+3. **B 摘要布局视图**
+   - 复用/扩展 `OverlayListView`：新增 hero 区（第一条放大：大号数值 + provider 强调色图标 + 进度条），其余条目走现有 row + 竖向滚动。
+   - 抽 hero row 与普通 row 为可复用子视图，供后续 A/C 共用。
+   - `NotchHostedSurfaceView.bodyPanel` 与 `FloatingPanelView` 按 `overlayLayout` 选择布局；非 `summary` 暂回退现有列表。
+
+4. **自适应高度几何**
+   - `NotchGeometryCalculator.notchFrames(screenFrame:geometry:expandedHeight:)` 加参数，默认 `expandedHeight`。
+   - `hostedSurfaceLayout` body 高度改为 `(surfaceSize.height - menuBarHeight) * progress`。
+   - `NotchHostPanelManager`：新增按内容估算高度的纯逻辑（hero ≈ 固定高 + 其余行 × 行高，clamp `[110, screen.visibleFrame.height × 0.6]`），在 `refreshGeometry` / 展开 / widget 变化时使用。
+   - 观察 `widgetStore` 变化触发重算（Observation）。
+
+5. **几何测试更新**
+   - 更新 `NotchGeometryCalculatorTests` 中依赖固定 110 的断言；新增自适应高度用例（给定 expandedHeight 得到对应 frame / body 高度；clamp 边界）。
+
+6. **Settings 小组件页改造**
+   - 移除样式选择 UI 与相关绑定；预设/已添加只显示 (service, metric)。
+   - 新增"布局模式"选择器（摘要/抽屉/分页；抽屉/分页标注"即将支持"或暂时可选但回退）。
+   - "当前效果/已添加"第一条标注"主指标 (hero)"。
+   - 恢复该页磨砂质感与统一 token。
+
+7. **验证**
+   - `swift test`（含更新后的几何测试）
+   - `xcodegen generate`（新增文件）后 `xcodebuild ... build`
+   - 手动：
+     - Settings 三页恢复磨砂科技感、文字清晰。
+     - 浮窗 B 布局：hero 贴合刘海、下方滚动、内容多时不再截断。
+     - 自适应高度在 1 条 / 多条 / 超多条下的表现（clamp 生效、超限滚动）。
+     - collapsed 与 expanded 切换仍与刘海融合、无双浮窗/漂移回归。
+
+### 验证
+
+- 更新并通过几何单测（自适应高度 + clamp 边界）。
+- 全量 `swift test` 无回退。
+- app 构建通过。
+- 手动确认两套表面身份、B 布局溢出解决、刘海融合无回归。
+
+### 风险
+
+- `expandedHeight` 参数化会牵动 `NotchGeometryCalculator` 及其测试；必须同步更新断言，避免几何回归（该模块历史上多次回归）。
+- 自适应高度改变展开 body 尺寸，需复核 snapZone、hit mask、hover region 是否仍正确；body 变高不应影响 collapsed 的刘海融合。
+- 观察 widgetStore 触发重算要防抖/防重复 setFrame，避免与浮窗生命周期（上一轮 `isRestoringState` 守卫）冲突。
+- Settings 恢复磨砂是对上一轮"实心深色统一"的部分回退；provider 强调色映射、brandAccent 收敛保留不动。
+- A/C 布局本轮仅占位；Settings 若提供其选项，需明确回退行为，避免用户选了没效果。
+
+### 本轮实现结果（2026-07-08）
+
+- **Theme 拆双 surface family**：`Theme` 新增 `GlassWindowBackground` 与 `.glassCard()`（Settings 半透明磨砂），保留 `SurfaceLevel` + `.themedCard()`（HUD 深色）。
+  - Settings 恢复磨砂：`SettingsGlassBackground` 回到 material + 高光渐变；侧栏回 `.regularMaterial`；平台侧栏回 `.ultraThinMaterial`；平台 `GlassPanel` 与 toast 改 `.glassCard()`。
+  - HUD 保持 `SolidPanelBackground`（深色刘海融合）不变。
+- **内容模型去样式 + 布局模式**：
+  - 新增 `OverlayLayout`（`summary`/`drawer`/`paged`）与 `overlayLayout` AppStorage。
+  - 重写 `OverlayListView.swift`：`OverlayContentView` 分发；`OverlaySummaryView`（B：hero + 滚动列表）；`OverlayListView`（列表）；`OverlayHeroRow` / `OverlayListRow` / `UsageBar` 复用组件。
+  - `NotchHostedSurfaceView` 与 `FloatingPanelView` 改用 `OverlayContentView`，内容用固定 `widgetSizeScale`（溢出滚动而非缩字）。
+  - `WidgetConfig.style` 保留存储但渲染忽略；未清数据。
+- **自适应高度（溢出根治）**：
+  - `NotchGeometryCalculator.notchFrames` / `hostedSurfaceLayout` 增加可选 `expandedHeight` 参数；body 高度改由 `surfaceSize.height - menuBarHeight` 推导。
+  - 新增 `adaptiveExpandedHeight(itemCount:isSummary:availableHeight:)`，clamp 到 `[110, 可用高 × 0.6]`。
+  - `NotchHostPanelManager.computeFrames` 按 widget 数 + 布局算高度；`animateToExpanded` 展开前重算几何；`windowDidResize` 增加 `isResettingHostedFrame` 守卫（自适应 reassert 会改尺寸，防止误切 detached）。
+  - 视图 `surfaceLayout` 从 `hostState.frames` 推导同一高度传入。
+- **Settings 配合**：
+  - 浮动面板设置：`overlayMode`(紧凑/分组) 选择器替换为 `overlayLayout`（摘要/列表）+ 说明；`paged` 本轮不放出。
+  - 小组件页"当前效果"预览改为直接渲染真实 `OverlayContentView`（深色面板），summary 模式标注"主指标 (hero)"；移除旧的按服务分组 chip 预览与其死代码（`WidgetPreviewGroup(View)` / `WidgetPreviewItem` / `groupedWidgets` / `removeWidget`）。
+- **几何测试**：新增 `customExpandedHeightDrivesFrameAndBody` / `adaptiveHeightGrowsWithItemsAndClamps` / `adaptiveHeightNeverBelowDefault`；既有固定高度断言用默认参数仍通过。
+- **未删除**：`CompactOverlayContent` / `GroupedOverlayView` 现已完全无引用（死代码），本轮未删以控制范围。
+- **已知限制**：A(drawer) 已可用（等高列表），C(paged) 未实现；widget 数变化仅在下次展开/屏幕变化时重算面板高度（展开中新增暂靠滚动，不实时长高）。
+
+### 验证结果（2026-07-08）
+
+- `swift test`：通过，160 个测试通过（含 3 个新增自适应高度用例）。
+- `xcodebuild ... build`：通过，无 error（本轮无新增源文件，未跑 xcodegen）。
+
+### 待手动验证
+
+- Settings 三页恢复半透明磨砂科技感、文字清晰（亮/暗外观 + Reduce Transparency）。
+- HUD 浮窗 B 布局：hero 贴合刘海、下方滚动；内容多时不再截断（自适应长高到上限再滚动）。
+- Settings 浮动面板切"摘要/列表"，浮窗实时反映；小组件页预览与真实 HUD 一致、hero 标注正确。
+- collapsed ↔ expanded 切换与刘海融合无回归、无双浮窗（上一轮 `isRestoringState` + 本轮 `isResettingHostedFrame` 守卫）。
+
+## 当前重点：设计 token + 材质/强调色统一（已实现，待手动体验验证）
+
+### 问题
+
+目前整个 app 的视觉语言不统一，是后续所有 UI 抛光的最大阻碍：
+
+- **三套互不相干的表面质感**：
+  - Settings 外壳 `.regularMaterial` 磨砂 + 白色渐变叠层（`SettingsWindow.swift` `SettingsGlassBackground`）。
+  - 平台页侧栏 `.ultraThinMaterial` + `白 0.035` 叠层（`PlatformListView.swift`）。
+  - 平台详情卡片 `GlassPanel`：`.thinMaterial` + `白 0.06` + 描边 + 阴影（`PlatformListView.swift:1148`）。
+  - 浮窗：上一轮改的 `SolidPanelBackground` 实心深色渐变。
+- **两套强调色并存**：Settings 主侧栏和多处用系统蓝 `Color.accentColor`（共 16 处），平台侧栏改用了 provider 品牌色（`serviceAccentSwiftUIColor`）。
+- **魔法数字散落**：圆角 5/6/8/10/14/16 混用；透明度 0.035/0.06/0.08/0.12/0.13/0.16 到处硬编码；间距 4/8/9/10/12/14 无栅格。
+- **字体无 ramp**：大量 `.font(.system(size:))` 直接写，数值/标签层级不统一。
+
+结论：单点抛光无法解决"拼凑感"，必须先建立单一来源的设计 token，并统一材质和强调色。
+
+### 本轮目标
+
+- 建立一套集中的设计 token（app 侧 SwiftUI 层，命名如 `Theme`）：
+  - **颜色层级**：`surface.base / raised / overlay`、`border.subtle / strong`、`text.primary / secondary / tertiary`、统一 `brandAccent`、status 语义色（`ok / warn / error / idle`）。
+  - **圆角梯子**：如 `radius.sm=8 / md=12 / lg=16`。
+  - **间距梯子**：4/8/12/16/24（8pt 栅格为主）。
+  - **材质身份**：全 app 统一一种表面身份。既然浮窗（产品主角）已是实心深色，Settings 也往"更实、更暗"靠，收敛磨砂叠层的随意用法。
+  - **字体 ramp**：`title / headline / body / caption` + 数值统一 `monospacedDigit`。
+- 用 token 收敛现有三处表面：
+  - `SettingsGlassBackground`、平台侧栏背景、`GlassPanel` 改为引用统一 token（surface + border + radius + shadow），保留各自布局，只换底层样式来源。
+  - `SolidPanelBackground`（浮窗）复用同一套 surface/边框 token，保证浮窗和 Settings 卡片是"同一种材质的不同层级"。
+- 强调色收敛：
+  - Settings 主侧栏（小组件/平台/通用）选中态、通用交互强调统一用 `Theme.brandAccent`，替换系统 `Color.accentColor`。
+  - provider 品牌色**只保留做"身份标识"**（图标 tint、平台侧栏小圆点/强调条），不再和主 UI 强调色混用。
+- 不改功能、不改数据模型、不改布局结构：本轮只替换样式来源，不动 fetcher、state、几何、浮窗生命周期。
+
+### 方案取舍
+
+- **推荐：新增 `Theme` 常量集合 + 少量 ViewModifier/背景 helper，逐处替换样式来源**
+  - 优点：地基清晰、风险可控、后续抛光都能复用。
+  - 缺点：本轮改动点分散在多个文件（但都是样式替换，无逻辑变化）。
+- 更激进：引入完整 design system（Environment 注入主题、支持多主题切换）——超出当前需要，暂不做。
+- 保守：只统一颜色不碰材质——无法解决三套质感割裂，达不到"精美"目标。
+
+### 实施步骤
+
+1. **定义 token**
+   - 新增 `token_hud/Design/Theme.swift`：集中 `Theme.Color`（surface/border/text/brandAccent/status）、`Theme.Radius`、`Theme.Spacing`、`Theme.Typography`。
+   - 颜色用固定 RGB / `Color` 常量，先按当前浮窗深色基调取值，保证 Settings 与浮窗同源。
+2. **统一表面 helper**
+   - 抽 `Theme` 提供的卡片背景 modifier（如 `.themedSurface(level:)`），统一 fill + border + radius + shadow。
+   - `SolidPanelBackground`、`GlassPanel`、`SettingsGlassBackground`、平台侧栏背景改为引用同一 helper/token。
+3. **强调色替换**
+   - 全局把 Settings 里非 provider 语义的 `Color.accentColor`（16 处）替换为 `Theme.Color.brandAccent`。
+   - 保留 `serviceAccentSwiftUIColor` 仅用于 provider 身份标识处。
+4. **状态色与 pill 收敛**
+   - `StatusPill`、"已配置 N" 绿色胶囊、状态点统一走 `Theme.Color.status`。
+5. **字体 ramp 落地（最小范围）**
+   - 先在 Settings 标题/说明/数值和浮窗列表主数值接入 `Theme.Typography`，不强制一次性替换所有 `.font`。
+6. **验证**
+   - `swift test`
+   - `xcodegen generate`（如新增文件）后 `xcodebuild ... build`
+   - 手动：三页 + 浮窗展开/collapsed 视觉是否统一（材质、强调色、圆角、间距），有无对比度/可读性回退。
+
+### 验证
+
+- 全量 `swift test` 保证无逻辑回退（本轮应为纯样式改动）。
+- app target 构建通过。
+- 手动对照：Settings 三页与浮窗是否读起来像"同一个 app"——统一材质身份、单一强调色、一致圆角与间距。
+
+### 风险
+
+- 统一材质会改变 Settings 现有观感（从磨砂转向更实的深色），需要手动确认亮/暗系统外观和 Reduce Transparency 下的可读性。
+- token 取值一次定死可能不完美；本轮以"建立单一来源 + 收敛现有魔法数字"为目标，具体色值后续可微调。
+- 改动点分散（16 处 accentColor + 多处 material），需逐处替换后统一验证，避免遗漏造成新的不一致。
+- 本轮不动 provider 强调色映射、浮窗几何与生命周期、数据模型。
+
+### 本轮实现结果（2026-07-08）
+
+- 新增 `token_hud/Design/Theme.swift`：集中 `Palette`（surface base/raised/overlay、border subtle/strong、text primary/secondary/tertiary、`brandAccent`、status ok/warn/error/idle）、`Radius`（sm8/md12/lg16）、`Spacing`（4/8/12/16/24）、`SurfaceLevel` 渐变，以及 `.themedCard(level:cornerRadius:padding:)` 修饰器。
+  - `brandAccent` 选用 periwinkle-indigo `(0.50, 0.52, 0.98)`，刻意区别于系统蓝、绿色 status、provider 身份色。
+- 表面统一到 token：
+  - 浮窗 `SolidPanelBackground` 改用 `Theme.SurfaceLevel.raised.gradient` + `borderSubtle`。
+  - 平台详情 `GlassPanel` 从 `.thinMaterial` 磨砂改为 `.themedCard`（实心深色渐变）。
+  - Settings 外壳 `SettingsGlassBackground` 从 `.regularMaterial` + 白渐变改为 `SurfaceLevel.base.gradient` 实心深底。
+  - Settings 侧栏与平台侧栏去掉 `.regularMaterial` / `.ultraThinMaterial`，改为 base 之上的极轻白色 tint，靠 `borderSubtle` 分隔。
+- 强调色收敛：
+  - Settings 主侧栏选中态、KeyRecorder 录制态、平台配额进度条正常态、小组件预设 chip 强调统一 `brandAccent`。
+  - provider 身份色（`serviceAccentSwiftUIColor`）保留于平台侧栏图标/强调条、小组件预设 chip 图标。
+  - `PlatformRowView.swift` 为死代码（无引用），本轮未改其残留 `accentColor`。
+- status 色收敛：平台"已配置 N"胶囊、配额告警走 `Theme.Palette.status*`。
+- 细节：平台页 reset toast 改 `.themedCard(level:.overlay)` 并加入淡入淡出 + 上移过渡（`showResetMessage` 包 `withAnimation`）。
+
+### 验证结果（2026-07-08）
+
+- `swift test`：通过，157 个测试通过。
+- `xcodegen generate` 后 `xcodebuild ... build`：通过，无 error。
+
+### 待手动验证
+
+- Settings 三页与浮窗展开态并排看是否像"同一个 app"：统一深色实心材质、单一 periwinkle 强调色、一致圆角/间距。
+- 亮/暗系统外观、Reduce Transparency 下 Settings 文字对比度是否仍清晰（材质从磨砂转实心的主要风险点）。
+- 通用页 `Form(.grouped)` 在新深色底上的观感（已知后续 tier 项：原生 Form 与自定义页风格仍有差异，本轮未改）。
+- provider 身份色是否仍能一眼区分平台，且不与 brandAccent 混淆。
+
+## 当前重点：展开面板大数字列表 + 实心深色卡片 + 启动双浮窗修复（已实现，待手动体验验证）
+
+### 问题
+
+用户对照参考项目 Token Monitor 后反馈三个问题：
+
+1. **首次点开时两个浮窗重叠**。
+2. **整体透明度/质感与参考差距大**——参考是接近不透明的深色实体卡片，token_hud 现在用 `.regularMaterial` 磨砂 + 半透明黑，在亮背景下发灰发糊。
+3. **浮窗里字体太小看不清**。
+
+现状排查（已读 `NotchHostPanelManager.swift`、`NotchHostedSurfaceView.swift`、`NotchHostRootView.swift`、`FloatingPanelView.swift`、`CompactOverlayContent.swift`、`GroupedOverlayView.swift`、`NotchGeometryCalculator.swift`、`AppDelegate.swift`）：
+
+- 问题 3 根因有两层：
+  - **布局层**：`CompactOverlayContent` 把所有 widget 横向塞进一个 `ScrollView`，每个都是 8~12pt 小 chip，widget 一多字体必然小。
+  - **回归层**：上一轮（"数值等宽字体与 Provider 强调色映射"）把各 widget 主数值从 `design: .rounded` 改成 `design: .monospaced`。等宽字形每字符更宽，widget 固定宽度 + `minimumScaleFactor(0.6~0.7)` 导致数字被自动缩小，反而更小更细。本轮需要修正这个副作用。
+- 问题 2 根因：`NotchHostedSurfaceView.bodyPanel` 和 `FloatingPanelView` 都是 `.regularMaterial` + `Color.black.opacity(0.58~0.70)` 叠加，是磨砂玻璃质感；参考项目是接近不透明的深灰渐变卡片 + 细亮边 + 柔和外阴影，质感更"实"。
+- 问题 1 根因已由真机日志确认（**不是 SkyLight 副本**，是启动恢复的时序竞争）：
+  - `savedMode: hosted` → 走 `.hostedCollapsed` 分支。
+  - 该分支 `setFrameWithDiagnostics` 调 `win.setFrame` 把 overlay 从默认 (200,200,300,60) 拉到展开尺寸 (455,814,560,142)，这个 resize **同步触发 `windowDidResize`**。
+  - `windowDidResize` 里"hosted 不该 resize → `transitionTo(.detached)`"于是中途把恢复流程切成 detached（`switch detached` 日志），随后 `.hostedCollapsed` 分支继续 `prepareOverlayForDisplay` 又把 overlay order front。
+  - 结果 `restore state complete`：`mode: detached` 且 `detachedVisible: true` / `overlayVisible: true` 两个窗口都可见。
+  - `windowDidMove` 已有 `isResettingHostedFrame` 守卫，但 `windowDidResize` 没有，且恢复流程整体无守卫。
+  - **已实现修复**：新增 `isRestoringState` 守卫，`restoreState()` 全程置位，`windowDidResize` / `windowDidMove` 在恢复期间直接早返回，杜绝恢复中途误切 detached。
+
+用户已确认方向：
+- 布局：展开面板重做成**大数字竖向列表**（参考项目形态）。
+- 质感：改成**实心深色渐变卡片**（去磨砂模糊）。
+
+### 本轮目标
+
+- 展开面板（hosted expanded body 与 detached 浮窗共用内容）从横向 chip 改为**竖向大数字列表**：
+  - 每行一个服务：左侧 provider 强调色图标 + 名称，右侧大号数值，下方/右侧配进度条。
+  - 数值字号显著加大、可读性优先；服务多时用竖向滚动，不再把字压小。
+  - 复用现有 provider 强调色映射与 `WidgetValueComputer`，不改数据来源。
+- 卡片质感改为**实心深色渐变卡片**：
+  - hosted expanded body 与 detached `FloatingPanelView` 统一改成深灰竖向渐变实底（接近不透明）+ 0.8pt 细亮边 + 柔和外阴影。
+  - 去掉/弱化 `.regularMaterial` 磨砂，避免亮背景发灰。
+  - collapsed top cap 继续保持接近刘海黑度以维持融合，不做过度玻璃化。
+- 修正上一轮 monospaced 主数值缩小的副作用：
+  - 保留 `.monospacedDigit()`（数字等宽对齐仍要），但主数值字形不再统一用 `design: .monospaced`；根据新大数字列表的实际宽度决定字体，确保不被 `minimumScaleFactor` 压缩。
+- 修复启动双浮窗：
+  - 先抓 `[NotchDiagnostics]` 日志确认是"两个真窗口都可见"还是"SkyLight 委托副本"。
+  - 根据根因收敛显示路径：启动/切换时保证同一时刻只有一个窗口可见；如为 SkyLight 委托副本，调整委托后原窗口的可见性/清理顺序。
+- 不改数据模型：不动 `state.json` schema、fetcher、凭据逻辑、刘海吸附/脱离几何策略。
+
+### 实施步骤
+
+1. **抓取问题 1 根因日志（阻塞后续修复）**
+   - 请用户重启 app，复现首次双浮窗重叠，抓取 Xcode/Console 里 `[NotchDiagnostics] restore state complete` 及前后 `surface prepared` / `surface strategy configured` 段落。
+   - 依据 `detachedVisible` / `overlayVisible` / `overlayDelegatedToSkyLight` 判断根因分支，再决定第 5 步的具体修法。
+
+2. **大数字列表内容视图**
+   - 在 `GroupedOverlayView` 基础上（或新建 `OverlayListView`）实现竖向列表行：
+     - 左：`serviceAccentSwiftUIColor(for:)` 图标 + provider 名。
+     - 右：大号主数值（复用 `WidgetRenderer` 的 `formattedValue` 逻辑或抽取共享格式化），下方细进度条。
+   - 每行一个主指标；同服务多 widget 时保留次要行或折叠，避免重新变回一排小 chip。
+   - 字号以展开 body 高度（`expandedHeight = 110`）为基准放大，主数值至少接近参考观感。
+
+3. **接入展开面板与浮窗**
+   - hosted expanded：`NotchHostedSurfaceView.bodyPanel` 的内容改用新列表视图。
+   - detached：`FloatingPanelView` 内容改用同一列表视图，保持两态一致。
+   - collapsed 态与 status slot 不变。
+
+4. **实心深色渐变卡片**
+   - 抽一个共享卡片背景（如 `SolidPanelBackground`）：深灰竖向 `LinearGradient` 实底 + `Color.white.opacity(~0.12)` 细边 + 柔和 `shadow`。
+   - 替换 `NotchHostedSurfaceView.bodyPanel` 和 `FloatingPanelView` 里的 `.regularMaterial` + 半透明黑叠加。
+   - 检查亮/暗桌面背景下对比度，确保不发灰、文字清晰。
+
+5. **修复启动双浮窗（依赖第 1 步结论）**
+   - 根据日志：
+     - 若为两个真窗口都可见：收紧 `restoreState()` / `prepareOverlayForDisplay` 的 orderOut 顺序，保证互斥。
+     - 若为 SkyLight 委托副本：调整委托时机与原窗口可见性处理。
+   - 增补可测的纯逻辑（如"给定 restoreMode 只应有一个窗口可见"）到 core，如果能抽出判断。
+
+6. **收尾字体修正**
+   - 复查 `TextWidget`/`AggregateWidget`/`BarWidget`/`RingWidget`/`MultiWidget`/`ModelBreakdownWidget`：如果这些仍用于新列表，按实际宽度决定是否保留 `design: .monospaced`；被大数字列表取代的路径相应调整。
+
+### 验证
+
+- 自动：
+  - `swift test`
+  - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`（新增文件先 `xcodegen generate`）。
+- 手动：
+  - 启动 app，确认首次不再出现两个浮窗重叠（对照日志 `overlayVisible` / `detachedVisible` 只有一个 true）。
+  - 展开刘海面板和 detached 浮窗，确认大数字清晰可读、卡片质感实、亮背景不发灰。
+  - 多服务时列表竖向滚动，字体不被压小。
+
+### 风险
+
+- 动到 `NotchHostPanelManager` 浮窗生命周期历史上多次回归，第 5 步必须以日志根因为准、小步改，不盲改。
+- 去磨砂改实心渐变后，collapsed 与刘海融合的黑度要单独校准，避免展开态和收起态质感割裂。
+- 大数字列表会改变展开 body 的理想高度，`adaptiveScale` / `expandedHeight` 可能需要同步调整，注意别撑破刘海几何。
+- 本轮会修正上一轮 monospaced 主数值改动；provider 强调色映射保留不动。
+
+### 本轮实现结果（2026-07-08）
+
+- **问题 1（启动双浮窗）已修**：
+  - `NotchHostPanelManager` 新增 `isRestoringState` 守卫，`restoreState()` 全程置位（`defer` 复位）。
+  - `windowDidResize` / `windowDidMove` 在恢复期间直接早返回，杜绝恢复中 `setFrame` 的 resize 同步触发 `transitionTo(.detached)`。
+- **问题 3（字体太小）**：
+  - 展开面板内容从横向 chip 改为大数字竖向列表 `OverlayListView`（新文件）：每行一个 widget，左侧 provider 强调色图标 + 服务名/指标名，右侧 20pt 主数值，下方细用量条；行数多时竖向滚动，不再压小字体。
+  - 抽取 `WidgetMetricComputer`（新文件），把原 `WidgetRenderer` 里 ~250 行的 fraction/formattedValue/formattedDetail/icon/metricTitle 计算集中为单一来源；`WidgetRenderer` 改为委托，行为不变。
+  - 回退上一轮把 chip 主数值改成 `design: .monospaced` 的副作用：7 个 widget 主数值改回 `.rounded`，保留 `.monospacedDigit()` 做数字对齐。
+- **问题 2（质感）**：
+  - 新增 `SolidPanelBackground`（新文件）：深灰竖向渐变实底（接近不透明）+ 0.8pt 细亮边 + 柔和外阴影，去掉 `.regularMaterial` 磨砂。
+  - `NotchHostedSurfaceView.bodyPanel` 与 `FloatingPanelView` 背景统一改用 `SolidPanelBackground`。
+  - collapsed top cap 保持原深黑度不变（仅展开 body 与 detached 玻璃化改实心）。
+- **未删除**已无引用的 `CompactOverlayContent` / `GroupedOverlayView`（本轮不顺手清理，保持范围集中）。
+- **未改动** `expandedHeight = 110` 几何常量：为避免破坏刘海几何测试，列表在现有高度内滚动；如需更多行同屏可见，后续单独评估加高 body。
+
+### 验证结果（2026-07-08）
+
+- `swift test`：通过，157 个测试通过。
+- `xcodegen generate` 后 `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过。
+
+### 待手动验证
+
+- 启动 app：确认首次不再出现两个浮窗重叠（对照日志 `restore state complete` 应只有一个窗口 `Visible: true`）。
+- 展开刘海面板 / detached 浮窗：确认大数字清晰、卡片是实心深色渐变、亮桌面背景下不发灰。
+- widget 较多时：确认列表竖向滚动、字体不被压小。
+- 切换 collapsed / expanded：确认顶部与刘海仍融合、无灰边或质感割裂。
+
+## 当前重点：数值等宽字体与 Provider 强调色映射（已实现，待手动体验验证）
+
+### 问题
+
+参考竞品 Token Monitor（Electron，一个多工具 AI 用量监控组件，见 https://github.com/Javis603/token-monitor）截图后，发现其 UI 质感两个特点在 `token_hud` 上还没有对应实现：
+
+- 核心数字（token 数、百分比、剩余时间）统一用等宽字体，视觉上有明显的"数据/终端感"，和标签文字形成字体层次。
+- 每个 provider 有稳定的品牌强调色，贯穿进度条、图标 tint，用户靠颜色就能扫描区分平台，不需要逐行读文字。
+
+现状排查：
+
+- `token_hud/Widgets/*.swift` 里，`TextWidget`、`BarWidget`、`AggregateWidget` 已经用了 `.monospacedDigit()`，但 `RingWidget`、`ModelBreakdownWidget`、`MultiWidget`、`StatusWidget`、`CountdownWidget` 没有统一加上；且现有字体全部是 `design: .rounded`，不是真正等宽字形（`SF Mono`/`monospaced`），"数据感"比参考产品弱。
+- 颜色方面完全没有 provider 级别的品牌色映射：
+  - `RingWidget.ringColor` / `BarWidget.barColor` 目前只按"剩余量/使用率"分三档（绿/黄/红），是纯状态色，和 provider 身份无关。
+  - `PlatformListView.swift`、`PlatformRowView.swift`、`WidgetListEditor.swift` 里的选中态、状态点、进度 `tint` 全部用系统 `Color.accentColor` 或红/黄阈值色，没有 per-service 颜色。
+  - 目前唯一的 service 到展示名映射是 `WidgetListEditor.swift:83 serviceDisplayName(_:)`，覆盖 `claude / openai / codex / gemini / deepseek / anthropic / minimax / mimo`，没有配套颜色表。
+
+### 本轮目标
+
+- 统一小组件数值的等宽处理：
+  - 所有渲染数值（不含单位文字、标签文字）都加 `.monospacedDigit()`。
+  - 每个 widget 的"主数值"（大字号那一行，如 `TextWidget`/`AggregateWidget` primary value、`RingWidget` 中心值、`BarWidget` 主标签、`ModelBreakdownWidget` 数值列）额外使用 `design: .monospaced`，获得更强"数据感"；标签、单位、次要说明保持现状字体。
+- 新增 provider 强调色映射，覆盖当前 8 个 service（claude/openai/codex/gemini/deepseek/anthropic/minimax/mimo）+ 未知 service 的兜底色：
+  - 映射放在 `Sources/token_hudCore`（跨平台、可测试），用 RGB 分量表示颜色，不直接依赖 SwiftUI `Color`。
+  - App 侧提供 `Color` 转换 helper，供 widget 和 Settings 复用。
+  - 应用范围：widget 图标/ring track tint、`PlatformListView`/`PlatformRowView` 的平台图标、选中态强调条、状态点。
+  - **不替换**现有红/黄/绿"剩余量预警色"：`ring`/`bar` 的进度值颜色继续用状态色（这是之前几轮已验证的用量语义），品牌色只用于"识别用途"（图标 tint、侧栏强调条、分组标题色块），两者叠加而不是互相覆盖。
+- 保持行为不变：不改 `state.json` schema、不改数据拉取逻辑、不改现有 widget 布局/尺寸策略。
+
+### 实施步骤
+
+1. **核心层新增颜色映射**
+   - 在 `Sources/token_hudCore` 新增文件（如 `ServiceAccentColor.swift`），定义 `struct ServiceAccentColor { let red, green, blue: Double }` 和 `func serviceAccentColor(for service: String) -> ServiceAccentColor`，覆盖 8 个已知 service，未知 service 返回中性灰兜底色。
+   - 为映射增加 Swift Testing 覆盖：已知 service 返回预期颜色、未知 service 返回兜底色、大小写不敏感（如果现有 service id 有大小写不一致场景需要确认）。
+
+2. **App 侧颜色转换 helper**
+   - 在 app target 增加 `Color(_ accent: ServiceAccentColor)` 或类似 extension，转换成 SwiftUI `Color`，放在合适的共享位置（如 `Widgets/WidgetRenderer.swift` 附近或新建 `Widgets/ServiceColor+SwiftUI.swift`）。
+
+3. **应用到 widget 图标/track**
+   - `RingWidget`：track 描边或 icon 部分使用 provider 强调色，进度值颜色保持现有状态色不变。
+   - `BarWidget`/其他 widget 涉及 provider 图标的位置，统一用强调色 tint。
+
+4. **应用到 Settings 平台列表**
+   - `PlatformListView.swift` / `PlatformRowView.swift` 的平台图标、侧栏选中强调条、状态点颜色改用 provider 强调色，替代目前统一的 `Color.accentColor`。
+   - 不改变现有红/黄状态阈值色的语义（配额告警仍用状态色）。
+
+5. **统一数值等宽字体**
+   - 逐个检查 `RingWidget`、`ModelBreakdownWidget`、`MultiWidget`、`StatusWidget`、`CountdownWidget`，给数值 Text 补上 `.monospacedDigit()`。
+   - 每个 widget 的主数值字体从 `design: .rounded` 改为 `design: .monospaced`（如果视觉上过重，可保留字重不变，只切字体 design）。
+   - 手动检查改字体后是否有截断/宽度变化导致的布局挤压，必要时微调 `frame`/`lineLimit`。
+
+6. **验证**
+   - 自动：
+     - `swift test --filter Widget`
+     - `swift test`（新增 `ServiceAccentColor` 测试一并跑过）
+     - `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`
+   - 手动：
+     - 打开刘海 hosted 展开态和 detached 浮窗，检查各 widget 样式下数字字体变化是否协调、是否有截断或挤压。
+     - 添加多个不同 provider 的小组件，确认强调色能一眼区分且和现有红/黄/绿用量警示色不冲突、不混淆。
+     - 打开 Settings → 平台页，切换不同 provider，确认图标/状态点颜色符合预期且原有配额告警色不受影响。
+
+### 验证
+
+- 新增 Swift Testing 覆盖 `ServiceAccentColor` 的已知/未知 service 分支。
+- 全量 `swift test` 确保不影响现有 widget 格式化和平台解析测试。
+- Xcode app 构建通过。
+- 手动检查真实 HUD 和 Settings 视觉效果，因为字体/颜色观感不是纯测试能完全覆盖的。
+
+### 风险
+
+- 品牌色和状态色（红/黄/绿）如果视觉上离得太近，可能造成"识别色"和"警示色"混淆；本轮需要在应用时刻意让两者用在不同的视觉部位（如图标 tint vs 进度条本体），而不是同一元素叠加两种语义色。
+- 主数值切换为 `design: .monospaced` 后字宽可能变化，尤其是 compact 尺寸的 widget，需要手动检查是否会在极小 scale 下截断或溢出。
+- `serviceDisplayName` 目前是 `WidgetListEditor.swift` 内的 `private` 函数，`PlatformListView`/`PlatformRowView` 可能各自有独立的展示名逻辑；新增颜色映射时如果发现重复定义，只做最小整理（复用同一份 core 映射），不顺手做大范围去重重构。
+
+### 本轮实现结果（2026-07-08）
+
+- 新增 `Sources/token_hudCore/ServiceAccentColor.swift`：
+  - `ServiceAccentColor` 纯 RGB 结构体，`serviceAccentColor(for:)` 覆盖 8 个已知 service（大小写不敏感），未知 service 返回中性灰兜底色。
+  - 8 个已知颜色两两不同，且都与兜底灰色区分开（`Tests/token_hudCoreTests/ServiceAccentColorTests.swift` 覆盖）。
+- 新增 `token_hud/Widgets/ServiceColor+SwiftUI.swift`：`Color(_ accent: ServiceAccentColor)` 转换 + `serviceAccentSwiftUIColor(for:)` app 侧入口。
+- Widget 应用强调色（仅用于识别，不替换用量状态色）：
+  - `RingWidget`/`CountdownWidget`：track 描边从固定白色半透明改为 `service` 强调色（未传 `service` 时保留原白色描边），进度弧颜色不变。
+  - `BarWidget`：底部轨道同样改为 `service` 强调色，进度条本身颜色不变。
+  - `AggregateWidget`：图标 tint 改为 `service` 强调色。
+  - `MultiWidget`：子行图标 tint 改为 `config.service` 强调色。
+  - `WidgetRenderer` 在构造 `RingWidget`/`BarWidget`/`AggregateWidget`/`CountdownWidget` 时传入 `config.service`。
+- Settings 平台侧栏应用强调色：
+  - `PlatformListView.swift` 的 `PlatformSidebarRow` 左侧强调条、平台图标改用 `serviceAccentSwiftUIColor(for: provider.id)`，选中态背景/描边透明度沿用原有数值。
+  - `StatusDot`/`StatusPill`（配额/授权状态）未改动，继续使用状态色语义。
+  - 确认 `PlatformRowView.swift` 当前未被任何视图引用（死代码），本轮未改动。
+- 统一数值等宽处理：
+  - 给 `RingWidget`、`CountdownWidget`、`StatusWidget`（次要 label）、`MultiWidget`、`ModelBreakdownWidget`（tokens + cost 两列）补上 `.monospacedDigit()`。
+  - 主数值字体 `design` 从 `.rounded` 改为 `.monospaced`：`TextWidget.text`、`AggregateWidget.value`、`RingWidget` 中心 label、`BarWidget` 主 label、`CountdownWidget` label、`MultiWidget` 子行 value、`ModelBreakdownWidget` token 数列；标签/次要文字（单位、说明、cost 列）保持原字体。
+- 新增文件被识别需要重新生成工程：运行 `xcodegen generate` 后 `token_hud.xcodeproj` 才能编译通过（新增 Swift 文件不会被旧 `.xcodeproj` 自动感知，这是本仓库已有约定）。
+
+### 验证结果
+
+- `swift test`：通过，157 个测试通过（含新增 `Service accent colors` 4 个测试）。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：通过（先执行 `xcodegen generate` 后）。
+
+### 待手动验证
+
+- 打开刘海 hosted 展开态和 detached 浮窗，检查各 widget 数字字体是否协调、有无截断或挤压（尤其是极小 compact scale）。
+- 添加多个不同 provider 的小组件，确认强调色能一眼区分，且和现有红/黄/绿用量警示色不会混淆（两者应出现在不同视觉部位：图标/轨道 vs 进度值本身）。
+- 打开 Settings → 平台页，切换 Claude/OpenAI/Codex/Gemini/DeepSeek/Anthropic/MiniMax/MiMo，确认侧栏图标和强调条颜色符合预期，原有配额告警色（`StatusDot`/`StatusPill`）未受影响。
+
 ## 当前重点：Xcode 运行时 LLDB attach failed 修复（待确认）
 
 ### 问题

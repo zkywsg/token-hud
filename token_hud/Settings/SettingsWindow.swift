@@ -26,8 +26,10 @@ struct SettingsWindow: View {
             }
         }
         .frame(
-            minWidth: 760,
-            idealWidth: 900,
+            // Wide enough for the widgets page's two-column workbench; below
+            // this it falls back to a single stacked column.
+            minWidth: 820,
+            idealWidth: 1000,
             maxWidth: .infinity,
             minHeight: 560,
             idealHeight: 620,
@@ -68,11 +70,8 @@ struct SettingsWindow: View {
         .padding(.horizontal, Theme.Spacing.md)
         .padding(.bottom, Theme.Spacing.md)
         .background(.regularMaterial.opacity(0.6))
-        .overlay(alignment: .trailing) {
-            Rectangle()
-                .fill(Theme.Palette.borderSubtle)
-                .frame(width: 1)
-        }
+        // The pane divider is drawn once by the parent HStack; the sidebar no
+        // longer stacks a second hairline on its trailing edge.
     }
 
     @ViewBuilder
@@ -140,14 +139,12 @@ struct GeneralSettingsView: View {
 
     var body: some View {
         Form {
-            FloatingPanelSection()
             DataSourceSection(stateFilePath: $stateFilePath,
                               refreshInterval: $refreshInterval,
                               browseFile: browseFile)
-            AppearanceSection()
+            SystemSection()
             AppFilterSettingsView()
                 .environment(appFilterStore)
-            SystemSection()
         }
         .formStyle(.grouped)
         .scrollContentBackground(.hidden)
@@ -160,74 +157,6 @@ struct GeneralSettingsView: View {
         if panel.runModal() == .OK, let url = panel.url {
             stateFilePath = url.path
         }
-    }
-}
-
-// MARK: - Floating Panel Section
-
-private struct FloatingPanelSection: View {
-    @AppStorage("floatingPanelEnabled") private var enabled = true
-    @AppStorage("floatingHotkeyKeyCode") private var keyCode = -1
-    @AppStorage("floatingHotkeyModifiers") private var modifiers = 0
-    @AppStorage("floatingPanelScale") private var scale = 1.0
-    @AppStorage("overlayLayout") private var overlayLayout = "summary"
-    @State private var accessibilityEnabled = GlobalHotkeyManager.isAccessibilityEnabled
-
-    var body: some View {
-        Section("浮动面板") {
-            Toggle("启用浮动面板", isOn: $enabled)
-            if enabled {
-                Picker("布局", selection: $overlayLayout) {
-                    Text("摘要").tag("summary")
-                    Text("列表").tag("drawer")
-                    Text("分页").tag("paged")
-                }
-                .pickerStyle(.segmented)
-                Text("摘要：第一条放大为主指标；列表：等高排列；分页：一屏一个，左右翻页。")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                KeyRecorder(label: "快捷键", keyCode: $keyCode, modifiers: $modifiers)
-                if requiresAccessibilityPrompt {
-                    HStack(alignment: .firstTextBaseline, spacing: 10) {
-                        Label("全局快捷键需要辅助功能权限", systemImage: "lock")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
-                        Spacer(minLength: 8)
-                        Button("授权") {
-                            GlobalHotkeyManager.requestAccessibility()
-                            refreshAccessibilityStatus()
-                        }
-                    }
-                }
-                Picker("缩放", selection: $scale) {
-                    Text("0.5x").tag(0.5)
-                    Text("0.75x").tag(0.75)
-                    Text("1x").tag(1.0)
-                    Text("1.5x").tag(1.5)
-                    Text("2x").tag(2.0)
-                }
-                .pickerStyle(.menu)
-            }
-        }
-        .onAppear(perform: refreshAccessibilityStatus)
-        .onChange(of: keyCode) { _, _ in refreshAccessibilityStatus() }
-        .onChange(of: modifiers) { _, _ in refreshAccessibilityStatus() }
-        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            refreshAccessibilityStatus()
-        }
-    }
-
-    private var hasConfiguredHotkey: Bool {
-        keyCode >= 0 && modifiers != 0
-    }
-
-    private var requiresAccessibilityPrompt: Bool {
-        hasConfiguredHotkey && !accessibilityEnabled
-    }
-
-    private func refreshAccessibilityStatus() {
-        accessibilityEnabled = GlobalHotkeyManager.isAccessibilityEnabled
     }
 }
 
@@ -262,40 +191,51 @@ private struct DataSourceSection: View {
     }
 }
 
-// MARK: - Appearance Section
-
-private struct AppearanceSection: View {
-    @AppStorage("hudOpacity")      private var hudOpacity      = 1.0
-    @AppStorage("widgetSizeScale") private var widgetSizeScale = 1.0
-
-    var body: some View {
-        Section("外观") {
-            HStack {
-                Text("透明度")
-                Slider(value: $hudOpacity, in: 0.2...1.0, step: 0.05)
-                Text("\(Int(hudOpacity * 100))%")
-                    .frame(width: 36, alignment: .trailing)
-                    .foregroundStyle(.secondary)
-            }
-            Picker("小组件大小", selection: $widgetSizeScale) {
-                Text("小").tag(0.75)
-                Text("中").tag(1.0)
-                Text("大").tag(1.25)
-            }
-            .pickerStyle(.segmented)
-        }
-    }
-}
-
 // MARK: - System Section
 
+/// Behaviour rather than looks: whether the HUD runs, how it's summoned, and
+/// login startup.
 private struct SystemSection: View {
+    @AppStorage("floatingPanelEnabled") private var enabled = true
+    @AppStorage("floatingHotkeyKeyCode") private var keyCode = -1
+    @AppStorage("floatingHotkeyModifiers") private var modifiers = 0
+    @State private var accessibilityEnabled = GlobalHotkeyManager.isAccessibilityEnabled
+
     var body: some View {
         Section("系统") {
+            Toggle("启用浮动面板", isOn: $enabled)
+            KeyRecorder(label: "呼出快捷键", keyCode: $keyCode, modifiers: $modifiers)
+            if requiresAccessibilityPrompt {
+                HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    Label("全局快捷键需要辅助功能权限", systemImage: "lock")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(2)
+                    Spacer(minLength: 8)
+                    Button("授权") {
+                        GlobalHotkeyManager.requestAccessibility()
+                        refreshAccessibilityStatus()
+                    }
+                }
+            }
             if #available(macOS 13, *) {
                 LaunchAtLoginToggle()
             }
         }
+        .onAppear(perform: refreshAccessibilityStatus)
+        .onChange(of: keyCode) { _, _ in refreshAccessibilityStatus() }
+        .onChange(of: modifiers) { _, _ in refreshAccessibilityStatus() }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshAccessibilityStatus()
+        }
+    }
+
+    private var requiresAccessibilityPrompt: Bool {
+        keyCode >= 0 && modifiers != 0 && !accessibilityEnabled
+    }
+
+    private func refreshAccessibilityStatus() {
+        accessibilityEnabled = GlobalHotkeyManager.isAccessibilityEnabled
     }
 }
 

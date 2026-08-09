@@ -172,6 +172,15 @@ enum KeychainHelper {
             kSecAttrAccount:  account,
             kSecReturnAttributes: true,
             kSecMatchLimit:   kSecMatchLimitOne,
+            // An existence check must never present the ACL password dialog.
+            // Without this, a keychain item whose ACL doesn't yet trust the
+            // running binary (e.g. after a code-signing identity change) makes
+            // this synchronous call pop a modal prompt and block whatever thread
+            // calls it — including the main thread via the Settings snapshot,
+            // freezing the whole app. `kSecUseAuthenticationUIFail` makes a
+            // would-be-interactive read fail silently instead of prompting; we
+            // treat "can't read without prompting" as "not readable here".
+            kSecUseAuthenticationUI: kSecUseAuthenticationUIFail,
         ]
         var result: AnyObject?
         return SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess

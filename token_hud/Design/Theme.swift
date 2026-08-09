@@ -34,6 +34,53 @@ enum Theme {
         static let statusIdle = Color(red: 0.60, green: 0.60, blue: 0.63)
     }
 
+    // MARK: - Severity
+
+    /// The one place green/yellow/red usage color is decided. Both the collapsed
+    /// notch strip and the expanded usage bars read from here (via
+    /// `UsageSeverity` in core), so a given usage fraction always reads as the
+    /// same severity and color across the whole HUD.
+    static func severityColor(for severity: UsageSeverity) -> Color {
+        switch severity {
+        case .ok:       return Palette.statusOK
+        case .warn:     return Palette.statusWarn
+        case .critical: return Palette.statusError
+        }
+    }
+
+    /// Convenience: fraction (0...1, usage) straight to its severity color.
+    static func severityColor(forFraction fraction: Double) -> Color {
+        severityColor(for: UsageSeverity.forFraction(fraction))
+    }
+
+    // MARK: - Typography
+
+    /// Named type ramp for the HUD so scattered `.system(size:)` literals
+    /// converge on a few semantic steps. `scale` folds in the user's widget
+    /// size preference; weights/designs stay fixed per role.
+    enum Typography {
+        /// Promoted hero metric (the big number on the first row).
+        static func hero(_ scale: CGFloat) -> Font {
+            .system(size: 26 * scale, weight: .semibold, design: .rounded)
+        }
+        /// Secondary-row metric value.
+        static func value(_ scale: CGFloat) -> Font {
+            .system(size: 16 * scale, weight: .semibold, design: .rounded)
+        }
+        /// Service / row name.
+        static func title(_ scale: CGFloat) -> Font {
+            .system(size: 12 * scale, weight: .semibold)
+        }
+        /// Muted metric sub-label under a title.
+        static func caption(_ scale: CGFloat) -> Font {
+            .system(size: 9 * scale, weight: .medium)
+        }
+        /// Monospaced detail line (rates, timestamps, amounts).
+        static func mono(_ scale: CGFloat) -> Font {
+            .system(size: 9 * scale, weight: .medium, design: .monospaced)
+        }
+    }
+
     // MARK: - Radius
 
     enum Radius {

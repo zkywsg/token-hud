@@ -9,6 +9,9 @@ final class StateWatcher {
     // MARK: - Published state
 
     private(set) var currentState: StateFile?
+    /// Set by AppDelegate; every fresh read is sampled so per-day usage can be
+    /// derived later (providers only report a cycle-cumulative figure).
+    weak var usageHistory: UsageHistoryStore?
     private(set) var lastError: String?
     private(set) var lastUpdated: Date?
 
@@ -104,6 +107,7 @@ final class StateWatcher {
             currentState = decoded
             lastUpdated = Date()
             lastError = nil
+            usageHistory?.record(from: decoded)
         } catch {
             lastError = error.localizedDescription
         }

@@ -15,6 +15,7 @@ final class CodexFetcher {
     private var timer: Timer?
     private var currentInterval: Int = 0
     private var defaultsObserver: NSObjectProtocol?
+    private var refreshObserver: NSObjectProtocol?
     private var initialFetchTask: Task<Void, Never>?
 
     init() {
@@ -24,6 +25,14 @@ final class CodexFetcher {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.rescheduleIfNeeded() }
+        }
+        // HUD refresh button → silent refetch.
+        refreshObserver = NotificationCenter.default.addObserver(
+            forName: .hudRefreshNow,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.fetch(allowUserInteraction: false) }
         }
         rescheduleIfNeeded()
         initialFetchTask = Task { await fetch(allowUserInteraction: false) }
@@ -37,6 +46,10 @@ final class CodexFetcher {
         if let obs = defaultsObserver {
             NotificationCenter.default.removeObserver(obs)
             defaultsObserver = nil
+        }
+        if let obs = refreshObserver {
+            NotificationCenter.default.removeObserver(obs)
+            refreshObserver = nil
         }
     }
 
@@ -520,6 +533,7 @@ final class APIPlatformFetcher {
     private var timer: Timer?
     private var currentInterval: Int = 0
     private var defaultsObserver: NSObjectProtocol?
+    private var refreshObserver: NSObjectProtocol?
     private var initialFetchTask: Task<Void, Never>?
 
     init() {
@@ -529,6 +543,14 @@ final class APIPlatformFetcher {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in self?.rescheduleIfNeeded() }
+        }
+        // HUD refresh button → silent refetch.
+        refreshObserver = NotificationCenter.default.addObserver(
+            forName: .hudRefreshNow,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in await self?.fetchAll(allowUserInteraction: false) }
         }
         rescheduleIfNeeded()
         initialFetchTask = Task { await fetchAll(allowUserInteraction: false) }
@@ -542,6 +564,10 @@ final class APIPlatformFetcher {
         if let obs = defaultsObserver {
             NotificationCenter.default.removeObserver(obs)
             defaultsObserver = nil
+        }
+        if let obs = refreshObserver {
+            NotificationCenter.default.removeObserver(obs)
+            refreshObserver = nil
         }
     }
 

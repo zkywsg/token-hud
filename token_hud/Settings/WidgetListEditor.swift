@@ -26,11 +26,9 @@ private let widgetCapabilities: [WidgetCapability] = [
     ),
     WidgetCapability(
         service: "codex",
-        metrics: [.remainingTime, .subscriptionStatus],
+        metrics: [.remainingTime],
         presets: [
             WidgetConfig(service: "codex", metric: .remainingTime, style: .bar, quotaIndex: 0),
-            WidgetConfig(service: "codex", metric: .remainingTime, style: .bar, quotaIndex: 1),
-            WidgetConfig(service: "codex", metric: .subscriptionStatus, style: .text),
         ]
     ),
     WidgetCapability(
@@ -67,17 +65,19 @@ private let widgetCapabilities: [WidgetCapability] = [
     ),
     WidgetCapability(
         service: "mimo",
-        metrics: [.creditsUsed, .planName, .resetCountdown],
+        metrics: [.creditsUsed],
         presets: [
             WidgetConfig(service: "mimo", metric: .creditsUsed, style: .bar),
-            WidgetConfig(service: "mimo", metric: .planName, style: .text),
-            WidgetConfig(service: "mimo", metric: .resetCountdown, style: .text),
         ]
     ),
 ]
 
+/// Retired metrics are filtered out here so no picker, preset, or
+/// recommendation can surface one. See `RetiredMetrics`.
 private let presets: [WidgetPreset] = widgetCapabilities.flatMap { capability in
-    capability.presets.map { WidgetPreset(config: $0) }
+    capability.presets
+        .filter { $0.metric.isSelectable }
+        .map { WidgetPreset(config: $0) }
 }
 
 private func serviceDisplayName(_ id: String) -> String {
@@ -96,7 +96,9 @@ private func serviceDisplayName(_ id: String) -> String {
 
 private func metricTitle(_ widget: WidgetConfig) -> String {
     if widget.service == "codex", widget.metric == .remainingTime {
-        return widget.quotaIndex == 1 ? "7 天剩余量" : "5 小时剩余量"
+        // Window name comes from live data (see WidgetMetricComputer); without
+        // state here, stay neutral rather than guessing from quotaIndex.
+        return "限额剩余量"
     }
     if widget.service == "mimo", widget.metric == .resetCountdown {
         return "Token Plan 到期时间"
@@ -135,18 +137,6 @@ private func metricIcon(_ metric: WidgetMetric) -> String {
     }
 }
 
-private func styleIcon(_ style: WidgetStyle) -> String {
-    switch style {
-    case .ring:           return "circle"
-    case .bar:            return "chart.bar.xaxis"
-    case .text:           return "textformat"
-    case .aggregate:      return "sum"
-    case .multi:          return "square.grid.2x2"
-    case .countdown:      return "timer"
-    case .status:         return "smallcircle.filled.circle"
-    case .modelBreakdown: return "list.bullet.rectangle"
-    }
-}
 
 // MARK: - Main Editor
 
@@ -161,32 +151,19 @@ struct WidgetListEditor: View {
         VStack(alignment: .leading, spacing: 14) {
             header
 
-            ConfiguredWidgetRecommendationPanel(
-                currentWidgets: store.widgets,
-                recommendations: recommendedWidgets,
-                configuredCount: configuredProviderCount,
-                onAdd: prependWidget,
-                onPrependMissing: prependMissingRecommendations
-            )
-
-            WidgetPreviewPanel(widgets: Bindable(store).widgets, state: watcher.effectiveState)
-                .onDrop(of: [.text], delegate: WidgetListDropDelegate(
-                    widgets: Bindable(store).widgets,
-                    recentlyDroppedIDs: $recentlyDroppedIDs
-                ))
-
-            NotchCollapsedSettingsPanel(
-                widgets: store.widgets,
-                recommendations: recommendedWidgets,
-                state: watcher.effectiveState
-            )
-
-            WidgetManagementPanel(
-                widgets: Bindable(store).widgets,
-                recentlyDroppedIDs: $recentlyDroppedIDs,
-                onAdd: addWidget,
-                onCustom: { showCustomSheet = true }
-            )
+            // Two-column workbench: content on the left, a live preview plus the
+            // settings that shape it on the right, so editing and seeing the
+            // result no longer live on opposite ends of a scroll.
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 14) {
+                    contentColumn.frame(maxWidth: .infinity)
+                    inspectorColumn.frame(maxWidth: .infinity)
+                }
+                VStack(alignment: .leading, spacing: 14) {
+                    inspectorColumn
+                    contentColumn
+                }
+            }
         }
         .padding()
         .sheet(isPresented: $showCustomSheet) {
@@ -195,6 +172,31 @@ struct WidgetListEditor: View {
         .task {
             reloadCredentialSnapshot()
             populateEmptyWidgetListIfNeeded()
+        }
+    }
+
+    /// Left: what the HUD shows — search, the ordered active list, and
+    /// everything that can still be added.
+    private var contentColumn: some View {
+        WidgetContentColumn(
+            widgets: Bindable(store).widgets,
+            recommendations: recommendedWidgets,
+            state: watcher.effectiveState,
+            recentlyDroppedIDs: $recentlyDroppedIDs,
+            onAdd: addWidget,
+            onCustom: { showCustomSheet = true }
+        )
+    }
+
+    /// Right: the live card plus the settings that change how it looks.
+    private var inspectorColumn: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            WidgetPreviewPanel(widgets: Bindable(store).widgets, state: watcher.effectiveState)
+                .onDrop(of: [.text], delegate: WidgetListDropDelegate(
+                    widgets: Bindable(store).widgets,
+                    recentlyDroppedIDs: $recentlyDroppedIDs
+                ))
+            WidgetDisplaySettingsPanel(widgets: store.widgets, state: watcher.effectiveState)
         }
     }
 
@@ -241,17 +243,9 @@ struct WidgetListEditor: View {
         ))
     }
 
-    private func prependWidget(_ config: WidgetConfig) {
-        let key = config.descriptor.semanticKey
-        guard !store.widgets.contains(where: { $0.descriptor.semanticKey == key }) else { return }
-        store.widgets.insert(WidgetConfig(
-            service: config.service,
-            metric: config.metric,
-            style: config.style,
-            quotaIndex: config.quotaIndex
-        ), at: 0)
-    }
 
+    /// Recommendations come from core as raw descriptors and can still name
+    /// retired metrics; filter them here too.
     private var recommendedWidgets: [WidgetConfig] {
         WidgetRecommendationEngine
             .recommendations(
@@ -260,18 +254,9 @@ struct WidgetListEditor: View {
                 includeCodexLocalAuth: isCodexConfigured
             )
             .compactMap(WidgetConfig.init(descriptor:))
+            .filter { $0.metric.isSelectable }
     }
 
-    private var configuredProviderCount: Int {
-        ProviderCapability.all.filter { provider in
-            switch provider.credentialKind {
-            case .codexLocalAuth:
-                return isCodexConfigured
-            default:
-                return credentialSnapshot.status(for: provider) == .configured
-            }
-        }.count
-    }
 
     private var isCodexConfigured: Bool {
         if case .configured = CodexAuthReader.status() {
@@ -280,12 +265,6 @@ struct WidgetListEditor: View {
         return false
     }
 
-    private func prependMissingRecommendations() {
-        let existingKeys = Set(store.widgets.map { $0.descriptor.semanticKey })
-        let missing = recommendedWidgets.filter { !existingKeys.contains($0.descriptor.semanticKey) }
-        guard !missing.isEmpty else { return }
-        store.widgets = missing + store.widgets
-    }
 
     private func populateEmptyWidgetListIfNeeded() {
         guard store.widgets.isEmpty else { return }
@@ -317,176 +296,237 @@ struct WidgetListEditor: View {
     }
 }
 
-// MARK: - Configured Recommendations
+// MARK: - Left column: content
 
-private struct ConfiguredWidgetRecommendationPanel: View {
-    let currentWidgets: [WidgetConfig]
+/// Search + the ordered active list + everything still addable, as one
+/// continuous column. Replaces the old "推荐组件" panel and the 已添加/添加
+/// segmented switch, which split closely-related actions across two views.
+private struct WidgetContentColumn: View {
+    @Binding var widgets: [WidgetConfig]
     let recommendations: [WidgetConfig]
-    let configuredCount: Int
+    let state: StateFile?
+    @Binding var recentlyDroppedIDs: Set<UUID>
     let onAdd: (WidgetConfig) -> Void
-    let onPrependMissing: () -> Void
+    let onCustom: () -> Void
 
-    private var existingKeys: Set<String> {
-        Set(currentWidgets.map { $0.descriptor.semanticKey })
+    @State private var searchText = ""
+    @State private var showsUnavailable = false
+
+    /// Candidates not already added, matching the search field.
+    private var addable: [WidgetConfig] {
+        let existing = Set(widgets.map(\.descriptor.semanticKey))
+        var seen = Set<String>()
+        let pool = recommendations + presets.map(\.config)
+        return pool.filter { config in
+            let key = config.descriptor.semanticKey
+            guard !existing.contains(key), seen.insert(key).inserted else { return false }
+            guard !searchText.isEmpty else { return true }
+            let needle = searchText.lowercased()
+            return serviceDisplayName(config.service).lowercased().contains(needle)
+                || metricTitle(config).lowercased().contains(needle)
+        }
     }
 
-    private var missingCount: Int {
-        recommendations.filter { !existingKeys.contains($0.descriptor.semanticKey) }.count
+    /// Candidates that would actually render a value right now. Asking the very
+    /// computer the card uses is the honest test: providers missing from
+    /// state.json, ones reporting an error, and metrics whose quota has no data
+    /// all resolve to "—", and offering those just produces empty cards.
+    private var available: [WidgetConfig] { addable.filter { Self.hasData($0, state) } }
+    private var unavailable: [WidgetConfig] { addable.filter { !Self.hasData($0, state) } }
+
+    static func hasData(_ config: WidgetConfig, _ state: StateFile?) -> Bool {
+        let value = WidgetMetricComputer(config: config, state: state).formattedValue
+        return value != "—" && !value.isEmpty
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .center) {
-                Label(configuredCount > 0 ? "推荐组件" : "可添加组件", systemImage: "plus.square.on.square")
-                    .font(.caption.weight(.semibold))
-                Spacer()
-                Button {
-                    onPrependMissing()
-                } label: {
-                    Label(missingCount > 0 ? "补齐 \(missingCount)" : "已补齐", systemImage: "text.insert")
-                }
-                .font(.caption)
-                .disabled(missingCount == 0)
-            }
-
-            if recommendations.isEmpty {
-                Text("暂无可推荐组件")
-                    .font(.caption)
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 7) {
+                Image(systemName: "magnifyingglass")
+                    .font(.system(size: 11))
                     .foregroundStyle(.secondary)
-                    .frame(maxWidth: .infinity, minHeight: 54)
-                    .background(Color.secondary.opacity(0.05))
-                    .clipShape(RoundedRectangle(cornerRadius: 8))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 8)
-                            .stroke(Color.secondary.opacity(0.12), lineWidth: 0.5)
-                    )
-            } else {
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 8) {
-                    ForEach(recommendations, id: \.descriptor.semanticKey) { widget in
-                        RecommendationChip(
-                            widget: widget,
-                            isAdded: existingKeys.contains(widget.descriptor.semanticKey),
-                            onAdd: { onAdd(widget) }
-                        )
+                TextField("搜索平台或指标…", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 12))
+                if !searchText.isEmpty {
+                    Button { searchText = "" } label: {
+                        Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary)
                     }
-                    }
-                    .padding(1)
+                    .buttonStyle(.plain)
                 }
             }
+            .padding(.horizontal, 9)
+            .padding(.vertical, 6)
+            .background(Color.secondary.opacity(0.10), in: RoundedRectangle(cornerRadius: 7))
+
+            ActiveWidgetsPanel(
+                widgets: $widgets,
+                state: state,
+                recentlyDroppedIDs: $recentlyDroppedIDs
+            )
+
+            VStack(alignment: .leading, spacing: 6) {
+                HStack {
+                    Label("可添加", systemImage: "plus.circle")
+                        .font(.caption.weight(.semibold))
+                    Spacer()
+                    Button(action: onCustom) {
+                        Label("自定义", systemImage: "slider.horizontal.3")
+                    }
+                    .font(.caption)
+                }
+                if available.isEmpty {
+                    Text(searchText.isEmpty
+                         ? "有数据的指标都已加上。"
+                         : "没有匹配且有数据的指标。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                        .padding(.vertical, 6)
+                } else {
+                    VStack(spacing: 4) {
+                        ForEach(available, id: \.descriptor.semanticKey) { config in
+                            AddableWidgetRow(config: config) { onAdd(config) }
+                        }
+                    }
+                }
+
+                // Metrics whose provider isn't connected or returns nothing are
+                // kept out of the way rather than padding the list with options
+                // that would render an empty card.
+                if !unavailable.isEmpty {
+                    Button {
+                        withAnimation(.easeInOut(duration: 0.15)) { showsUnavailable.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: showsUnavailable ? "chevron.down" : "chevron.right")
+                                .font(.system(size: 8, weight: .semibold))
+                            Text("暂无数据 \(unavailable.count)")
+                            Spacer()
+                        }
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .padding(.top, 2)
+
+                    if showsUnavailable {
+                        VStack(spacing: 4) {
+                            ForEach(unavailable, id: \.descriptor.semanticKey) { config in
+                                AddableWidgetRow(config: config, isUnavailable: true) { onAdd(config) }
+                            }
+                        }
+                        Text("这些平台未连接或未返回数据；在「平台」页配置后会自动出现在上面。")
+                            .font(.caption2)
+                            .foregroundStyle(.secondary)
+                    }
+                }
+            }
+            .padding(10)
+            .background(Color.secondary.opacity(0.04))
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.secondary.opacity(0.10), lineWidth: 0.8)
+            )
         }
-        .padding(10)
-        .background(Color.secondary.opacity(0.055))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.10), lineWidth: 0.8)
-        )
     }
 }
 
-private struct RecommendationChip: View {
-    let widget: WidgetConfig
-    let isAdded: Bool
+private struct AddableWidgetRow: View {
+    let config: WidgetConfig
+    var isUnavailable = false
     let onAdd: () -> Void
 
     var body: some View {
         HStack(spacing: 8) {
-            Image(systemName: metricIcon(widget.metric))
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(isAdded ? Color.secondary : serviceAccentSwiftUIColor(for: widget.service))
-                .frame(width: 18)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(serviceDisplayName(widget.service))
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(isAdded ? .secondary : .primary)
+            Image(systemName: metricIcon(config.metric))
+                .font(.system(size: 11))
+                .foregroundStyle(serviceAccentSwiftUIColor(for: config.service))
+                .frame(width: 16)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(metricTitle(config))
+                    .font(.system(size: 11.5, weight: .medium))
                     .lineLimit(1)
-                    .truncationMode(.tail)
-                Text(metricTitle(widget))
-                    .font(.system(size: 10, weight: .medium))
+                Text(serviceDisplayName(config.service))
+                    .font(.system(size: 9.5))
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
-                    .truncationMode(.tail)
             }
-            .frame(width: 116, alignment: .leading)
-            Spacer(minLength: 0)
-
-            if isAdded {
-                Image(systemName: "checkmark")
+            Spacer(minLength: 6)
+            Button(action: onAdd) {
+                Image(systemName: "plus")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(.secondary)
-                    .frame(width: 22, height: 22)
-            } else {
-                Button {
-                    onAdd()
-                } label: {
-                    Image(systemName: "plus")
-                }
-                .font(.system(size: 10, weight: .semibold))
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-                .help("添加")
             }
+            .buttonStyle(.plain)
+            .foregroundStyle(.secondary)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 7)
-        .frame(width: 205, alignment: .leading)
-        .background(isAdded ? Color.secondary.opacity(0.06) : Theme.Palette.brandAccent.opacity(0.10))
-        .clipShape(RoundedRectangle(cornerRadius: 7))
-        .overlay(
-            RoundedRectangle(cornerRadius: 7)
-                .stroke(isAdded ? Color.secondary.opacity(0.10) : Theme.Palette.brandAccent.opacity(0.20), lineWidth: 0.6)
-        )
+        .padding(.horizontal, 8)
+        .padding(.vertical, 6)
+        .background(Color.secondary.opacity(0.06), in: RoundedRectangle(cornerRadius: 6))
+        .opacity(isUnavailable ? 0.45 : 1)
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onAdd)
     }
 }
 
-// MARK: - Notch Collapsed Settings
+// MARK: - Right column: display settings
 
-private struct NotchCollapsedSettingsPanel: View {
+/// The settings that change how the previewed card looks, sitting directly
+/// under the preview instead of on a different page.
+private struct WidgetDisplaySettingsPanel: View {
     let widgets: [WidgetConfig]
-    let recommendations: [WidgetConfig]
-    let state: StateFile
+    let state: StateFile?
 
+    @AppStorage("focusGaugeStyle") private var focusGaugeStyle = FocusGaugeStyle.default.rawValue
+    @AppStorage("widgetSizeScale") private var widgetSizeScale = 1.0
     @AppStorage("notchCollapsedLeadingSource") private var leadingSource = NotchCollapsedSourceStore.autoRawValue
     @AppStorage("notchCollapsedTrailingSource") private var trailingSource = NotchCollapsedSourceStore.autoRawValue
 
-    private var status: NotchCollapsedStatusDisplay {
-        NotchCollapsedStatusEngine.value(
-            widgets: widgets.map(\.descriptor),
-            state: state,
-            configuration: NotchCollapsedStatusConfiguration(
-                leading: NotchCollapsedSourceStore.source(from: leadingSource),
-                trailing: NotchCollapsedSourceStore.source(from: trailingSource)
-            )
-        )
-    }
-
     var body: some View {
-        ViewThatFits(in: .horizontal) {
-            HStack(alignment: .center, spacing: 14) {
-                Label("刘海收起态", systemImage: "rectangle.compress.vertical")
-                    .font(.caption.weight(.semibold))
-                    .frame(width: 92, alignment: .leading)
-                compactPreview
-                sourcePicker(title: "左侧", selection: $leadingSource)
-                sourcePicker(title: "右侧", selection: $trailingSource)
+        VStack(alignment: .leading, spacing: 9) {
+            Label("显示", systemImage: "paintbrush")
+                .font(.caption.weight(.semibold))
+
+            LabeledContent("进度条样式") {
+                Picker("", selection: $focusGaugeStyle) {
+                    ForEach(FocusGaugeStyle.allCases, id: \.rawValue) { style in
+                        Text(style.displayName).tag(style.rawValue)
+                    }
+                }
+                .labelsHidden()
+                .pickerStyle(.menu)
             }
 
-            VStack(alignment: .leading, spacing: 10) {
-                HStack {
-                    Label("刘海收起态", systemImage: "rectangle.compress.vertical")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
-                    compactPreview
+            LabeledContent("内容大小") {
+                Picker("", selection: $widgetSizeScale) {
+                    Text("小").tag(0.75)
+                    Text("中").tag(1.0)
+                    Text("大").tag(1.25)
                 }
-                HStack(spacing: 12) {
-                    sourcePicker(title: "左侧", selection: $leadingSource)
-                    sourcePicker(title: "右侧", selection: $trailingSource)
-                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .frame(width: 150)
             }
+
+            Divider().padding(.vertical, 1)
+
+            // Without this the daily-usage feature is invisible until enough
+            // history exists — there was no way to tell it was even running.
+            UsageHistoryStatusRows()
+
+            Divider().padding(.vertical, 1)
+
+            Text("刘海收起态")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+            LabeledContent("左侧") { collapsedPicker($leadingSource) }
+            LabeledContent("右侧") { collapsedPicker($trailingSource) }
         }
+        .font(.system(size: 11.5))
         .padding(10)
-        .background(Color.secondary.opacity(0.055))
+        .background(Color.secondary.opacity(0.04))
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay(
             RoundedRectangle(cornerRadius: 8)
@@ -494,67 +534,64 @@ private struct NotchCollapsedSettingsPanel: View {
         )
     }
 
-    private var compactPreview: some View {
-        HStack(spacing: 8) {
-            ZStack(alignment: .leading) {
-                Capsule()
-                    .fill(Color.white.opacity(0.16))
-                Capsule()
-                    .fill(progressColor(for: status.leadingFraction))
-                    .frame(width: 42 * status.leadingFraction.clamped(to: 0...1))
+    private func collapsedPicker(_ selection: Binding<String>) -> some View {
+        Picker("", selection: selection) {
+            Text("自动").tag(NotchCollapsedSourceStore.autoRawValue)
+            ForEach(widgets) { widget in
+                Text(label(for: widget))
+                    .tag(NotchCollapsedSourceStore.rawValue(for: .widget(widget.id.uuidString)))
             }
-            .frame(width: 42, height: 5)
-
-            Text(status.trailingText)
-                .font(.system(size: 11, weight: .semibold, design: .rounded))
-                .monospacedDigit()
-                .foregroundStyle(.white.opacity(0.92))
-                .frame(width: 34, alignment: .trailing)
         }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 6)
-        .background(Color.black.opacity(0.92))
-        .clipShape(Capsule())
+        .labelsHidden()
+        .pickerStyle(.menu)
     }
 
-    private func sourcePicker(title: String, selection: Binding<String>) -> some View {
-        HStack(spacing: 6) {
-            Text(title)
-                .font(.caption2.weight(.semibold))
-                .foregroundStyle(.secondary)
-            Picker(title, selection: selection) {
-                Text("自动").tag(NotchCollapsedSourceStore.autoRawValue)
-                if !widgets.isEmpty {
-                    Section("当前小组件") {
-                        ForEach(widgets) { widget in
-                            Text("\(serviceDisplayName(widget.service)) · \(metricTitle(widget))")
-                                .tag(NotchCollapsedSourceStore.rawValue(for: .widget(widget.id.uuidString)))
-                        }
+    private func label(for widget: WidgetConfig) -> String {
+        let computer = WidgetMetricComputer(config: widget, state: state)
+        let title = computer.metricTitle
+        return title.isEmpty ? computer.serviceLabel : "\(computer.serviceLabel) · \(title)"
+    }
+}
+
+/// Shows which providers are having their daily usage recorded and how far
+/// along each is, so the feature is legible before the chart can appear.
+private struct UsageHistoryStatusRows: View {
+    @Environment(UsageHistoryStore.self) private var history: UsageHistoryStore?
+
+    var body: some View {
+        if let history, !history.trackedServiceIDs.isEmpty {
+            VStack(alignment: .leading, spacing: 5) {
+                Text("每日用量记录")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                ForEach(history.trackedServiceIDs, id: \.self) { id in
+                    HStack(spacing: 6) {
+                        Circle()
+                            .fill(Theme.Palette.statusOK)
+                            .frame(width: 5, height: 5)
+                        Text(serviceDisplayName(id))
+                            .font(.system(size: 11))
+                        Spacer(minLength: 6)
+                        Text(statusText(for: id, history: history))
+                            .font(.system(size: 10))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
                     }
                 }
-                if !recommendations.isEmpty {
-                    Section("已配置推荐") {
-                        ForEach(recommendations, id: \.descriptor.semanticKey) { widget in
-                            Text("\(serviceDisplayName(widget.service)) · \(metricTitle(widget))")
-                                .tag(NotchCollapsedSourceStore.rawValue(for: .metric(
-                                    service: widget.service,
-                                    metric: widget.metric.rawValue,
-                                    quotaIndex: widget.quotaIndex
-                                )))
-                        }
-                    }
-                }
+                Text("上游只给本周期累计值，每日数据靠本地采样差分得出，历史无法回填。")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
-            .labelsHidden()
-            .pickerStyle(.menu)
         }
-        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private func progressColor(for fraction: Double) -> Color {
-        if fraction >= 0.85 { return Color(red: 1.0, green: 0.28, blue: 0.34) }
-        if fraction >= 0.65 { return Color(red: 1.0, green: 0.76, blue: 0.20) }
-        return Color(red: 0.30, green: 0.86, blue: 0.55)
+    private func statusText(for id: String, history: UsageHistoryStore) -> String {
+        let spanned = history.daysSinceFirstSample(for: id) ?? 0
+        let withUsage = history.recordedDayCount(for: id)
+        if withUsage >= UsageHistoryCalculator.minimumDaysForChart {
+            return "已记录 \(spanned) 天 · 图表已启用"
+        }
+        return spanned <= 1 ? "今天开始记录" : "已记录 \(spanned) 天"
     }
 }
 
@@ -563,7 +600,6 @@ private struct NotchCollapsedSettingsPanel: View {
 private struct WidgetPreviewPanel: View {
     @Binding var widgets: [WidgetConfig]
     let state: StateFile
-    @AppStorage("overlayLayout") private var overlayLayoutRaw = "summary"
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -577,14 +613,11 @@ private struct WidgetPreviewPanel: View {
                     .foregroundStyle(.secondary)
             }
 
-            ZStack(alignment: .topTrailing) {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(Theme.SurfaceLevel.raised.gradient)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 12, style: .continuous)
-                            .stroke(Color.white.opacity(0.10), lineWidth: 0.8)
-                    )
-                    .shadow(color: Color.black.opacity(0.16), radius: 14, y: 8)
+            ZStack {
+                GlassPanelBackground(
+                    shape: RoundedRectangle(cornerRadius: 12, style: .continuous),
+                    opacity: 0.6
+                )
 
                 if widgets.isEmpty {
                     VStack(spacing: 6) {
@@ -600,27 +633,26 @@ private struct WidgetPreviewPanel: View {
                     }
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                 } else {
-                    OverlayContentView(
-                        layout: OverlayLayout.from(overlayLayoutRaw),
-                        widgets: widgets,
-                        state: state
-                    )
-                    .environment(\.panelAdaptiveScale, 1.0)
-                    .padding(12)
-
-                    if overlayLayoutRaw == "summary" {
-                        Text("主指标 (hero)")
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(.white.opacity(0.7))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(Color.white.opacity(0.10), in: Capsule())
-                            .padding(8)
-                    }
+                    OverlayFocusView(widgets: widgets, state: state)
+                        .environment(\.panelAdaptiveScale, 1.0)
+                        .padding(12)
                 }
             }
-            .frame(height: widgets.isEmpty ? 118 : 240)
+            // Size the preview to its content instead of a fixed tall box, so a
+            // single widget no longer leaves a large empty void below it.
+            .frame(height: previewHeight)
         }
+    }
+
+    /// The preview shows one focus card at a time (swipe to change), so its
+    /// height is the card's own height plus the dots row — not a function of how
+    /// many widgets exist. The old per-row formula was sized for the retired
+    /// stacked list and cropped the card.
+    private var previewHeight: CGFloat {
+        guard !widgets.isEmpty else { return 118 }
+        let card = NotchGeometryCalculator.focusCardHeight
+        let dots: CGFloat = widgets.count > 1 ? 14 : 0
+        return card + dots + 24
     }
 
     private var summaryText: String {
@@ -629,81 +661,18 @@ private struct WidgetPreviewPanel: View {
     }
 }
 
-// MARK: - Active Widgets
-
-private struct WidgetManagementPanel: View {
-    @Binding var widgets: [WidgetConfig]
-    @Binding var recentlyDroppedIDs: Set<UUID>
-    let onAdd: (WidgetConfig) -> Void
-    let onCustom: () -> Void
-    @State private var selectedMode: Mode = .active
-
-    private enum Mode: String, CaseIterable {
-        case active
-        case add
-
-        var title: String {
-            switch self {
-            case .active: return "已添加"
-            case .add: return "添加"
-            }
-        }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 12) {
-                Picker("", selection: $selectedMode) {
-                    ForEach(Mode.allCases, id: \.self) { mode in
-                        Text(mode.title).tag(mode)
-                    }
-                }
-                .labelsHidden()
-                .pickerStyle(.segmented)
-                .frame(width: 180)
-
-                Text(selectedMode == .active ? "拖动调整顺序" : "点击添加，或使用自定义")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-
-                Spacer()
-
-                if selectedMode == .add {
-                    Button(action: onCustom) {
-                        Label("自定义", systemImage: "slider.horizontal.3")
-                    }
-                    .font(.caption)
-                }
-            }
-
-            if selectedMode == .active {
-                ActiveWidgetsPanel(
-                    widgets: $widgets,
-                    recentlyDroppedIDs: $recentlyDroppedIDs,
-                    showsHeader: false
-                )
-            } else {
-                AddWidgetsPanel(
-                    onAdd: onAdd,
-                    onCustom: onCustom,
-                    showsHeader: false
-                )
-            }
-        }
-        .padding(10)
-        .background(Color.secondary.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay(
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.secondary.opacity(0.10), lineWidth: 0.8)
-        )
-    }
-}
-
 private struct ActiveWidgetsPanel: View {
     @Binding var widgets: [WidgetConfig]
+    var state: StateFile?
     @Binding var recentlyDroppedIDs: Set<UUID>
     var showsHeader = true
+
+    /// Height that hugs the rows, so a short list no longer sits in a tall
+    /// half-empty table. Capped so a long list scrolls instead of pushing the
+    /// rest of the column off-screen.
+    private var listHeight: CGFloat {
+        min(320, max(76, CGFloat(widgets.count) * 44 + 8))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -734,18 +703,29 @@ private struct ActiveWidgetsPanel: View {
                         recentlyDroppedIDs: $recentlyDroppedIDs
                     ))
             } else {
+                // Kept as a List purely for `.onMove` drag-reordering, but
+                // stripped of its table chrome so it reads as part of the glass
+                // card rather than a nested system control.
                 List {
                     ForEach(widgets) { widget in
-                        WidgetRow(widget: widget) {
+                        WidgetRow(
+                            widget: widget,
+                            hasData: WidgetContentColumn.hasData(widget, state)
+                        ) {
                             widgets.removeAll { $0.id == widget.id }
                         }
+                        .listRowInsets(EdgeInsets(top: 2, leading: 4, bottom: 2, trailing: 4))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
                     }
                     .onMove { from, to in
                         widgets.move(fromOffsets: from, toOffset: to)
                     }
                 }
-                .listStyle(.bordered)
-                .frame(minHeight: 180)
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .environment(\.defaultMinListRowHeight, 34)
+                .frame(height: listHeight)
                 .onDrop(of: [.text], delegate: WidgetListDropDelegate(
                     widgets: $widgets,
                     recentlyDroppedIDs: $recentlyDroppedIDs
@@ -758,6 +738,7 @@ private struct ActiveWidgetsPanel: View {
 
 private struct WidgetRow: View {
     let widget: WidgetConfig
+    var hasData = true
     let onRemove: () -> Void
 
     var body: some View {
@@ -771,11 +752,18 @@ private struct WidgetRow: View {
                 Text(metricTitle(widget))
                     .font(.system(size: 12, weight: .medium))
                     .lineLimit(1)
-                HStack(spacing: 4) {
+                HStack(spacing: 5) {
                     Text(serviceDisplayName(widget.service))
-                    Text("·")
-                    Image(systemName: styleIcon(widget.style))
-                    Text(widget.style.displayName)
+                    if !hasData {
+                        // Explains an empty-looking card instead of leaving the
+                        // user to wonder why it shows nothing.
+                        Text("无数据")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(Theme.Palette.statusWarn)
+                            .padding(.horizontal, 4)
+                            .padding(.vertical, 1)
+                            .background(Theme.Palette.statusWarn.opacity(0.16), in: Capsule())
+                    }
                 }
                 .font(.system(size: 10))
                 .foregroundStyle(.secondary)
@@ -794,94 +782,6 @@ private struct WidgetRow: View {
             .help("移除")
         }
         .padding(.vertical, 5)
-    }
-}
-
-// MARK: - Add Widgets
-
-private struct AddWidgetsPanel: View {
-    let onAdd: (WidgetConfig) -> Void
-    let onCustom: () -> Void
-    var showsHeader = true
-
-    private let columns = [
-        GridItem(.adaptive(minimum: 104, maximum: 132), spacing: 8)
-    ]
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            if showsHeader {
-                HStack {
-                    Label("添加组件", systemImage: "plus.circle")
-                        .font(.caption.weight(.semibold))
-                    Spacer()
-                    Button(action: onCustom) {
-                        Label("自定义", systemImage: "slider.horizontal.3")
-                    }
-                    .font(.caption)
-                }
-            }
-
-            ScrollView {
-                LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
-                    ForEach(presets) { preset in
-                        PresetCard(preset: preset) {
-                            onAdd(preset.config)
-                        }
-                        .onDrag {
-                            NSItemProvider(object: preset.config.id.uuidString as NSString)
-                        }
-                    }
-                }
-                .padding(1)
-            }
-            .frame(minHeight: 170)
-        }
-        .frame(maxWidth: .infinity, alignment: .topLeading)
-    }
-}
-
-private struct PresetCard: View {
-    let preset: WidgetPreset
-    let onAdd: () -> Void
-
-    var body: some View {
-        Button(action: onAdd) {
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 6) {
-                    Image(systemName: metricIcon(preset.config.metric))
-                        .font(.system(size: 12, weight: .medium))
-                        .foregroundStyle(.tint)
-                    Text(serviceDisplayName(preset.config.service))
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(.primary)
-                    Spacer(minLength: 0)
-                }
-
-                Text(metricTitle(preset.config))
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(.primary)
-                    .lineLimit(1)
-                    .minimumScaleFactor(0.75)
-
-                HStack(spacing: 4) {
-                    Image(systemName: styleIcon(preset.config.style))
-                    Text(preset.config.style.displayName)
-                }
-                .font(.system(size: 10))
-                .foregroundColor(.secondary)
-            }
-            .padding(10)
-            .frame(maxWidth: .infinity, minHeight: 76, alignment: .leading)
-            .background(Color.secondary.opacity(0.08))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .overlay(
-                RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.secondary.opacity(0.14), lineWidth: 0.5)
-            )
-        }
-        .buttonStyle(.plain)
-        .help("点击添加，也可以拖到预览或已添加列表")
     }
 }
 
@@ -943,7 +843,9 @@ private struct CustomWidgetSheet: View {
 
     private var options: [Option] {
         widgetCapabilities.flatMap { capability in
-            capability.metrics.map { Option(service: capability.service, metric: $0) }
+            capability.metrics
+                .filter(\.isSelectable)
+                .map { Option(service: capability.service, metric: $0) }
         }
     }
 
@@ -968,17 +870,6 @@ private struct CustomWidgetSheet: View {
         return options.first { $0.id == selectedOptionID }
     }
 
-    private var availableStyles: [WidgetStyle] {
-        guard let option = selectedOption else { return [.bar, .text] }
-        switch option.metric {
-        case .remainingTime, .tokensRemaining, .usagePercent, .creditsUsed, .dailyTokens, .monthlyTokens:
-            return [.bar, .text]
-        case .rateLimitStatus, .subscriptionStatus, .planName:
-            return [.status, .text]
-        default:
-            return [.text, .bar]
-        }
-    }
 
     var body: some View {
         NavigationStack {
@@ -1016,12 +907,6 @@ private struct CustomWidgetSheet: View {
                 }
                 .frame(minHeight: 220)
 
-                Picker("样式", selection: $style) {
-                    ForEach(availableStyles, id: \.self) {
-                        Text($0.displayName).tag($0)
-                    }
-                }
-                .pickerStyle(.segmented)
             }
             .padding()
             .navigationTitle("自定义组件")
@@ -1057,11 +942,6 @@ private struct CustomWidgetSheet: View {
                 if let selectedOptionID,
                    !filteredOptions.contains(where: { $0.id == selectedOptionID }) {
                     self.selectedOptionID = filteredOptions.first?.id
-                }
-            }
-            .onChange(of: selectedOption?.id) { _, _ in
-                if !availableStyles.contains(style) {
-                    style = availableStyles.first ?? .text
                 }
             }
         }

@@ -4,8 +4,6 @@ import SwiftUI
 struct FloatingPanelView: View {
     @Environment(StateWatcher.self) private var watcher
     @Environment(WidgetStore.self) private var store
-    @AppStorage("floatingPanelScale") private var scale = 1.0
-    @AppStorage("overlayLayout") private var overlayLayoutRaw = OverlayLayout.summary.rawValue
     @AppStorage("widgetSizeScale") private var widgetSizeScale = 1.0
     @State private var gestureStartScale: CGFloat = 1.0
 
@@ -13,20 +11,20 @@ struct FloatingPanelView: View {
         GeometryReader { geometry in
             let adaptiveScale = calculateAdaptiveScale(for: geometry.size)
             ZStack(alignment: .bottomTrailing) {
-                SolidPanelBackground(shape: RoundedRectangle(cornerRadius: 8))
-
+                // The focus card draws its own glass + accent glow, so the panel
+                // has no background of its own.
                 overlayContent
-                    .padding(12 * adaptiveScale)
                     .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .center)
-                    .scaleEffect(scale, anchor: .center)
+                    // Pinching now drives the single shared content scale
+                    // (`widgetSizeScale`) instead of a second panel-only zoom.
                     .gesture(
                         MagnificationGesture()
                             .onChanged { value in
-                                scale = (gestureStartScale * value)
-                                    .clamped(to: 0.5...3.0)
+                                widgetSizeScale = (gestureStartScale * value)
+                                    .clamped(to: 0.6...2.0)
                             }
                             .onEnded { _ in
-                                gestureStartScale = scale
+                                gestureStartScale = widgetSizeScale
                             }
                     )
 
@@ -41,15 +39,11 @@ struct FloatingPanelView: View {
             .contentShape(Rectangle())
             .environment(\.panelAdaptiveScale, adaptiveScale)
         }
-        .onAppear { gestureStartScale = scale }
+        .onAppear { gestureStartScale = widgetSizeScale }
     }
 
     private var overlayContent: some View {
-        OverlayContentView(
-            layout: OverlayLayout.from(overlayLayoutRaw),
-            widgets: store.widgets,
-            state: watcher.effectiveState
-        )
+        OverlayFocusView(widgets: store.widgets, state: watcher.effectiveState)
     }
 
     private func calculateAdaptiveScale(for size: CGSize) -> CGFloat {

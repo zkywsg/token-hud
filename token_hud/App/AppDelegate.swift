@@ -2,10 +2,12 @@
 import AppKit
 import SwiftUI
 import ServiceManagement
+import Security
 
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var stateWatcher: StateWatcher!
+    private var usageHistory: UsageHistoryStore!
     private var widgetStore: WidgetStore!
     private var appFilterStore: AppFilterStore!
     private var appWatcher: AppWatcher!
@@ -19,10 +21,21 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var didFinishInitialLaunch = false
 
     func applicationDidFinishLaunching(_ notification: Notification) {
+        // This app never needs an interactive keychain dialog: it reads secrets
+        // it saved itself (already trusted in the item ACL) and background
+        // fetches are meant to fail silently when a key is unreadable. Disabling
+        // keychain UI process-wide makes any would-be-prompt read fail fast with
+        // errSecInteractionNotAllowed instead of popping a modal that blocks the
+        // legacy-keychain global lock — which otherwise freezes the whole app
+        // (e.g. when a dev build's signature isn't yet in an item's ACL).
+        SecKeychainSetUserInteractionAllowed(false)
+
         NSApp.setActivationPolicy(.regular)
         NSApp.applicationIconImage = Self.makeAppIcon()
 
+        usageHistory    = UsageHistoryStore()
         stateWatcher    = StateWatcher()
+        stateWatcher.usageHistory = usageHistory
         widgetStore     = WidgetStore()
         appFilterStore  = AppFilterStore()
         appWatcher      = AppWatcher()
@@ -33,7 +46,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         floatingPanelManager = NotchHostPanelManager(
             stateWatcher: stateWatcher,
-            widgetStore: widgetStore
+            widgetStore: widgetStore,
+            usageHistory: usageHistory
         )
         floatingPanelManager.setup()
         menuBarBridgeProbe = MenuBarBridgeProbe()
@@ -47,6 +61,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         setupStatusBar()
         didFinishInitialLaunch = true
+
+        // HUD focus-card "more" button → open Settings.
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(openSettings),
+            name: .hudOpenSettings,
+            object: nil
+        )
 
         openSettingsOnLaunch()
     }
@@ -222,6 +244,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let settingsView = SettingsWindow()
             .environment(widgetStore)
             .environment(stateWatcher)
+            .environment(usageHistory)
             .environment(appFilterStore)
             .environment(codexFetcher)
             .environment(apiPlatformFetcher)

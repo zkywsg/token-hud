@@ -31,6 +31,16 @@ public enum WidgetStyle: String, Codable, CaseIterable, Sendable {
     case ring, bar, text, aggregate, multi, countdown, status, modelBreakdown
 }
 
+extension WidgetMetric {
+    /// Whether this metric is still offered to users. Retired cases are kept so
+    /// saved configs keep decoding, but are filtered out of every picker and
+    /// dropped when the store loads. See `RetiredMetrics`.
+    public var isSelectable: Bool { !RetiredMetrics.isRetired(rawValue) }
+
+    /// The metrics users can actually choose from.
+    public static var selectableCases: [WidgetMetric] { allCases.filter(\.isSelectable) }
+}
+
 public struct WidgetConfig: Identifiable, Codable, Sendable, Equatable {
     public var id: UUID
     public var service: String

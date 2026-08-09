@@ -65,27 +65,12 @@ enum NotchGeometryCalculator {
     static let listRowHeight: CGFloat = 40
     static let bodyVerticalPadding: CGFloat = 16
 
-    static func adaptiveExpandedHeight(
-        itemCount: Int,
-        isSummary: Bool,
-        availableHeight: CGFloat
-    ) -> CGFloat {
-        guard itemCount > 0 else { return expandedHeight }
-        let base: CGFloat
-        if isSummary {
-            let listRows = max(0, itemCount - 1)
-            base = heroRowHeight + CGFloat(listRows) * listRowHeight + bodyVerticalPadding
-        } else {
-            base = CGFloat(itemCount) * listRowHeight + bodyVerticalPadding
-        }
-        let maxHeight = max(expandedHeight, availableHeight * 0.6)
-        return base.clamped(to: expandedHeight...maxHeight)
-    }
 
-    /// Paged layout shows one hero-sized page plus a dots row; height is fixed
-    /// regardless of item count.
-    static func pagedExpandedHeight() -> CGFloat {
-        max(expandedHeight, heroRowHeight + bodyVerticalPadding + 14)
+    /// Focus (media-card) layout shows one tall card plus a dots row; height is
+    /// fixed regardless of item count so the card never clips its waveform/controls.
+    static let focusCardHeight: CGFloat = 172
+    static func focusExpandedHeight() -> CGFloat {
+        max(expandedHeight, focusCardHeight + 14)
     }
     static let contentFadeStartProgress: CGFloat = 0.55
     static let snapZoneExpandX: CGFloat = 80

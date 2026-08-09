@@ -17,3 +17,4 @@ docs/superpowers/
 
 # SwiftPM Xcode 生成文件
 .swiftpm/
+build/
