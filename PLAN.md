@@ -2,6 +2,78 @@
 
 这个文件跟踪当前项目正在进行的实现工作。保持内容小而可执行；可长期保留的决策沉淀到 `docs/`。
 
+## 当前重点：Focus Card 重构验收与仓库收口（待确认）
+
+### 问题
+
+`feat: redesign HUD around focus cards` 已提交并推送到 `main`，自动化验证此前通过，但本轮包含 HUD、设置页、用量历史、旧组件删除等跨模块改动，仍缺少一次面向真实 macOS UI 的集中验收。仓库还遗留未跟踪的 `.claude/` 本地工作目录；`PLAN.md` 也积累了大量已完成条目，需要在确认交付稳定后收敛。
+
+### 本轮目标
+
+1. 对已提交的 Focus Card 版本执行完整冒烟验收，优先覆盖刘海展开/收起、翻页、脱离/吸附、设置页编辑和每日用量可见性。
+2. 复跑 `swift test` 与 macOS App 全量构建，记录可复现的失败；若发现 Bug，先回写本计划并再次确认修复范围。
+3. 验收通过后清理仓库交付边界：将 `.claude/` 保持为本地文件而不纳入版本控制，并判断已提交的 HTML mockup 与签名配置是否应继续保留。
+4. 将仍有长期价值的架构/数据取舍沉淀到 `docs/work-log/`，随后把 `PLAN.md` 收敛为真正未完成的事项。
+
+### 实施步骤
+
+1. 只读核对 `main`、`origin/main`、工作区和最新提交范围。
+2. 启动当前 Debug App，依照验收清单检查 HUD 与设置页；记录截图、异常现象和稳定通过项。
+3. 运行 `swift test` 和 `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`。
+4. 汇总验收结果；若需要代码修复，先把根因、拟改文件和验证方法补充到本计划，等待确认后再改。
+5. 验收无阻断问题后，再单独执行文档和仓库清理；不改写或压缩已经推送的公共提交历史。
+
+### 验证
+
+- 自动化：175 个核心测试应全部通过；macOS App target 应 `BUILD SUCCEEDED`。
+- 手动：刘海悬停展开/离开收起、左右翻页 header 同步、拖拽脱离与吸附、设置页搜索/添加/删除/排序/实时预览、Gauge 样式切换、用量历史状态说明均可正常工作。
+- 仓库：`main` 与 `origin/main` 一致；除明确保留的本地目录外无意外修改。
+
+### 风险
+
+- UI 验收会读写本机的 App 偏好和本地用量历史，但不应修改源码；涉及删除本地文件或重写 Git 历史的动作不在本轮授权范围内。
+- 刘海、辅助功能权限和真实平台凭据依赖本机环境；无法自动覆盖的项目必须明确标为“待用户实机确认”，不能用构建通过代替。
+- 当前大重构已经推送到 `main`，后续若发现问题应追加修复提交，不对公共历史做 rebase/reset。
+
+### 验收结果（2026-08-13）
+
+- `swift test`：175 个测试全部通过。
+- `xcodebuild -project token_hud.xcodeproj -scheme token_hud -destination 'platform=macOS' build`：`BUILD SUCCEEDED`。
+- 设置页：小组件 / 平台 / 通用三栏均可正常打开；搜索过滤、添加小组件、Gauge 菜单、实时刷新均生效；DeepSeek 金额正确显示 `¥11.48`。测试新增的小组件已精确恢复为原来的 4 项，Gauge 恢复为 `wave`。
+- 每日历史：Codex / Claude / MiMo 均显示已记录 11 天，Codex 已进入柱状图展示；“历史无法回填”的说明可见。
+- 受 Computer Use 能力限制，未自动完成：真实鼠标 hover 展开/离开收起、List 拖拽排序、面板拖拽脱离与重新吸附，保留为用户实机确认项。
+
+### 验收发现与拟修复范围（待确认）
+
+#### 1. P1：刘海收起态把“已用”显示成“剩余”
+
+真实 Codex time quota 为 `used=30240 / total=604800`：已用约 5%、剩余约 95%。设置来源明确选择“Codex Plus · 7 天剩余量”，聚焦卡显示 96% 左右，但收起态显示 5%。根因是 `NotchCollapsedStatusEngine` 对所有指标无差别调用 `usageFraction`，完全忽略指标的“剩余 / 已用 / 计数”语义；现有测试也把错误的已用比例固化成了期望值。
+
+拟修：
+
+- 在 core 为收起态引入指标语义明确的展示值：剩余型指标用 `1 - used/total`，已用型指标用 `used/total`。
+- 计数型/无分母指标不再偷偷回退到其他平台的首个 quota；左槽显示中性细线，右槽显示该指标的紧凑数值或明确的无数据状态。
+- 修正 `creditsUsed` 当前返回“剩余比例”的反向实现，并补覆盖 remaining / used / counter / missing-source 的测试。
+
+#### 2. P2：Gauge 样式设置在已有历史时没有可见预览
+
+菜单可切换全部 8 种样式，但 `OverlayFocusCard` 在 `dailyUsage != nil` 时总是优先渲染 `DailyUsageChart`，所以当前 Codex 主卡切换为“粒子流”后画面仍是每日柱状图。设置页声称实时预览，用户会认为选项无效。
+
+拟修：在“进度条样式”设置附近增加一个常驻的小型 Gauge 样式预览；同时补一句“每日历史充足时，主卡优先显示每日柱状图”。不改变每日图表优先级和 HUD 数据逻辑。
+
+#### 3. 仓库收口
+
+- `.claude/worktrees/` 是本地工具工作目录，当前未被忽略；将 `.claude/` 加入仓库 `.gitignore`，避免误提交。
+- `token_hud/settings-layout-options-preview.html` 是未被代码引用的设计 mockup，却被 XcodeGen 自动加入 App Resources；移出 app target（保留到 `docs/mockups/`，不随 App 打包）。
+- `project.yml` 当前硬编码个人 `DEVELOPMENT_TEAM=4R6MW2B238` 和 `Apple Development`，与仓库历史中“空 team + ad-hoc 签名”的可移植约定冲突；恢复可移植配置，并以全量构建验证。
+- 这轮涉及 core 展示语义、UI 约定和仓库结构，完成后写 `docs/work-log/2026-08-13-focus-card-acceptance.md`，再收敛 `PLAN.md`。
+
+### 修复验证（待确认后执行）
+
+- 新增/更新 core 测试，明确 25% 已用的 remaining 指标应显示 75%，used 指标应显示 25%，counter 不得借用其他 quota。
+- `swift test`、`xcodegen generate`、macOS App 全量构建全部通过。
+- 实机复核：同一 Codex 数据下聚焦卡与刘海收起态都显示约 95% 剩余；切换 8 种 Gauge 时设置卡内的小预览即时变化；App bundle 不再包含 HTML mockup。
+
 ## 当前重点：每日用量统计（E 版本，已确认范围，实施中）
 
 ### 背景
